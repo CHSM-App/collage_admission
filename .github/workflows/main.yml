@@ -1,4 +1,4 @@
-name: Publish dist on tag
+name: Publish frontend and backend on tag
 
 on:
   push:
@@ -9,11 +9,14 @@ permissions:
   contents: write
 
 env:
+  FRONTEND_DIR: FrontEnd
+  BACKEND_DIR: BackEnd
   DEPLOY_BRANCH: dist
+  BACKEND_BRANCH: backend
 
 jobs:
   build-and-publish:
-    name: Build and publish dist
+    name: Build and publish frontend and backend
     runs-on: ubuntu-latest
 
     steps:
@@ -25,18 +28,30 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: FrontEnd/package-lock.json
 
       - name: Install dependencies
         run: npm ci
+        working-directory: ${{ env.FRONTEND_DIR }}
 
       - name: Build project
         run: npm run build
+        working-directory: ${{ env.FRONTEND_DIR }}
 
       - name: Push dist to deploy branch
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: ${{ env.DEPLOY_BRANCH }}
-          publish_dir: ./dist
+          publish_dir: ./${{ env.FRONTEND_DIR }}/dist
           force_orphan: true
           commit_message: Build dist from tag ${{ github.ref_name }}
+
+      - name: Push backend folder to backend branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: ${{ env.BACKEND_BRANCH }}
+          publish_dir: ./${{ env.BACKEND_DIR }}
+          force_orphan: true
+          commit_message: Publish backend from tag ${{ github.ref_name }}
