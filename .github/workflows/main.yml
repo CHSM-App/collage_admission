@@ -12,7 +12,6 @@ env:
   FRONTEND_DIR: FrontEnd
   BACKEND_DIR: BackEnd
   DEPLOY_BRANCH: dist
-  BACKEND_BRANCH: backend
 
 jobs:
   build-and-publish:
@@ -38,20 +37,17 @@ jobs:
         run: npm run build
         working-directory: ${{ env.FRONTEND_DIR }}
 
-      - name: Push dist to deploy branch
+      - name: Prepare dist output folder
+        run: |
+          mkdir -p ./output
+          cp -r ./${{ env.FRONTEND_DIR }}/dist ./output/dist
+          cp -r ./${{ env.BACKEND_DIR }} ./output/BackEnd
+
+      - name: Push frontend dist + backend to deploy branch
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: ${{ env.DEPLOY_BRANCH }}
-          publish_dir: ./${{ env.FRONTEND_DIR }}/dist
+          publish_dir: ./output
           force_orphan: true
-          commit_message: Build dist from tag ${{ github.ref_name }}
-
-      - name: Push backend folder to backend branch
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_branch: ${{ env.BACKEND_BRANCH }}
-          publish_dir: ./${{ env.BACKEND_DIR }}
-          force_orphan: true
-          commit_message: Publish backend from tag ${{ github.ref_name }}
+          commit_message: Build from tag ${{ github.ref_name }}
