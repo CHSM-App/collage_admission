@@ -3,6 +3,7 @@ import api from '../../../services/api.js'
 const loginEndpoints = {
   student: 'auth/login/student',
   college: 'auth/login/college',
+  admin:   'auth/login/admin',
 }
 
 function normalizeAuthResponse(responseData, fallbackRole) {

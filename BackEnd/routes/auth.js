@@ -92,6 +92,36 @@ router.post('/login/college', async (req, res) => {
   }
 });
 
+// ── Admin login ─────────────────────────────────────────────
+router.post('/login/admin', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ message: 'Email and password are required.' });
+  }
+  try {
+    const result = await db.request()
+      .input('email', email)
+      .query('SELECT id, name, email, password_hash FROM admins WHERE email = @email');
+
+    if (result.recordset.length === 0) {
+      return res.status(401).json({ message: 'Invalid email or password.' });
+    }
+    const admin = result.recordset[0];
+    const match = await bcrypt.compare(password, admin.password_hash);
+    if (!match) {
+      return res.status(401).json({ message: 'Invalid email or password.' });
+    }
+    return res.json({
+      message: 'Login successful',
+      role: 'admin',
+      user: { id: admin.id, name: admin.name, email: admin.email },
+    });
+  } catch (err) {
+    console.error('Admin login error:', err);
+    return res.status(500).json({ message: 'Server error. Please try again.' });
+  }
+});
+
 // ── Student registration ────────────────────────────────────
 router.post('/register/student', async (req, res) => {
   const { full_name, email, password, phone, dob, gender, address, city, category } = req.body;
