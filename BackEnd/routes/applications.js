@@ -46,12 +46,12 @@ router.get('/', async (req, res) => {
         a.rejection_reason, a.cancellation_reason,
         a.application_fee_paid, a.college_fee_paid,
         c.id   AS college_id,   c.name  AS college_name,  c.city AS college_city,
-        cr.id  AS course_id,    cr.name AS course_name,
+        a.course_id,    COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
         ap.application_fee, ap.total_seats, ap.filled_seats
       FROM applications a
-      JOIN colleges        c  ON c.id  = a.college_id
-      JOIN courses         cr ON cr.id = a.course_id
-      JOIN admission_periods ap ON ap.id = a.admission_period_id
+      JOIN colleges        c  ON c.id       = a.college_id
+      LEFT JOIN faculty_master cr ON cr.code_no = a.course_id AND cr.college_id = a.college_id
+      JOIN admission_periods ap ON ap.id    = a.admission_period_id
       WHERE a.student_id = @sid
     `;
 
@@ -82,14 +82,14 @@ router.get('/:id', async (req, res) => {
           s.full_name AS student_name, s.email AS student_email,
           s.phone, s.dob, s.gender, s.address, s.city, s.category,
           c.name  AS college_name,  c.city   AS college_city,
-          cr.name AS course_name,
+          COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
           ap.application_fee, ap.total_seats, ap.filled_seats,
           ap.start_date, ap.end_date
         FROM applications a
-        JOIN students       s  ON s.id  = a.student_id
-        JOIN colleges       c  ON c.id  = a.college_id
-        JOIN courses        cr ON cr.id = a.course_id
-        JOIN admission_periods ap ON ap.id = a.admission_period_id
+        JOIN students       s  ON s.id       = a.student_id
+        JOIN colleges       c  ON c.id       = a.college_id
+        LEFT JOIN faculty_master cr ON cr.code_no = a.course_id AND cr.college_id = a.college_id
+        JOIN admission_periods ap ON ap.id   = a.admission_period_id
         WHERE a.id = @id
       `);
 

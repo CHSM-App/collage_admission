@@ -9,8 +9,75 @@
  */
 
 const express = require('express');
+const bcrypt  = require('bcryptjs');
 const router  = express.Router();
 const db      = require('./db');
+const mssql   = require('mssql');
+
+// ── Generate next college code (CL001, CL002, …) ────────────
+async function generateCollegeCode() {
+  const result = await db.request().query(
+    `SELECT TOP 1 college_code FROM colleges
+     WHERE college_code LIKE 'CL%'
+     ORDER BY college_code DESC`
+  )
+  if (!result.recordset.length) return 'CL001'
+  const last = result.recordset[0].college_code  // e.g. 'CL007'
+  const num  = parseInt(last.replace('CL', ''), 10) + 1
+  return `CL${String(num).padStart(3, '0')}`
+}
+
+// Create a new college (admin onboarding)
+router.post('/', async (req, res) => {
+  const { name, address, city, phone, email, admin_email, admin_password } = req.body
+
+  if (!name || !email || !admin_email || !admin_password) {
+    return res.status(400).json({ success: false, message: 'name, email, admin_email and admin_password are required.' })
+  }
+
+  try {
+    // Check duplicate admin_email
+    const dup = await db.request()
+      .input('ae', mssql.NVarChar, admin_email)
+      .query('SELECT id FROM colleges WHERE admin_email=@ae')
+    if (dup.recordset.length) {
+      return res.status(409).json({ success: false, message: 'A college with this admin email already exists.' })
+    }
+
+    const hash = await bcrypt.hash(admin_password, 10)
+    const code = await generateCollegeCode()
+
+    const result = await db.request()
+      .input('name',  mssql.NVarChar, name)
+      .input('addr',  mssql.NVarChar, address    || null)
+      .input('city',  mssql.NVarChar, city       || null)
+      .input('phone', mssql.NVarChar, phone      || null)
+      .input('email', mssql.NVarChar, email)
+      .input('ae',    mssql.NVarChar, admin_email)
+      .input('hash',  mssql.NVarChar, hash)
+      .input('code',  mssql.NVarChar, code)
+      .query(`
+        INSERT INTO colleges (name, address, city, phone, email, admin_email, admin_password_hash, college_code)
+        OUTPUT INSERTED.id, INSERTED.name, INSERTED.admin_email, INSERTED.college_code
+        VALUES (@name, @addr, @city, @phone, @email, @ae, @hash, @code)
+      `)
+
+    const college = result.recordset[0]
+    return res.status(201).json({
+      success: true,
+      message: 'College created successfully.',
+      data: {
+        id:           college.id,
+        name:         college.name,
+        admin_email:  college.admin_email,
+        college_code: college.college_code,
+      },
+    })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ success: false, message: 'Server error.' })
+  }
+})
 
 // List all colleges
 router.get('/', async (req, res) => {

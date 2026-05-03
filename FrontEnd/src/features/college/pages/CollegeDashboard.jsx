@@ -38,7 +38,14 @@ function Overview({ user }) {
     <section className="space-y-6">
       <div>
         <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">College portal</p>
-        <h1 className="mt-2 text-3xl font-bold text-slate-950">{user?.name}</h1>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <h1 className="text-3xl font-bold text-slate-950">{user?.name}</h1>
+          {user?.college_code && (
+            <span className="rounded-full bg-blue-50 border border-blue-200 px-3 py-1 text-sm font-mono font-semibold text-blue-700">
+              {user.college_code}
+            </span>
+          )}
+        </div>
         <p className="mt-1 text-slate-600">{user?.city}</p>
       </div>
 

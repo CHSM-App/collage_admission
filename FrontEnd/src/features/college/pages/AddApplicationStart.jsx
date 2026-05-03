@@ -11,7 +11,7 @@ import Button from '../../../shared/components/Button.jsx'
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
 
 const EMPTY_REG = {
-  full_name: '', email: '', password: '', phone: '', category: 'general',
+  full_name: '', email: '', password: '', phone: '',
 }
 
 export default function AddApplicationStart() {
@@ -91,7 +91,7 @@ export default function AddApplicationStart() {
   // ── Register new student ────────────────────────────────────
   async function handleRegister() {
     setRegError('')
-    const { full_name, email, password, phone, category } = regForm
+    const { full_name, email, password, phone } = regForm
     if (!full_name.trim()) { setRegError('Full name is required.'); return }
     if (!email.trim())     { setRegError('Email is required.'); return }
     if (!password)         { setRegError('Password is required.'); return }
@@ -104,7 +104,6 @@ export default function AddApplicationStart() {
         email:     email.trim().toLowerCase(),
         password,
         phone:     phone.trim() || undefined,
-        category,
       })
       const newStudent = res.data.user
       handleSelectStudent({ id: newStudent.id, full_name: newStudent.name, email: newStudent.email, phone: phone.trim() || '' })
@@ -255,18 +254,6 @@ export default function AddApplicationStart() {
               onChange={v => setRegForm(f => ({ ...f, password: v }))}
               placeholder="Min 6 characters"
             />
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Category</label>
-              <select
-                value={regForm.category}
-                onChange={e => setRegForm(f => ({ ...f, category: e.target.value }))}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-              >
-                {['general','obc','sc','st','nt','sbc','vjnt','ews'].map(c => (
-                  <option key={c} value={c}>{c.toUpperCase()}</option>
-                ))}
-              </select>
-            </div>
           </div>
 
           {regError && (

@@ -62,7 +62,7 @@ router.post('/login/college', async (req, res) => {
   try {
     const result = await db.request()
       .input('email', email)
-      .query('SELECT id, name, admin_email, admin_password_hash, city FROM colleges WHERE admin_email = @email');
+      .query('SELECT id, name, admin_email, admin_password_hash, city, college_code FROM colleges WHERE admin_email = @email');
 
     if (result.recordset.length === 0) {
       return res.status(401).json({ message: 'Invalid email or password.' });
@@ -79,10 +79,11 @@ router.post('/login/college', async (req, res) => {
       message: 'Login successful',
       role: 'college',
       user: {
-        id:    college.id,
-        name:  college.name,
-        email: college.admin_email,
-        city:  college.city,
+        id:           college.id,
+        name:         college.name,
+        email:        college.admin_email,
+        city:         college.city,
+        college_code: college.college_code,
       },
     });
   } catch (err) {

@@ -163,22 +163,18 @@ router.post('/applications/init-by-college', async (req, res) => {
   }
 
   try {
-    let yr = parseInt(year_of_study) || null;
+    // Always get year_of_study from the admission period — same as student init route
+    const period = await db.request()
+      .input('pid', mssql.Int, parseInt(admission_period_id))
+      .query('SELECT id, year_of_study FROM admission_periods WHERE id=@pid');
 
-    if (!yr) {
-      const history = await db.request()
-        .input('sid', mssql.Int, parseInt(student_id))
-        .input('col', mssql.Int, parseInt(college_id))
-        .query(`
-          SELECT year_of_study FROM applications
-          WHERE student_id = @sid AND college_id = @col
-            AND status IN ('confirmed','fees_paid','roll_assigned','enrolled')
-          ORDER BY year_of_study DESC
-        `);
-      yr = history.recordset.length === 0 ? 1 : Math.min(history.recordset[0].year_of_study + 1, 3);
+    if (!period.recordset.length) {
+      return res.status(400).json({ success: false, message: 'Admission period not found.' });
     }
 
-    // Return existing draft if present
+    const yr = period.recordset[0].year_of_study;
+
+    // Return existing draft if present (using correct year from period)
     const existing = await db.request()
       .input('sid', mssql.Int, parseInt(student_id))
       .input('col', mssql.Int, parseInt(college_id))
@@ -201,15 +197,6 @@ router.post('/applications/init-by-college', async (req, res) => {
           resumed: true,
         },
       });
-    }
-
-    // Verify period exists (no active/date/seat constraints for college-side)
-    const period = await db.request()
-      .input('pid', mssql.Int, parseInt(admission_period_id))
-      .query('SELECT id FROM admission_periods WHERE id=@pid');
-
-    if (!period.recordset.length) {
-      return res.status(400).json({ success: false, message: 'Admission period not found.' });
     }
 
     const result = await db.request()
@@ -250,7 +237,7 @@ router.get('/applications/:id/form', async (req, res) => {
       .query(`
         SELECT a.*,
                c.name  AS college_name,  c.city AS college_city, c.address AS college_address,
-               cr.name AS course_name,
+               COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
                ap.academic_year AS period_ay,
                ap.application_fee,
                s.email AS student_email, s.full_name AS student_name, s.phone AS student_phone,
@@ -262,10 +249,10 @@ router.get('/applications/:id/form', async (req, res) => {
                s.son_daughter_number, s.aadhaar, s.abc_id, s.prn,
                s.bank_account_number, s.bank_ifsc, s.bank_name, s.bank_branch
         FROM applications a
-        JOIN colleges         c  ON c.id  = a.college_id
-        JOIN courses          cr ON cr.id = a.course_id
-        JOIN admission_periods ap ON ap.id = a.admission_period_id
-        JOIN students         s  ON s.id  = a.student_id
+        JOIN colleges         c  ON c.id       = a.college_id
+        LEFT JOIN faculty_master  cr ON cr.code_no  = a.course_id AND cr.college_id = a.college_id
+        JOIN admission_periods ap ON ap.id     = a.admission_period_id
+        JOIN students         s  ON s.id       = a.student_id
         WHERE a.id = @id
       `);
 
