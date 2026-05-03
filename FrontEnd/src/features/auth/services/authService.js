@@ -1,31 +1,15 @@
 import api from '../../../services/api.js'
 
 const loginEndpoints = {
-  student: 'users/login/student/',
-  college: '/login/college/',
-  admin: '/login/admin/',
+  student: 'auth/login/student',
+  college: 'auth/login/college',
 }
 
-function normalizeAuthResponse(responseData, fallbackRole, email) {
-  const user =
-    responseData?.user ||
-    responseData?.data?.user ||
-    responseData?.profile ||
-    { email }
-
-  // JWT token handling is disabled for now.
-  // const token =
-  //   responseData?.token ||
-  //   responseData?.accessToken ||
-  //   responseData?.access ||
-  //   responseData?.jwt ||
-  //   responseData?.data?.token ||
-  //   null
-
+function normalizeAuthResponse(responseData, fallbackRole) {
   return {
-    user,
+    user:  responseData?.user  || { email: responseData?.email },
     token: null,
-    role: fallbackRole,
+    role:  responseData?.role  || fallbackRole,
   }
 }
 
@@ -37,13 +21,19 @@ export async function loginByRole(role, credentials) {
   }
 
   const { data } = await api.post(endpoint, {
-    email: credentials.email,
+    email:    credentials.email,
     password: credentials.password,
   })
 
-  return normalizeAuthResponse(data, role, credentials.email)
+  return normalizeAuthResponse(data, role)
+}
+
+export async function registerStudent(fields) {
+  const { data } = await api.post('auth/register/student', fields)
+  return normalizeAuthResponse(data, 'student')
 }
 
 export const authService = {
   loginByRole,
+  registerStudent,
 }

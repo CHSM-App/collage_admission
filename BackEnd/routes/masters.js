@@ -1,0 +1,770 @@
+/**
+ * masters.js — CRUD routes for all 6 master tables
+ * Mounted at /masters
+ *
+ * All endpoints require college_id context (from URL param or query).
+ * A college admin can only access their own college's data.
+ *
+ * Routes:
+ *   Faculty Master    GET/POST/PUT/DELETE /masters/:collegeId/faculty
+ *   Bank Master       GET/POST/PUT/DELETE /masters/:collegeId/bank
+ *   Course Master     GET/POST/PUT/DELETE /masters/:collegeId/course
+ *   Group Master      GET/POST/PUT/DELETE /masters/:collegeId/group
+ *   Group Courses     GET/POST/PUT/DELETE /masters/:collegeId/group/:groupId/courses
+ *   Division Master   GET/POST/PUT/DELETE /masters/:collegeId/division
+ *   Fees Master       GET/POST/PUT/DELETE /masters/:collegeId/fees
+ *   Classwise Fees    GET/POST/PUT/DELETE /masters/:collegeId/fees/classwise
+ */
+
+const express  = require('express')
+const router   = express.Router()
+const db       = require('./db')
+const mssql    = require('mssql')
+const feeSvc   = require('../services/FeeDeterminationService')
+
+// ── Helper: assert college ownership ────────────────────────────
+// In production, verify JWT token's college_id matches param.
+// For now, trusts the param (auth middleware can be added globally).
+function cid(req) { return parseInt(req.params.collegeId) }
+
+// ═══════════════════════════════════════════════════════════════
+// FACULTY MASTER
+// ═══════════════════════════════════════════════════════════════
+
+// GET /masters/:collegeId/faculty — list all (active + inactive)
+router.get('/:collegeId/faculty', async (req, res) => {
+  try {
+    const r = await db.request()
+      .input('cid', mssql.Int, cid(req))
+      .query(`
+        SELECT * FROM faculty_master
+        WHERE college_id = @cid
+        ORDER BY degree_course_code
+      `)
+    res.json({ success: true, data: r.recordset })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// POST /masters/:collegeId/faculty — create
+router.post('/:collegeId/faculty', async (req, res) => {
+  const {
+    degree_course_code, degree_course_name, duration_years = 3,
+    unique_code_sem1, unique_code_sem2, unique_code_sem3,
+    unique_code_sem4, unique_code_sem5, unique_code_sem6,
+    exam_seat_code_year1, exam_seat_code_year2, exam_seat_code_year3,
+    is_active = true, created_by,
+  } = req.body
+
+  if (!degree_course_code?.trim()) return res.status(422).json({ success: false, message: 'degree_course_code is required.' })
+  if (!degree_course_name?.trim()) return res.status(422).json({ success: false, message: 'degree_course_name is required.' })
+  if (!/^[A-Za-z0-9\(\).\-/ ]+$/.test(exam_seat_code_year1 || 'A')) {
+    // basic check — exam seat codes should be alpha-character-based; validated more strictly in UI
+  }
+
+  try {
+    const r = await db.request()
+      .input('cid', mssql.Int, cid(req))
+      .input('dc',  mssql.NVarChar, degree_course_code.trim().toUpperCase())
+      .input('dn',  mssql.NVarChar, degree_course_name.trim())
+      .input('dy',  mssql.Int,      parseInt(duration_years) || 3)
+      .input('s1',  mssql.NVarChar, unique_code_sem1 || null)
+      .input('s2',  mssql.NVarChar, unique_code_sem2 || null)
+      .input('s3',  mssql.NVarChar, unique_code_sem3 || null)
+      .input('s4',  mssql.NVarChar, unique_code_sem4 || null)
+      .input('s5',  mssql.NVarChar, unique_code_sem5 || null)
+      .input('s6',  mssql.NVarChar, unique_code_sem6 || null)
+      .input('e1',  mssql.NVarChar, exam_seat_code_year1 || null)
+      .input('e2',  mssql.NVarChar, exam_seat_code_year2 || null)
+      .input('e3',  mssql.NVarChar, exam_seat_code_year3 || null)
+      .input('ia',  mssql.Bit,      is_active ? 1 : 0)
+      .input('cb',  mssql.NVarChar, created_by || null)
+      .query(`
+        INSERT INTO faculty_master
+          (college_id,degree_course_code,degree_course_name,duration_years,
+           unique_code_sem1,unique_code_sem2,unique_code_sem3,
+           unique_code_sem4,unique_code_sem5,unique_code_sem6,
+           exam_seat_code_year1,exam_seat_code_year2,exam_seat_code_year3,
+           is_active,created_by)
+        OUTPUT INSERTED.*
+        VALUES
+          (@cid,@dc,@dn,@dy,@s1,@s2,@s3,@s4,@s5,@s6,@e1,@e2,@e3,@ia,@cb)
+      `)
+    res.status(201).json({ success: true, data: r.recordset[0] })
+  } catch (e) {
+    if (e.number === 2627 || e.number === 2601)
+      return res.status(409).json({ success: false, message: 'Degree course code already exists for this college.' })
+    res.status(500).json({ success: false, message: e.message })
+  }
+})
+
+// PUT /masters/:collegeId/faculty/:id — update
+router.put('/:collegeId/faculty/:id', async (req, res) => {
+  const {
+    degree_course_code, degree_course_name, duration_years,
+    unique_code_sem1, unique_code_sem2, unique_code_sem3,
+    unique_code_sem4, unique_code_sem5, unique_code_sem6,
+    exam_seat_code_year1, exam_seat_code_year2, exam_seat_code_year3,
+    is_active, modified_by,
+  } = req.body
+  try {
+    const r = await db.request()
+      .input('id',  mssql.Int,      parseInt(req.params.id))
+      .input('cid', mssql.Int,      cid(req))
+      .input('dc',  mssql.NVarChar, degree_course_code?.trim().toUpperCase())
+      .input('dn',  mssql.NVarChar, degree_course_name?.trim())
+      .input('dy',  mssql.Int,      parseInt(duration_years) || 3)
+      .input('s1',  mssql.NVarChar, unique_code_sem1 || null)
+      .input('s2',  mssql.NVarChar, unique_code_sem2 || null)
+      .input('s3',  mssql.NVarChar, unique_code_sem3 || null)
+      .input('s4',  mssql.NVarChar, unique_code_sem4 || null)
+      .input('s5',  mssql.NVarChar, unique_code_sem5 || null)
+      .input('s6',  mssql.NVarChar, unique_code_sem6 || null)
+      .input('e1',  mssql.NVarChar, exam_seat_code_year1 || null)
+      .input('e2',  mssql.NVarChar, exam_seat_code_year2 || null)
+      .input('e3',  mssql.NVarChar, exam_seat_code_year3 || null)
+      .input('ia',  mssql.Bit,      is_active ? 1 : 0)
+      .input('mb',  mssql.NVarChar, modified_by || null)
+      .query(`
+        UPDATE faculty_master SET
+          degree_course_code=@dc, degree_course_name=@dn, duration_years=@dy,
+          unique_code_sem1=@s1, unique_code_sem2=@s2, unique_code_sem3=@s3,
+          unique_code_sem4=@s4, unique_code_sem5=@s5, unique_code_sem6=@s6,
+          exam_seat_code_year1=@e1, exam_seat_code_year2=@e2, exam_seat_code_year3=@e3,
+          is_active=@ia, modified_by=@mb, modified_on=GETDATE()
+        OUTPUT INSERTED.*
+        WHERE code_no=@id AND college_id=@cid
+      `)
+    if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Record not found.' })
+    res.json({ success: true, data: r.recordset[0] })
+  } catch (e) {
+    if (e.number === 2627 || e.number === 2601)
+      return res.status(409).json({ success: false, message: 'Degree course code already exists for this college.' })
+    res.status(500).json({ success: false, message: e.message })
+  }
+})
+
+// DELETE /masters/:collegeId/faculty/:id — soft delete (set is_active=0)
+router.delete('/:collegeId/faculty/:id', async (req, res) => {
+  try {
+    await db.request()
+      .input('id',  mssql.Int, parseInt(req.params.id))
+      .input('cid', mssql.Int, cid(req))
+      .query(`UPDATE faculty_master SET is_active=0, modified_on=GETDATE() WHERE code_no=@id AND college_id=@cid`)
+    res.json({ success: true })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// BANK MASTER
+// ═══════════════════════════════════════════════════════════════
+
+router.get('/:collegeId/bank', async (req, res) => {
+  try {
+    const r = await db.request()
+      .input('cid', mssql.Int, cid(req))
+      .query(`SELECT * FROM bank_master WHERE college_id=@cid ORDER BY bank_name`)
+    res.json({ success: true, data: r.recordset })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+router.post('/:collegeId/bank', async (req, res) => {
+  const { bank_account_number, bank_name, branch, ifsc_code, account_type, is_active = true } = req.body
+  if (!bank_account_number?.trim()) return res.status(422).json({ success: false, message: 'bank_account_number is required.' })
+  if (!bank_name?.trim())           return res.status(422).json({ success: false, message: 'bank_name is required.' })
+  try {
+    const r = await db.request()
+      .input('cid', mssql.Int,      cid(req))
+      .input('an',  mssql.NVarChar, bank_account_number.trim())
+      .input('bn',  mssql.NVarChar, bank_name.trim())
+      .input('br',  mssql.NVarChar, branch || null)
+      .input('if',  mssql.NVarChar, ifsc_code || null)
+      .input('at',  mssql.NVarChar, account_type || null)
+      .input('ia',  mssql.Bit,      is_active ? 1 : 0)
+      .query(`
+        INSERT INTO bank_master (college_id,bank_account_number,bank_name,branch,ifsc_code,account_type,is_active)
+        OUTPUT INSERTED.*
+        VALUES (@cid,@an,@bn,@br,@if,@at,@ia)
+      `)
+    res.status(201).json({ success: true, data: r.recordset[0] })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+router.put('/:collegeId/bank/:id', async (req, res) => {
+  const { bank_account_number, bank_name, branch, ifsc_code, account_type, is_active } = req.body
+  try {
+    const r = await db.request()
+      .input('id',  mssql.Int,      parseInt(req.params.id))
+      .input('cid', mssql.Int,      cid(req))
+      .input('an',  mssql.NVarChar, bank_account_number?.trim())
+      .input('bn',  mssql.NVarChar, bank_name?.trim())
+      .input('br',  mssql.NVarChar, branch || null)
+      .input('if',  mssql.NVarChar, ifsc_code || null)
+      .input('at',  mssql.NVarChar, account_type || null)
+      .input('ia',  mssql.Bit,      is_active ? 1 : 0)
+      .query(`
+        UPDATE bank_master SET
+          bank_account_number=@an, bank_name=@bn, branch=@br,
+          ifsc_code=@if, account_type=@at, is_active=@ia, modified_on=GETDATE()
+        OUTPUT INSERTED.*
+        WHERE ledger_code=@id AND college_id=@cid
+      `)
+    if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Record not found.' })
+    res.json({ success: true, data: r.recordset[0] })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+router.delete('/:collegeId/bank/:id', async (req, res) => {
+  try {
+    await db.request()
+      .input('id',  mssql.Int, parseInt(req.params.id))
+      .input('cid', mssql.Int, cid(req))
+      .query(`UPDATE bank_master SET is_active=0, modified_on=GETDATE() WHERE ledger_code=@id AND college_id=@cid`)
+    res.json({ success: true })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// COURSE MASTER (subjects per semester)
+// ═══════════════════════════════════════════════════════════════
+
+// GET /masters/:collegeId/course?faculty_id=&semester=
+router.get('/:collegeId/course', async (req, res) => {
+  const { faculty_id, semester } = req.query
+  try {
+    let q = `
+      SELECT cm.*, fm.degree_course_code, fm.degree_course_name
+      FROM course_master cm
+      JOIN faculty_master fm ON fm.code_no = cm.faculty_master_id
+      WHERE cm.college_id = @cid
+    `
+    const req2 = db.request().input('cid', mssql.Int, cid(req))
+    if (faculty_id) { q += ' AND cm.faculty_master_id = @fid'; req2.input('fid', mssql.Int, parseInt(faculty_id)) }
+    if (semester)   { q += ' AND cm.semester = @sem';          req2.input('sem', mssql.Int, parseInt(semester)) }
+    q += ' ORDER BY cm.display_order, cm.id'
+    const r = await req2.query(q)
+    res.json({ success: true, data: r.recordset })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// POST — create single course master row
+router.post('/:collegeId/course', async (req, res) => {
+  const {
+    faculty_master_id, semester, course_code, course_title,
+    credits, max_internal, min_internal, max_sem_end, min_sem_end,
+    max_total, min_total, subject_type, display_order = 0,
+  } = req.body
+
+  if (!faculty_master_id) return res.status(422).json({ success: false, message: 'faculty_master_id required.' })
+  if (!semester)          return res.status(422).json({ success: false, message: 'semester required.' })
+  if (!course_code?.trim()) return res.status(422).json({ success: false, message: 'course_code required.' })
+  if (!course_title?.trim()) return res.status(422).json({ success: false, message: 'course_title required.' })
+  if (max_internal && min_internal && min_internal > max_internal)
+    return res.status(422).json({ success: false, message: 'min_internal cannot exceed max_internal.' })
+  if (max_sem_end && min_sem_end && min_sem_end > max_sem_end)
+    return res.status(422).json({ success: false, message: 'min_sem_end cannot exceed max_sem_end.' })
+
+  try {
+    const r = await db.request()
+      .input('cid', mssql.Int,      cid(req))
+      .input('fid', mssql.Int,      parseInt(faculty_master_id))
+      .input('sem', mssql.Int,      parseInt(semester))
+      .input('cc',  mssql.NVarChar, course_code.trim())
+      .input('ct',  mssql.NVarChar, course_title.trim())
+      .input('cr',  mssql.Decimal,  credits != null ? parseFloat(credits) : null)
+      .input('mi',  mssql.Int,      max_internal != null ? parseInt(max_internal) : null)
+      .input('ni',  mssql.Int,      min_internal != null ? parseInt(min_internal) : null)
+      .input('ms',  mssql.Int,      max_sem_end  != null ? parseInt(max_sem_end)  : null)
+      .input('ns',  mssql.Int,      min_sem_end  != null ? parseInt(min_sem_end)  : null)
+      .input('mt',  mssql.Int,      max_total    != null ? parseInt(max_total)    : null)
+      .input('nt',  mssql.Int,      min_total    != null ? parseInt(min_total)    : null)
+      .input('st',  mssql.NVarChar, subject_type || null)
+      .input('do',  mssql.Int,      parseInt(display_order) || 0)
+      .query(`
+        INSERT INTO course_master
+          (college_id,faculty_master_id,semester,course_code,course_title,
+           credits,max_internal,min_internal,max_sem_end,min_sem_end,
+           max_total,min_total,subject_type,display_order)
+        OUTPUT INSERTED.*
+        VALUES (@cid,@fid,@sem,@cc,@ct,@cr,@mi,@ni,@ms,@ns,@mt,@nt,@st,@do)
+      `)
+    res.status(201).json({ success: true, data: r.recordset[0] })
+  } catch (e) {
+    if (e.number === 2627 || e.number === 2601)
+      return res.status(409).json({ success: false, message: 'Course code already exists for this program-semester.' })
+    res.status(500).json({ success: false, message: e.message })
+  }
+})
+
+router.put('/:collegeId/course/:id', async (req, res) => {
+  const {
+    faculty_master_id, semester, course_code, course_title,
+    credits, max_internal, min_internal, max_sem_end, min_sem_end,
+    max_total, min_total, subject_type, display_order, is_active,
+  } = req.body
+  if (max_internal && min_internal && min_internal > max_internal)
+    return res.status(422).json({ success: false, message: 'min_internal cannot exceed max_internal.' })
+  try {
+    const r = await db.request()
+      .input('id',  mssql.Int,      parseInt(req.params.id))
+      .input('cid', mssql.Int,      cid(req))
+      .input('fid', mssql.Int,      parseInt(faculty_master_id))
+      .input('sem', mssql.Int,      parseInt(semester))
+      .input('cc',  mssql.NVarChar, course_code?.trim())
+      .input('ct',  mssql.NVarChar, course_title?.trim())
+      .input('cr',  mssql.Decimal,  credits != null ? parseFloat(credits) : null)
+      .input('mi',  mssql.Int,      max_internal != null ? parseInt(max_internal) : null)
+      .input('ni',  mssql.Int,      min_internal != null ? parseInt(min_internal) : null)
+      .input('ms',  mssql.Int,      max_sem_end  != null ? parseInt(max_sem_end)  : null)
+      .input('ns',  mssql.Int,      min_sem_end  != null ? parseInt(min_sem_end)  : null)
+      .input('mt',  mssql.Int,      max_total    != null ? parseInt(max_total)    : null)
+      .input('nt',  mssql.Int,      min_total    != null ? parseInt(min_total)    : null)
+      .input('st',  mssql.NVarChar, subject_type || null)
+      .input('do',  mssql.Int,      parseInt(display_order) || 0)
+      .input('ia',  mssql.Bit,      is_active ? 1 : 0)
+      .query(`
+        UPDATE course_master SET
+          faculty_master_id=@fid, semester=@sem, course_code=@cc, course_title=@ct,
+          credits=@cr, max_internal=@mi, min_internal=@ni, max_sem_end=@ms, min_sem_end=@ns,
+          max_total=@mt, min_total=@nt, subject_type=@st, display_order=@do,
+          is_active=@ia, modified_on=GETDATE()
+        OUTPUT INSERTED.*
+        WHERE id=@id AND college_id=@cid
+      `)
+    if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Record not found.' })
+    res.json({ success: true, data: r.recordset[0] })
+  } catch (e) {
+    if (e.number === 2627 || e.number === 2601)
+      return res.status(409).json({ success: false, message: 'Course code already exists for this program-semester.' })
+    res.status(500).json({ success: false, message: e.message })
+  }
+})
+
+router.delete('/:collegeId/course/:id', async (req, res) => {
+  try {
+    await db.request()
+      .input('id',  mssql.Int, parseInt(req.params.id))
+      .input('cid', mssql.Int, cid(req))
+      .query(`UPDATE course_master SET is_active=0, modified_on=GETDATE() WHERE id=@id AND college_id=@cid`)
+    res.json({ success: true })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// POST /masters/:collegeId/course/bulk-save — save entire semester grid at once
+router.post('/:collegeId/course/bulk-save', async (req, res) => {
+  const { faculty_master_id, semester, rows } = req.body
+  if (!faculty_master_id || !semester || !Array.isArray(rows))
+    return res.status(422).json({ success: false, message: 'faculty_master_id, semester, rows[] required.' })
+
+  try {
+    for (const row of rows) {
+      if (!row.course_code?.trim() || !row.course_title?.trim()) continue
+      // Upsert by (college_id, faculty_master_id, semester, course_code)
+      await db.request()
+        .input('cid', mssql.Int,      cid(req))
+        .input('fid', mssql.Int,      parseInt(faculty_master_id))
+        .input('sem', mssql.Int,      parseInt(semester))
+        .input('cc',  mssql.NVarChar, row.course_code.trim())
+        .input('ct',  mssql.NVarChar, row.course_title.trim())
+        .input('cr',  mssql.Decimal,  row.credits != null ? parseFloat(row.credits) : null)
+        .input('mi',  mssql.Int,      row.max_internal != null ? parseInt(row.max_internal) : null)
+        .input('ni',  mssql.Int,      row.min_internal != null ? parseInt(row.min_internal) : null)
+        .input('ms',  mssql.Int,      row.max_sem_end  != null ? parseInt(row.max_sem_end)  : null)
+        .input('ns',  mssql.Int,      row.min_sem_end  != null ? parseInt(row.min_sem_end)  : null)
+        .input('mt',  mssql.Int,      row.max_total    != null ? parseInt(row.max_total)    : null)
+        .input('nt',  mssql.Int,      row.min_total    != null ? parseInt(row.min_total)    : null)
+        .input('st',  mssql.NVarChar, row.subject_type || null)
+        .input('do',  mssql.Int,      parseInt(row.display_order) || 0)
+        .query(`
+          MERGE course_master AS target
+          USING (SELECT @cid AS college_id, @fid AS faculty_master_id, @sem AS semester, @cc AS course_code) AS src
+          ON target.college_id=src.college_id AND target.faculty_master_id=src.faculty_master_id
+             AND target.semester=src.semester AND target.course_code=src.course_code
+          WHEN MATCHED THEN UPDATE SET
+            course_title=@ct, credits=@cr, max_internal=@mi, min_internal=@ni,
+            max_sem_end=@ms, min_sem_end=@ns, max_total=@mt, min_total=@nt,
+            subject_type=@st, display_order=@do, modified_on=GETDATE()
+          WHEN NOT MATCHED THEN INSERT
+            (college_id,faculty_master_id,semester,course_code,course_title,credits,
+             max_internal,min_internal,max_sem_end,min_sem_end,max_total,min_total,subject_type,display_order)
+          VALUES (@cid,@fid,@sem,@cc,@ct,@cr,@mi,@ni,@ms,@ns,@mt,@nt,@st,@do);
+        `)
+    }
+    res.json({ success: true, message: 'Saved.' })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// GROUP MASTER
+// ═══════════════════════════════════════════════════════════════
+
+router.get('/:collegeId/group', async (req, res) => {
+  const { faculty_id, semester } = req.query
+  try {
+    let q = `
+      SELECT gm.*, fm.degree_course_code,
+        (SELECT COUNT(*) FROM group_courses gc WHERE gc.group_id=gm.id) AS course_count
+      FROM group_master gm
+      JOIN faculty_master fm ON fm.code_no=gm.faculty_master_id
+      WHERE gm.college_id=@cid
+    `
+    const req2 = db.request().input('cid', mssql.Int, cid(req))
+    if (faculty_id) { q += ' AND gm.faculty_master_id=@fid'; req2.input('fid', mssql.Int, parseInt(faculty_id)) }
+    if (semester)   { q += ' AND gm.semester=@sem';          req2.input('sem', mssql.Int, parseInt(semester)) }
+    q += ' ORDER BY gm.group_code'
+    const r = await req2.query(q)
+    res.json({ success: true, data: r.recordset })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+router.get('/:collegeId/group/:id', async (req, res) => {
+  try {
+    const [gRes, gcRes] = await Promise.all([
+      db.request()
+        .input('id',  mssql.Int, parseInt(req.params.id))
+        .input('cid', mssql.Int, cid(req))
+        .query(`SELECT * FROM group_master WHERE id=@id AND college_id=@cid`),
+      db.request()
+        .input('gid', mssql.Int, parseInt(req.params.id))
+        .query(`SELECT * FROM group_courses WHERE group_id=@gid ORDER BY course_position`),
+    ])
+    if (!gRes.recordset.length) return res.status(404).json({ success: false, message: 'Not found.' })
+    res.json({ success: true, data: { ...gRes.recordset[0], courses: gcRes.recordset } })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+router.post('/:collegeId/group', async (req, res) => {
+  const { faculty_master_id, semester, group_code, group_description, is_active = true, courses = [] } = req.body
+  if (!faculty_master_id) return res.status(422).json({ success: false, message: 'faculty_master_id required.' })
+  if (!group_code?.trim()) return res.status(422).json({ success: false, message: 'group_code required.' })
+  if (!group_description?.trim()) return res.status(422).json({ success: false, message: 'group_description required.' })
+  try {
+    const r = await db.request()
+      .input('cid', mssql.Int,      cid(req))
+      .input('fid', mssql.Int,      parseInt(faculty_master_id))
+      .input('sem', mssql.Int,      parseInt(semester))
+      .input('gc',  mssql.NVarChar, group_code.trim())
+      .input('gd',  mssql.NVarChar, group_description.trim())
+      .input('ia',  mssql.Bit,      is_active ? 1 : 0)
+      .query(`
+        INSERT INTO group_master (college_id,faculty_master_id,semester,group_code,group_description,is_active)
+        OUTPUT INSERTED.*
+        VALUES (@cid,@fid,@sem,@gc,@gd,@ia)
+      `)
+    const newGroup = r.recordset[0]
+    // Insert child courses
+    for (const c of courses) {
+      if (!c.course_code?.trim()) continue
+      await db.request()
+        .input('gid', mssql.Int,      newGroup.id)
+        .input('pos', mssql.Int,      parseInt(c.course_position))
+        .input('cc',  mssql.NVarChar, c.course_code.trim())
+        .input('ct',  mssql.NVarChar, c.course_title?.trim() || '')
+        .query(`INSERT INTO group_courses (group_id,course_position,course_code,course_title) VALUES (@gid,@pos,@cc,@ct)`)
+    }
+    res.status(201).json({ success: true, data: newGroup })
+  } catch (e) {
+    if (e.number === 2627 || e.number === 2601)
+      return res.status(409).json({ success: false, message: 'Group code already exists for this program-semester.' })
+    res.status(500).json({ success: false, message: e.message })
+  }
+})
+
+router.put('/:collegeId/group/:id', async (req, res) => {
+  const { faculty_master_id, semester, group_code, group_description, is_active, courses = [] } = req.body
+  try {
+    const r = await db.request()
+      .input('id',  mssql.Int,      parseInt(req.params.id))
+      .input('cid', mssql.Int,      cid(req))
+      .input('fid', mssql.Int,      parseInt(faculty_master_id))
+      .input('sem', mssql.Int,      parseInt(semester))
+      .input('gc',  mssql.NVarChar, group_code?.trim())
+      .input('gd',  mssql.NVarChar, group_description?.trim())
+      .input('ia',  mssql.Bit,      is_active ? 1 : 0)
+      .query(`
+        UPDATE group_master SET
+          faculty_master_id=@fid, semester=@sem, group_code=@gc,
+          group_description=@gd, is_active=@ia, modified_on=GETDATE()
+        OUTPUT INSERTED.*
+        WHERE id=@id AND college_id=@cid
+      `)
+    if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Record not found.' })
+    // Replace child courses
+    await db.request().input('gid', mssql.Int, parseInt(req.params.id))
+      .query(`DELETE FROM group_courses WHERE group_id=@gid`)
+    for (const c of courses) {
+      if (!c.course_code?.trim()) continue
+      await db.request()
+        .input('gid', mssql.Int,      parseInt(req.params.id))
+        .input('pos', mssql.Int,      parseInt(c.course_position))
+        .input('cc',  mssql.NVarChar, c.course_code.trim())
+        .input('ct',  mssql.NVarChar, c.course_title?.trim() || '')
+        .query(`INSERT INTO group_courses (group_id,course_position,course_code,course_title) VALUES (@gid,@pos,@cc,@ct)`)
+    }
+    res.json({ success: true, data: r.recordset[0] })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+router.delete('/:collegeId/group/:id', async (req, res) => {
+  try {
+    await db.request()
+      .input('id',  mssql.Int, parseInt(req.params.id))
+      .input('cid', mssql.Int, cid(req))
+      .query(`UPDATE group_master SET is_active=0, modified_on=GETDATE() WHERE id=@id AND college_id=@cid`)
+    res.json({ success: true })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// DIVISION MASTER
+// ═══════════════════════════════════════════════════════════════
+
+// GET /masters/:collegeId/division?faculty_id=&year_level=
+router.get('/:collegeId/division', async (req, res) => {
+  const { faculty_id, year_level } = req.query
+  try {
+    let q = `
+      SELECT dm.*, fm.degree_course_code, fm.degree_course_name
+      FROM division_master dm
+      JOIN faculty_master fm ON fm.code_no=dm.faculty_master_id
+      WHERE dm.college_id=@cid
+    `
+    const req2 = db.request().input('cid', mssql.Int, cid(req))
+    if (faculty_id)  { q += ' AND dm.faculty_master_id=@fid'; req2.input('fid', mssql.Int, parseInt(faculty_id)) }
+    if (year_level)  { q += ' AND dm.year_level=@yl';         req2.input('yl', mssql.NVarChar, year_level) }
+    q += ' ORDER BY dm.year_level, dm.division_letter'
+    const r = await req2.query(q)
+    res.json({ success: true, data: r.recordset })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// POST /masters/:collegeId/division/save-grid — save entire A-J grid for one class-year
+// Body: { faculty_master_id, year_level, class_year_code, divisions: [{letter, funding_type},...] }
+router.post('/:collegeId/division/save-grid', async (req, res) => {
+  const { faculty_master_id, year_level, class_year_code, divisions } = req.body
+  if (!faculty_master_id || !year_level || !Array.isArray(divisions))
+    return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, divisions[] required.' })
+  try {
+    for (const d of divisions) {
+      if (!d.division_letter || !d.funding_type) continue
+      await db.request()
+        .input('cid', mssql.Int,      cid(req))
+        .input('fid', mssql.Int,      parseInt(faculty_master_id))
+        .input('yl',  mssql.NVarChar, year_level)
+        .input('cyc', mssql.NVarChar, class_year_code || '')
+        .input('dl',  mssql.Char,     d.division_letter)
+        .input('ft',  mssql.NVarChar, d.funding_type)
+        .input('ia',  mssql.Bit,      d.is_active !== false ? 1 : 0)
+        .query(`
+          MERGE division_master AS target
+          USING (SELECT @cid AS college_id, @fid AS faculty_master_id, @yl AS year_level, @dl AS division_letter) AS src
+          ON target.college_id=src.college_id AND target.faculty_master_id=src.faculty_master_id
+             AND target.year_level=src.year_level AND target.division_letter=src.division_letter
+          WHEN MATCHED THEN UPDATE SET funding_type=@ft, class_year_code=@cyc, is_active=@ia, modified_on=GETDATE()
+          WHEN NOT MATCHED THEN INSERT
+            (college_id,faculty_master_id,year_level,class_year_code,division_letter,funding_type,is_active)
+          VALUES (@cid,@fid,@yl,@cyc,@dl,@ft,@ia);
+        `)
+    }
+    res.json({ success: true })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+router.delete('/:collegeId/division/:id', async (req, res) => {
+  try {
+    await db.request()
+      .input('id',  mssql.Int, parseInt(req.params.id))
+      .input('cid', mssql.Int, cid(req))
+      .query(`UPDATE division_master SET is_active=0, modified_on=GETDATE() WHERE id=@id AND college_id=@cid`)
+    res.json({ success: true })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// FEES MASTER
+// ═══════════════════════════════════════════════════════════════
+
+router.get('/:collegeId/fees', async (req, res) => {
+  try {
+    const r = await db.request()
+      .input('cid', mssql.Int, cid(req))
+      .query(`
+        SELECT fm.*, bm.bank_name, bm.bank_account_number
+        FROM fees_master fm
+        LEFT JOIN bank_master bm ON bm.ledger_code = fm.credit_to_bank_ledger
+        WHERE fm.college_id = @cid
+        ORDER BY fm.sequence_auto_fees, fm.fees_code
+      `)
+    res.json({ success: true, data: r.recordset })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+router.post('/:collegeId/fees', async (req, res) => {
+  const {
+    fees_type, is_other_misc = false, fees_head, short_name,
+    sequence_auto_fees = 0, credit_to_bank_ledger,
+    is_refundable = false,
+    fees_cat1_amount = 0, fees_cat2_amount = 0,
+    fees_cat3_amount = 0, fees_cat4_amount = 0,
+    cat4_description, is_active = true,
+  } = req.body
+  if (!fees_type)     return res.status(422).json({ success: false, message: 'fees_type required.' })
+  if (!fees_head?.trim()) return res.status(422).json({ success: false, message: 'fees_head required.' })
+  if (!short_name?.trim()) return res.status(422).json({ success: false, message: 'short_name required.' })
+  try {
+    const r = await db.request()
+      .input('cid', mssql.Int,      cid(req))
+      .input('ft',  mssql.NVarChar, fees_type)
+      .input('iom', mssql.Bit,      is_other_misc ? 1 : 0)
+      .input('fh',  mssql.NVarChar, fees_head.trim())
+      .input('sn',  mssql.NVarChar, short_name.trim())
+      .input('seq', mssql.Int,      parseInt(sequence_auto_fees) || 0)
+      .input('ctb', mssql.Int,      credit_to_bank_ledger ? parseInt(credit_to_bank_ledger) : null)
+      .input('ir',  mssql.Bit,      is_refundable ? 1 : 0)
+      .input('a1',  mssql.Decimal,  parseFloat(fees_cat1_amount) || 0)
+      .input('a2',  mssql.Decimal,  parseFloat(fees_cat2_amount) || 0)
+      .input('a3',  mssql.Decimal,  parseFloat(fees_cat3_amount) || 0)
+      .input('a4',  mssql.Decimal,  parseFloat(fees_cat4_amount) || 0)
+      .input('c4',  mssql.NVarChar, cat4_description || null)
+      .input('ia',  mssql.Bit,      is_active ? 1 : 0)
+      .query(`
+        INSERT INTO fees_master
+          (college_id,fees_type,is_other_misc,fees_head,short_name,sequence_auto_fees,
+           credit_to_bank_ledger,is_refundable,fees_cat1_amount,fees_cat2_amount,
+           fees_cat3_amount,fees_cat4_amount,cat4_description,is_active)
+        OUTPUT INSERTED.*
+        VALUES (@cid,@ft,@iom,@fh,@sn,@seq,@ctb,@ir,@a1,@a2,@a3,@a4,@c4,@ia)
+      `)
+    res.status(201).json({ success: true, data: r.recordset[0] })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+router.put('/:collegeId/fees/:id', async (req, res) => {
+  const {
+    fees_type, is_other_misc, fees_head, short_name,
+    sequence_auto_fees, credit_to_bank_ledger, is_refundable,
+    fees_cat1_amount, fees_cat2_amount, fees_cat3_amount, fees_cat4_amount,
+    cat4_description, is_active,
+  } = req.body
+  try {
+    const r = await db.request()
+      .input('id',  mssql.Int,      parseInt(req.params.id))
+      .input('cid', mssql.Int,      cid(req))
+      .input('ft',  mssql.NVarChar, fees_type)
+      .input('iom', mssql.Bit,      is_other_misc ? 1 : 0)
+      .input('fh',  mssql.NVarChar, fees_head?.trim())
+      .input('sn',  mssql.NVarChar, short_name?.trim())
+      .input('seq', mssql.Int,      parseInt(sequence_auto_fees) || 0)
+      .input('ctb', mssql.Int,      credit_to_bank_ledger ? parseInt(credit_to_bank_ledger) : null)
+      .input('ir',  mssql.Bit,      is_refundable ? 1 : 0)
+      .input('a1',  mssql.Decimal,  parseFloat(fees_cat1_amount) || 0)
+      .input('a2',  mssql.Decimal,  parseFloat(fees_cat2_amount) || 0)
+      .input('a3',  mssql.Decimal,  parseFloat(fees_cat3_amount) || 0)
+      .input('a4',  mssql.Decimal,  parseFloat(fees_cat4_amount) || 0)
+      .input('c4',  mssql.NVarChar, cat4_description || null)
+      .input('ia',  mssql.Bit,      is_active ? 1 : 0)
+      .query(`
+        UPDATE fees_master SET
+          fees_type=@ft, is_other_misc=@iom, fees_head=@fh, short_name=@sn,
+          sequence_auto_fees=@seq, credit_to_bank_ledger=@ctb, is_refundable=@ir,
+          fees_cat1_amount=@a1, fees_cat2_amount=@a2, fees_cat3_amount=@a3,
+          fees_cat4_amount=@a4, cat4_description=@c4, is_active=@ia, modified_on=GETDATE()
+        OUTPUT INSERTED.*
+        WHERE fees_code=@id AND college_id=@cid
+      `)
+    if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Record not found.' })
+    res.json({ success: true, data: r.recordset[0] })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+router.delete('/:collegeId/fees/:id', async (req, res) => {
+  try {
+    await db.request()
+      .input('id',  mssql.Int, parseInt(req.params.id))
+      .input('cid', mssql.Int, cid(req))
+      .query(`UPDATE fees_master SET is_active=0, modified_on=GETDATE() WHERE fees_code=@id AND college_id=@cid`)
+    res.json({ success: true })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// ── Classwise Fees ───────────────────────────────────────────
+
+// GET /masters/:collegeId/fees/classwise?faculty_id=&year_level=
+router.get('/:collegeId/fees/classwise', async (req, res) => {
+  const { faculty_id, year_level } = req.query
+  try {
+    let q = `
+      SELECT cf.*, fm_row.fees_head, fm_row.short_name, fm_row.fees_type,
+             fm.degree_course_code
+      FROM classwise_fees cf
+      JOIN fees_master fm_row ON fm_row.fees_code = cf.fees_code
+      JOIN faculty_master fm  ON fm.code_no = cf.faculty_master_id
+      WHERE cf.college_id = @cid
+    `
+    const req2 = db.request().input('cid', mssql.Int, cid(req))
+    if (faculty_id) { q += ' AND cf.faculty_master_id=@fid'; req2.input('fid', mssql.Int, parseInt(faculty_id)) }
+    if (year_level) { q += ' AND cf.year_level=@yl';         req2.input('yl',  mssql.NVarChar, year_level) }
+    q += ' ORDER BY fm_row.sequence_auto_fees'
+    const r = await req2.query(q)
+    res.json({ success: true, data: r.recordset })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// POST /masters/:collegeId/fees/classwise/save — upsert classwise fees
+router.post('/:collegeId/fees/classwise/save', async (req, res) => {
+  const { faculty_master_id, year_level, rows } = req.body
+  if (!faculty_master_id || !year_level || !Array.isArray(rows))
+    return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, rows[] required.' })
+  try {
+    for (const row of rows) {
+      await db.request()
+        .input('cid', mssql.Int,     cid(req))
+        .input('fid', mssql.Int,     parseInt(faculty_master_id))
+        .input('yl',  mssql.NVarChar, year_level)
+        .input('fc',  mssql.Int,     parseInt(row.fees_code))
+        .input('a1',  mssql.Decimal, row.cat1_amount != null ? parseFloat(row.cat1_amount) : null)
+        .input('a2',  mssql.Decimal, row.cat2_amount != null ? parseFloat(row.cat2_amount) : null)
+        .input('a3',  mssql.Decimal, row.cat3_amount != null ? parseFloat(row.cat3_amount) : null)
+        .input('a4',  mssql.Decimal, row.cat4_amount != null ? parseFloat(row.cat4_amount) : null)
+        .query(`
+          MERGE classwise_fees AS target
+          USING (SELECT @cid AS college_id, @fid AS faculty_master_id, @yl AS year_level, @fc AS fees_code) AS src
+          ON target.college_id=src.college_id AND target.faculty_master_id=src.faculty_master_id
+             AND target.year_level=src.year_level AND target.fees_code=src.fees_code
+          WHEN MATCHED THEN UPDATE SET cat1_amount=@a1,cat2_amount=@a2,cat3_amount=@a3,cat4_amount=@a4
+          WHEN NOT MATCHED THEN INSERT
+            (college_id,faculty_master_id,year_level,fees_code,cat1_amount,cat2_amount,cat3_amount,cat4_amount)
+          VALUES (@cid,@fid,@yl,@fc,@a1,@a2,@a3,@a4);
+        `)
+    }
+    res.json({ success: true })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// FEE DETERMINATION — compute endpoint
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * POST /masters/:collegeId/fees/compute
+ * Body: { faculty_master_id, year_level, division_letter, caste, special_status }
+ * Returns full fee breakdown + payment mode + slab for the given student context.
+ */
+router.post('/:collegeId/fees/compute', async (req, res) => {
+  const { faculty_master_id, year_level, division_letter, caste, special_status } = req.body
+  try {
+    const result = await feeSvc.compute({
+      collegeId:       cid(req),
+      facultyMasterId: faculty_master_id ? parseInt(faculty_master_id) : null,
+      yearLevel:       year_level || null,
+      divisionLetter:  division_letter || null,
+      caste:           caste || null,
+      specialStatus:   special_status || null,
+      pool:            db,
+    })
+    res.json({ success: true, data: result })
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message })
+  }
+})
+
+module.exports = router

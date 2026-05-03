@@ -16,6 +16,10 @@ export const DASHBOARD_PATHS = {
   admin: '/admin/dashboard',
 }
 
+export const REGISTER_PATHS = {
+  student: '/register/student',
+}
+
 export const getDashboardPath = (role) => DASHBOARD_PATHS[role] || LOGIN_PATHS.student
 
 export const getLoginPath = (role) => LOGIN_PATHS[role] || LOGIN_PATHS.student

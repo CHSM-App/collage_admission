@@ -1,12 +1,19 @@
 var createError = require('http-errors');
-var express = require('express');
-var path = require('path');
-var cookieParser = require('cookie-parser');
-var logger = require('morgan');
-var cors = require('cors');
+var express     = require('express');
+var path        = require('path');
+var cookieParser= require('cookie-parser');
+var logger      = require('morgan');
+var cors        = require('cors');
 
-var indexRouter = require('./routes/index');
-var usersRouter = require('./routes/users');
+var authRouter           = require('./routes/auth');
+var collegesRouter       = require('./routes/colleges');
+var applicationsRouter   = require('./routes/applications');
+var applicationFormRouter= require('./routes/application_form');
+var collegeAdminRouter   = require('./routes/college_admin');
+var documentsRouter      = require('./routes/documents');
+var paymentsRouter       = require('./routes/payments');
+var mastersRouter        = require('./routes/masters');
+var indexRouter          = require('./routes/index');
 
 var app = express();
 
@@ -21,32 +28,33 @@ app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
-app.use('/', indexRouter);
-app.use('/users', usersRouter);
+// ── Routes ───────────────────────────────────────────────────
+app.use('/',              indexRouter);
+app.use('/auth',          authRouter);
+app.use('/colleges',      collegesRouter);
+app.use('/applications',  applicationsRouter);
+app.use('/api',           applicationFormRouter);
+app.use('/college-admin', collegeAdminRouter);
+app.use('/payments',      paymentsRouter);
+app.use('/masters',       mastersRouter);
+app.use('/',              documentsRouter);
 
-// catch 404 and forward to error handler
+// ── 404 handler ──────────────────────────────────────────────
 app.use(function(req, res, next) {
   next(createError(404));
 });
 
-// error handler
+// ── Error handler ────────────────────────────────────────────
 app.use(function(err, req, res, next) {
-  // set locals, only providing error in development
-  res.locals.message = err.message;
-  res.locals.error = req.app.get('env') === 'development' ? err : {};
-
-  // render the error page
-  res.status(err.status || 500);
-  res.render('error');
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || 'Internal server error',
+  });
 });
-
-
-
-
 
 const PORT = process.env.PORT || 8000;
 app.listen(PORT, function () {
-  console.log("Listening on :" + PORT);
+  console.log('Server listening on :' + PORT);
 });
 
 module.exports = app;
