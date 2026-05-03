@@ -12,6 +12,7 @@ env:
   FRONTEND_DIR: FrontEnd
   BACKEND_DIR: BackEnd
   DEPLOY_BRANCH: dist
+  BACKEND_BRANCH: backend
 
 jobs:
   build-and-publish:
@@ -36,20 +37,23 @@ jobs:
       - name: Build project
         run: npm run build
         env:
-          VITE_API_URL: https://collegeadmission.vengurlatech.com/
+          VITE_API_URL: https://collageserver.vengurlatech.com/
         working-directory: ${{ env.FRONTEND_DIR }}
 
-      - name: Prepare output folder
-        run: |
-          mkdir -p ./output
-          cp -r ./${{ env.FRONTEND_DIR }}/dist/. ./output/
-          cp -r ./${{ env.BACKEND_DIR }} ./output/BackEnd
-
-      - name: Push to deploy branch
+      - name: Push frontend dist to deploy branch
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_branch: ${{ env.DEPLOY_BRANCH }}
-          publish_dir: ./output
+          publish_dir: ./${{ env.FRONTEND_DIR }}/dist
           force_orphan: true
           commit_message: Build from tag ${{ github.ref_name }}
+
+      - name: Push backend to backend branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: ${{ env.BACKEND_BRANCH }}
+          publish_dir: ./${{ env.BACKEND_DIR }}
+          force_orphan: true
+          commit_message: Publish backend from tag ${{ github.ref_name }}
