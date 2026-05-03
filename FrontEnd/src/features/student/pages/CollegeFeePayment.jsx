@@ -84,6 +84,50 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
     }
   }
 
+  // ── Pay full remaining amount (used alongside installment plan) ─
+  async function payFullAmount(amount) {
+    setPayError('')
+    setPaidMsg('')
+    setPaying(true)
+    try {
+      const orderRes = await api.post('payments/create-order', {
+        application_id: application.id,
+        payment_type:   'college_fee',
+        amount,
+      })
+      const orderData = orderRes.data.data
+      setPaying(false)
+      openCheckout({
+        orderData,
+        onSuccess: async (rzpResponse) => {
+          setPaying(true)
+          try {
+            const verifyRes = await api.post('payments/verify', {
+              application_id:      application.id,
+              payment_type:        'college_fee',
+              razorpay_order_id:   rzpResponse.razorpay_order_id,
+              razorpay_payment_id: rzpResponse.razorpay_payment_id,
+              razorpay_signature:  rzpResponse.razorpay_signature,
+            })
+            setPaidMsg(verifyRes.data.message)
+            setShowReceipts(true)
+            fetchStatus()
+            if (verifyRes.data.data?.all_paid) setTimeout(onDone, 2000)
+          } catch (err) {
+            setPayError(err?.response?.data?.message || 'Payment verification failed.')
+          } finally { setPaying(false) }
+        },
+        onFailure: (err) => {
+          setPaying(false)
+          if (err.message !== 'Payment cancelled by user.') setPayError(err.message)
+        },
+      })
+    } catch (err) {
+      setPayError(err?.response?.data?.message || 'Could not initiate payment.')
+      setPaying(false)
+    }
+  }
+
   // ── Pay a custom amount (partial or full) ────────────────
   async function payCustomAmount() {
     const amt = parseFloat(inputAmount)
@@ -214,8 +258,8 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
 
         {/* ── Installment plan (college-defined) ── */}
         {fs.has_installment_plan && !allPaid && (
-          <div>
-            <p className="text-sm font-semibold text-slate-700 mb-2">Pay by Installment</p>
+          <div className="space-y-3">
+            <p className="text-sm font-semibold text-slate-700">Pay by Installment</p>
             <div className="space-y-2">
               {fs.installments.map(ins => (
                 <div
@@ -250,6 +294,26 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
                 </div>
               ))}
             </div>
+
+            {/* Pay full balance at once */}
+            {fs.remaining > 0 && (
+              <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-blue-900">Pay Full Amount</p>
+                  <p className="text-xs text-blue-600 mt-0.5">Clear all remaining dues in one payment</p>
+                </div>
+                <Button
+                  onClick={() => {
+                    setInputAmount(String(fs.remaining))
+                    payFullAmount(fs.remaining)
+                  }}
+                  loading={paying}
+                  disabled={!!payingId || !!paying || scriptError}
+                >
+                  Pay ₹{Number(fs.remaining).toLocaleString('en-IN')}
+                </Button>
+              </div>
+            )}
           </div>
         )}
 

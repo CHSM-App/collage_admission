@@ -327,7 +327,6 @@ router.post('/create-order', async (req, res) => {
       }
       // Validate custom amount against remaining balance
       const feeInfo = await getCollegeFeTotal(app);
-      // student_payable = total minus reimbursable (BCC); for non-BCC they are equal
       const totalFee = feeInfo?.student_payable ?? feeInfo?.total_fee ?? 0;
       const paidRes = await db.request()
         .input('appId', mssql.Int, parseInt(application_id))
@@ -340,9 +339,18 @@ router.post('/create-order', async (req, res) => {
       const totalPaid = parseFloat(paidRes.recordset[0].total_paid) || 0;
       const remaining = Math.max(0, totalFee - totalPaid);
 
+      // If the college has set an installment plan, only allow paying the full remaining balance
+      const planRes = await db.request()
+        .input('pid', mssql.Int, app.admission_period_id)
+        .query('SELECT COUNT(*) AS cnt FROM fee_installment_plans WHERE admission_period_id = @pid');
+      const hasInstallmentPlan = (planRes.recordset[0].cnt || 0) > 0;
+
       const parsedAmount = parseFloat(customAmount);
       if (!parsedAmount || parsedAmount <= 0) {
         return res.status(400).json({ success: false, message: 'Enter a valid payment amount.' });
+      }
+      if (hasInstallmentPlan && Math.abs(parsedAmount - remaining) > 0.01) {
+        return res.status(400).json({ success: false, message: 'An installment plan is set. You must pay either the full remaining balance or use the installment options.' });
       }
       if (parsedAmount > remaining + 0.01) {
         return res.status(400).json({ success: false, message: `Amount cannot exceed the remaining balance of ₹${remaining}.` });
