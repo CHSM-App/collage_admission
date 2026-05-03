@@ -206,6 +206,9 @@ export default function ApplyWizard() {
     setField(e.target.name, e.target.value)
   }, [setField])
 
+  // Scroll to top on every step change
+  useEffect(() => { window.scrollTo({ top: 0, behavior: 'smooth' }) }, [state.currentStep])
+
   // ── Navigate steps ──────────────────────────────────────────
   function goStep(n) {
     dispatch({ type: 'SET_STEP', step: n })

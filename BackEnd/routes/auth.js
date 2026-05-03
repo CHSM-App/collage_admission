@@ -51,7 +51,7 @@ router.post('/login/student', async (req, res) => {
   }
 });
 
-// ── College admin login ─────────────────────────────────────
+// ── College login (admin OR staff — single endpoint) ────────
 router.post('/login/college', async (req, res) => {
   const { email, password } = req.body;
 
@@ -60,30 +60,76 @@ router.post('/login/college', async (req, res) => {
   }
 
   try {
-    const result = await db.request()
-      .input('email', email)
+    // 1. Try college admin first
+    const adminResult = await db.request()
+      .input('email', email.trim().toLowerCase())
       .query('SELECT id, name, admin_email, admin_password_hash, city, college_code FROM colleges WHERE admin_email = @email');
 
-    if (result.recordset.length === 0) {
+    if (adminResult.recordset.length > 0) {
+      const college = adminResult.recordset[0];
+      const match   = await bcrypt.compare(password, college.admin_password_hash);
+      if (!match) return res.status(401).json({ message: 'Invalid email or password.' });
+
+      return res.json({
+        message: 'Login successful',
+        role: 'college',
+        user: {
+          id:           college.id,
+          name:         college.name,
+          email:        college.admin_email,
+          city:         college.city,
+          college_code: college.college_code,
+        },
+      });
+    }
+
+    // 2. Try college staff user
+    const staffResult = await db.request()
+      .input('email', email.trim().toLowerCase())
+      .query(`
+        SELECT u.id, u.full_name, u.email, u.password_hash, u.is_active,
+               u.college_id, u.role_id,
+               c.name AS college_name, c.college_code,
+               r.role_name,
+               (SELECT p.permission, p.can_write
+                FROM college_role_permissions p
+                WHERE p.role_id = u.role_id
+                FOR JSON PATH) AS permissions_json
+        FROM college_users u
+        JOIN colleges c ON c.id = u.college_id
+        JOIN college_roles r ON r.id = u.role_id
+        WHERE u.email = @email
+      `);
+
+    if (!staffResult.recordset.length) {
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
 
-    const college = result.recordset[0];
-    const match   = await bcrypt.compare(password, college.admin_password_hash);
-
-    if (!match) {
-      return res.status(401).json({ message: 'Invalid email or password.' });
+    const staff = staffResult.recordset[0];
+    if (!staff.is_active) {
+      return res.status(403).json({ message: 'Your account has been deactivated. Contact the administrator.' });
     }
+
+    const match = await bcrypt.compare(password, staff.password_hash);
+    if (!match) return res.status(401).json({ message: 'Invalid email or password.' });
+
+    const permsArray = staff.permissions_json ? JSON.parse(staff.permissions_json) : [];
+    const permissions = {};
+    permsArray.forEach(p => { permissions[p.permission] = !!p.can_write; });
 
     return res.json({
       message: 'Login successful',
       role: 'college',
       user: {
-        id:           college.id,
-        name:         college.name,
-        email:        college.admin_email,
-        city:         college.city,
-        college_code: college.college_code,
+        id:           staff.college_id,
+        name:         staff.college_name,
+        email:        staff.email,
+        college_code: staff.college_code,
+        staff_id:     staff.id,
+        staff_name:   staff.full_name,
+        role_name:    staff.role_name,
+        permissions,
+        is_staff:     true,
       },
     });
   } catch (err) {
@@ -118,6 +164,72 @@ router.post('/login/admin', async (req, res) => {
     });
   } catch (err) {
     console.error('Admin login error:', err);
+    return res.status(500).json({ message: 'Server error. Please try again.' });
+  }
+});
+
+// ── College staff (sub-user) login ──────────────────────────
+router.post('/login/college-user', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ message: 'Email and password are required.' });
+  }
+  try {
+    const result = await db.request()
+      .input('email', email.trim().toLowerCase())
+      .query(`
+        SELECT u.id, u.full_name, u.email, u.password_hash, u.is_active,
+               u.college_id, u.role_id,
+               c.name AS college_name, c.college_code,
+               r.role_name,
+               (SELECT p.permission, p.can_write
+                FROM college_role_permissions p
+                WHERE p.role_id = u.role_id
+                FOR JSON PATH) AS permissions_json
+        FROM college_users u
+        JOIN colleges c ON c.id = u.college_id
+        JOIN college_roles r ON r.id = u.role_id
+        WHERE u.email = @email
+      `);
+
+    if (!result.recordset.length) {
+      return res.status(401).json({ message: 'Invalid email or password.' });
+    }
+
+    const user = result.recordset[0];
+
+    if (!user.is_active) {
+      return res.status(403).json({ message: 'Your account has been deactivated. Contact the administrator.' });
+    }
+
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) {
+      return res.status(401).json({ message: 'Invalid email or password.' });
+    }
+
+    // Build permissions map: { submit_application: true/false, ... }
+    const permsArray = user.permissions_json ? JSON.parse(user.permissions_json) : [];
+    const permissions = {};
+    permsArray.forEach(p => { permissions[p.permission] = !!p.can_write; });
+
+    return res.json({
+      message: 'Login successful',
+      role: 'college',
+      user: {
+        id:           user.college_id,
+        name:         user.college_name,
+        email:        user.email,
+        college_code: user.college_code,
+        // staff-specific fields
+        staff_id:     user.id,
+        staff_name:   user.full_name,
+        role_name:    user.role_name,
+        permissions,
+        is_staff:     true,
+      },
+    });
+  } catch (err) {
+    console.error('College-user login error:', err);
     return res.status(500).json({ message: 'Server error. Please try again.' });
   }
 });

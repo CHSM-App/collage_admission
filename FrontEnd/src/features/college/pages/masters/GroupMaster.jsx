@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import api from '../../../../services/api.js'
+import { usePermissions } from '../../hooks/usePermissions.js'
 
 const SEMESTERS  = [1,2,3,4,5,6]
 const NUM_SLOTS  = 11
@@ -14,6 +15,8 @@ const EMPTY_GROUP = (facultyId, sem) => ({
 })
 
 export default function GroupMaster({ collegeId }) {
+  const { canWrite } = usePermissions()
+  const rw = canWrite('masters')
   const [faculty, setFaculty]       = useState([])
   const [selFaculty, setSelFaculty] = useState('')
   const [selSem, setSelSem]         = useState(1)
@@ -45,13 +48,12 @@ export default function GroupMaster({ collegeId }) {
 
   useEffect(() => { loadGroups() }, [loadGroups])
 
-  // Load course hints when faculty+semester changes (for autocomplete)
+  // Load course hints for ALL faculties at the selected semester (for elective autocomplete)
   useEffect(() => {
-    if (!selFaculty) return
-    api.get(`masters/${collegeId}/course?faculty_id=${selFaculty}&semester=${selSem}`)
+    api.get(`masters/${collegeId}/course?semester=${selSem}`)
       .then(r => setCourseHints(r.data.data || []))
       .catch(() => {})
-  }, [collegeId, selFaculty, selSem])
+  }, [collegeId, selSem])
 
   function openNew() {
     setForm(EMPTY_GROUP(selFaculty, selSem))
@@ -113,7 +115,7 @@ export default function GroupMaster({ collegeId }) {
         <h2 className="text-lg font-semibold text-slate-800">
           Group Master <span className="text-sm font-normal text-slate-400">(Subject Combinations)</span>
         </h2>
-        <button onClick={openNew} className="shrink-0 px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700">+ New Group</button>
+        {rw && <button onClick={openNew} className="shrink-0 px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700">+ New Group</button>}
       </div>
 
       {/* Filters */}
@@ -171,8 +173,8 @@ export default function GroupMaster({ collegeId }) {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right space-x-2">
-                      <button onClick={() => openEdit(g)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>
-                      {g.is_active && <button onClick={() => softDelete(g)} className="text-xs text-red-400 hover:text-red-600 underline">Deactivate</button>}
+                      {rw && <button onClick={() => openEdit(g)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>}
+                      {rw && g.is_active && <button onClick={() => softDelete(g)} className="text-xs text-red-400 hover:text-red-600 underline">Deactivate</button>}
                     </td>
                   </tr>
                 ))}

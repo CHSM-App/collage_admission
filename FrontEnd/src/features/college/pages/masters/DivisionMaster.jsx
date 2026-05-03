@@ -1,11 +1,14 @@
 import { useEffect, useState, useCallback } from 'react'
 import api from '../../../../services/api.js'
+import { usePermissions } from '../../hooks/usePermissions.js'
 
 const YEAR_LEVELS  = ['FY', 'SY', 'TY']
 const DIVISIONS    = ['A','B','C','D','E','F','G','H','I','J']
 const FUNDING_OPTS = ['Granted','NonGranted','Both']
 
 export default function DivisionMaster({ collegeId }) {
+  const { canWrite } = usePermissions()
+  const rw = canWrite('masters')
   const [faculty, setFaculty]       = useState([])
   const [selFaculty, setSelFaculty] = useState('')
   const [selYear, setSelYear]       = useState('FY')
@@ -77,10 +80,10 @@ export default function DivisionMaster({ collegeId }) {
     <div>
       <div className="flex items-center justify-between mb-4 gap-2">
         <h2 className="text-lg font-semibold text-slate-800">Division Master</h2>
-        <button onClick={saveGrid} disabled={saving}
+        {rw && <button onClick={saveGrid} disabled={saving}
           className="shrink-0 px-4 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700 disabled:opacity-50">
           {saving ? 'Saving…' : 'Save'}
-        </button>
+        </button>}
       </div>
 
       {/* Filters */}

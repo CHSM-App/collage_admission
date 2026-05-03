@@ -1,19 +1,21 @@
 /**
- * masters.js — CRUD routes for all 6 master tables
+ * masters.js — CRUD routes for all master tables
  * Mounted at /masters
  *
  * All endpoints require college_id context (from URL param or query).
  * A college admin can only access their own college's data.
  *
  * Routes:
- *   Faculty Master    GET/POST/PUT/DELETE /masters/:collegeId/faculty
- *   Bank Master       GET/POST/PUT/DELETE /masters/:collegeId/bank
- *   Course Master     GET/POST/PUT/DELETE /masters/:collegeId/course
- *   Group Master      GET/POST/PUT/DELETE /masters/:collegeId/group
- *   Group Courses     GET/POST/PUT/DELETE /masters/:collegeId/group/:groupId/courses
- *   Division Master   GET/POST/PUT/DELETE /masters/:collegeId/division
- *   Fees Master       GET/POST/PUT/DELETE /masters/:collegeId/fees
- *   Classwise Fees    GET/POST/PUT/DELETE /masters/:collegeId/fees/classwise
+ *   Faculty Master       GET/POST/PUT/DELETE /masters/:collegeId/faculty
+ *   Bank Master          GET/POST/PUT/DELETE /masters/:collegeId/bank
+ *   Course Master        GET/POST/PUT/DELETE /masters/:collegeId/course
+ *   Group Master         GET/POST/PUT/DELETE /masters/:collegeId/group
+ *   Group Courses        GET/POST/PUT/DELETE /masters/:collegeId/group/:groupId/courses
+ *   Division Master      GET/POST/PUT/DELETE /masters/:collegeId/division
+ *   Fees Master          GET/POST/PUT/DELETE /masters/:collegeId/fees
+ *   Classwise Fees       GET/POST/PUT/DELETE /masters/:collegeId/fees/classwise
+ *   Document Types       GET                  /masters/document-types
+ *   Required Documents   GET/POST/DELETE      /masters/:collegeId/required-documents
  */
 
 const express  = require('express')
@@ -59,6 +61,28 @@ router.post('/:collegeId/faculty', async (req, res) => {
   if (!degree_course_name?.trim()) return res.status(422).json({ success: false, message: 'degree_course_name is required.' })
   if (!/^[A-Za-z0-9\(\).\-/ ]+$/.test(exam_seat_code_year1 || 'A')) {
     // basic check — exam seat codes should be alpha-character-based; validated more strictly in UI
+  }
+
+  // Check sem codes uniqueness per college (excluding nulls)
+  const semCodes = [unique_code_sem1,unique_code_sem2,unique_code_sem3,unique_code_sem4,unique_code_sem5,unique_code_sem6].filter(Boolean)
+  const examCodes = [exam_seat_code_year1,exam_seat_code_year2,exam_seat_code_year3].filter(Boolean)
+  if (semCodes.length > 0) {
+    const existing = await db.request().input('cid', mssql.Int, cid(req)).query(`
+      SELECT unique_code_sem1,unique_code_sem2,unique_code_sem3,unique_code_sem4,unique_code_sem5,unique_code_sem6
+      FROM faculty_master WHERE college_id=@cid AND is_active=1
+    `)
+    const allSems = existing.recordset.flatMap(r => [r.unique_code_sem1,r.unique_code_sem2,r.unique_code_sem3,r.unique_code_sem4,r.unique_code_sem5,r.unique_code_sem6].filter(Boolean))
+    const dup = semCodes.find(c => allSems.includes(c))
+    if (dup) return res.status(409).json({ success: false, message: `Semester code "${dup}" is already used by another course in this college.` })
+  }
+  if (examCodes.length > 0) {
+    const existing = await db.request().input('cid', mssql.Int, cid(req)).query(`
+      SELECT exam_seat_code_year1,exam_seat_code_year2,exam_seat_code_year3
+      FROM faculty_master WHERE college_id=@cid AND is_active=1
+    `)
+    const allExam = existing.recordset.flatMap(r => [r.exam_seat_code_year1,r.exam_seat_code_year2,r.exam_seat_code_year3].filter(Boolean))
+    const dup = examCodes.find(c => allExam.includes(c))
+    if (dup) return res.status(409).json({ success: false, message: `Exam seat code "${dup}" is already used by another course in this college.` })
   }
 
   try {
@@ -344,7 +368,7 @@ router.delete('/:collegeId/course/:id', async (req, res) => {
     await db.request()
       .input('id',  mssql.Int, parseInt(req.params.id))
       .input('cid', mssql.Int, cid(req))
-      .query(`UPDATE course_master SET is_active=0, modified_on=GETDATE() WHERE id=@id AND college_id=@cid`)
+      .query(`DELETE FROM course_master WHERE id=@id AND college_id=@cid`)
     res.json({ success: true })
   } catch (e) { res.status(500).json({ success: false, message: e.message }) }
 })
@@ -765,6 +789,103 @@ router.post('/:collegeId/fees/compute', async (req, res) => {
   } catch (e) {
     res.status(500).json({ success: false, message: e.message })
   }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// DOCUMENT TYPES (global list)
+// ═══════════════════════════════════════════════════════════════
+
+// GET /masters/document-types — list all global document types
+router.get('/document-types', async (req, res) => {
+  try {
+    const r = await db.request()
+      .query('SELECT id, name, description FROM document_types ORDER BY name')
+    res.json({ success: true, data: r.recordset })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// REQUIRED DOCUMENTS MASTER
+// ═══════════════════════════════════════════════════════════════
+
+// GET /masters/:collegeId/required-documents?faculty_master_id=&year_of_study=
+router.get('/:collegeId/required-documents', async (req, res) => {
+  const { faculty_master_id, year_of_study } = req.query
+  try {
+    let query = `
+      SELECT rd.id, rd.faculty_master_id, rd.year_of_study, rd.document_type_id,
+             rd.is_mandatory, dt.name AS document_type_name,
+             fm.degree_course_code, fm.degree_course_name
+      FROM college_required_documents rd
+      JOIN document_types dt ON dt.id = rd.document_type_id
+      JOIN faculty_master fm ON fm.code_no = rd.faculty_master_id
+      WHERE rd.college_id = @cid
+    `
+    const req2 = db.request().input('cid', mssql.Int, cid(req))
+    if (faculty_master_id) {
+      query += ' AND rd.faculty_master_id = @fmid'
+      req2.input('fmid', mssql.Int, parseInt(faculty_master_id))
+    }
+    if (year_of_study) {
+      query += ' AND rd.year_of_study = @yr'
+      req2.input('yr', mssql.Int, parseInt(year_of_study))
+    }
+    query += ' ORDER BY fm.degree_course_code, rd.year_of_study, dt.name'
+    const r = await req2.query(query)
+    res.json({ success: true, data: r.recordset })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// POST /masters/:collegeId/required-documents — add a required document
+router.post('/:collegeId/required-documents', async (req, res) => {
+  const { faculty_master_id, year_of_study, document_type_id, is_mandatory } = req.body
+  if (!faculty_master_id || !year_of_study || !document_type_id) {
+    return res.status(400).json({ success: false, message: 'faculty_master_id, year_of_study, document_type_id are required.' })
+  }
+  try {
+    const r = await db.request()
+      .input('cid',   mssql.Int,  cid(req))
+      .input('fmid',  mssql.Int,  parseInt(faculty_master_id))
+      .input('yr',    mssql.Int,  parseInt(year_of_study))
+      .input('dtid',  mssql.Int,  parseInt(document_type_id))
+      .input('mand',  mssql.Bit,  is_mandatory !== false ? 1 : 0)
+      .query(`
+        INSERT INTO college_required_documents
+          (college_id, faculty_master_id, year_of_study, document_type_id, is_mandatory)
+        OUTPUT INSERTED.id
+        VALUES (@cid, @fmid, @yr, @dtid, @mand)
+      `)
+    res.status(201).json({ success: true, data: { id: r.recordset[0].id } })
+  } catch (e) {
+    if (e.number === 2627 || e.number === 2601) {
+      return res.status(409).json({ success: false, message: 'This document is already in the list.' })
+    }
+    res.status(500).json({ success: false, message: e.message })
+  }
+})
+
+// PUT /masters/:collegeId/required-documents/:id — toggle is_mandatory
+router.put('/:collegeId/required-documents/:id', async (req, res) => {
+  const { is_mandatory } = req.body
+  try {
+    await db.request()
+      .input('id',   mssql.Int, parseInt(req.params.id))
+      .input('cid',  mssql.Int, cid(req))
+      .input('mand', mssql.Bit, is_mandatory ? 1 : 0)
+      .query('UPDATE college_required_documents SET is_mandatory=@mand WHERE id=@id AND college_id=@cid')
+    res.json({ success: true })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// DELETE /masters/:collegeId/required-documents/:id
+router.delete('/:collegeId/required-documents/:id', async (req, res) => {
+  try {
+    await db.request()
+      .input('id',  mssql.Int, parseInt(req.params.id))
+      .input('cid', mssql.Int, cid(req))
+      .query('DELETE FROM college_required_documents WHERE id=@id AND college_id=@cid')
+    res.json({ success: true })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
 })
 
 module.exports = router

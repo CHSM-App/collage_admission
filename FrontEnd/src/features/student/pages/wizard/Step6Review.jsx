@@ -110,8 +110,8 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
 
         <ReviewSection title="Personal Details" onEdit={() => onEditStep(2)}>
           <Row label="Full Name"     value={[data.surname, data.first_name, data.middle_name].filter(Boolean).join(' ')} />
-          <Row label="Mother's Name" value={data.mother_name} />
-          <Row label="Sex"           value={data.sex} />
+          <Row label="Mother's First Name" value={data.mother_name} />
+          <Row label="Gender"         value={data.sex} />
           <Row label="Mobile"        value={data.mobile} />
           <Row label="Email"         value={data.email} />
           <Row label="Address"       value={[data.address, data.taluka, data.district, data.state].filter(Boolean).join(', ')} />

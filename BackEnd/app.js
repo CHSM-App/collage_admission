@@ -13,6 +13,7 @@ var collegeAdminRouter   = require('./routes/college_admin');
 var documentsRouter      = require('./routes/documents');
 var paymentsRouter       = require('./routes/payments');
 var mastersRouter        = require('./routes/masters');
+var collegeUsersRouter   = require('./routes/college_users');
 var indexRouter          = require('./routes/index');
 
 var app = express();
@@ -37,6 +38,7 @@ app.use('/api',           applicationFormRouter);
 app.use('/college-admin', collegeAdminRouter);
 app.use('/payments',      paymentsRouter);
 app.use('/masters',       mastersRouter);
+app.use('/admin',         collegeUsersRouter);
 app.use('/',              documentsRouter);
 
 // ── 404 handler ──────────────────────────────────────────────

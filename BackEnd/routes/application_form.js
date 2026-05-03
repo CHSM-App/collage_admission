@@ -121,6 +121,27 @@ router.post('/applications/init', async (req, res) => {
       });
     }
 
+    // Block if an active (non-draft, non-cancelled, non-rejected) application already exists
+    const activeCheck = await db.request()
+      .input('sid', mssql.Int, parseInt(student_id))
+      .input('col', mssql.Int, parseInt(college_id))
+      .input('crs', mssql.Int, parseInt(course_id))
+      .input('yr',  mssql.Int, yr)
+      .input('ay',  mssql.NVarChar, academic_year)
+      .query(`
+        SELECT id, status FROM applications
+        WHERE student_id = @sid AND college_id = @col AND course_id = @crs
+          AND year_of_study = @yr AND academic_year = @ay
+          AND status NOT IN ('draft','cancelled','rejected')
+      `);
+
+    if (activeCheck.recordset.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'You have already applied for this course at this college. Applying again for the same course is not allowed.',
+      });
+    }
+
     // Create draft
     const result = await db.request()
       .input('sid',  mssql.Int, parseInt(student_id))
@@ -196,6 +217,27 @@ router.post('/applications/init-by-college', async (req, res) => {
           current_step: existing.recordset[0].current_step || 1,
           resumed: true,
         },
+      });
+    }
+
+    // Block if an active (non-draft, non-cancelled, non-rejected) application already exists
+    const activeCheck = await db.request()
+      .input('sid', mssql.Int, parseInt(student_id))
+      .input('col', mssql.Int, parseInt(college_id))
+      .input('crs', mssql.Int, parseInt(course_id))
+      .input('yr',  mssql.Int, yr)
+      .input('ay',  mssql.NVarChar, academic_year)
+      .query(`
+        SELECT id, status FROM applications
+        WHERE student_id = @sid AND college_id = @col AND course_id = @crs
+          AND year_of_study = @yr AND academic_year = @ay
+          AND status NOT IN ('draft','cancelled','rejected')
+      `);
+
+    if (activeCheck.recordset.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'This student already has an active application for this course at this college.',
       });
     }
 
@@ -468,7 +510,6 @@ router.patch('/applications/:id/other-details', async (req, res) => {
       errors.birth_date = `Student must be at least ${MIN_AGE_FOR_FY} years old for FY.`;
     }
   }
-  if (!birth_place)     errors.birth_place     = 'Birth place is required.';
   if (!birth_state)     errors.birth_state     = 'Birth state is required.';
   if (!nationality)     errors.nationality     = 'Nationality is required.';
   if (!marital_status)  errors.marital_status  = 'Marital status is required.';

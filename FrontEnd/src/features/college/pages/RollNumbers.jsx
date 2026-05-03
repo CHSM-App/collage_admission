@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
 import api from '../../../services/api.js'
 import Button from '../../../shared/components/Button.jsx'
+import { usePermissions } from '../hooks/usePermissions.js'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
 
 export default function RollNumbers({ collegeId }) {
+  const { canWrite } = usePermissions()
+  const rw = canWrite('assign_subjects')
   const [courses, setCourses]     = useState([])
   const [loading, setLoading]     = useState(true)
   const [generating, setGenerating] = useState(false)
@@ -118,9 +121,9 @@ export default function RollNumbers({ collegeId }) {
           </div>
         )}
 
-        <Button type="submit" loading={generating}>
+        {rw && <Button type="submit" loading={generating}>
           Generate Roll Numbers
-        </Button>
+        </Button>}
       </form>
     </section>
   )

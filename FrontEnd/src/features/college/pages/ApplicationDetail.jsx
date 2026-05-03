@@ -2,26 +2,32 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../../services/api.js'
 import Button from '../../../shared/components/Button.jsx'
+import { usePermissions } from '../hooks/usePermissions.js'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000/').replace(/\/$/, '')
 
 const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year' }
 
 const STATUS_FLOW = {
-  submitted:             { label: 'Submitted — awaiting review' },
-  under_review:          { label: 'Under Review' },
-  approved:              { label: 'Approved — awaiting student visit' },
-  document_verification: { label: 'Docs being verified' },
-  confirmed:             { label: 'Confirmed — waiting for fee payment' },
-  fees_paid:             { label: 'Fees paid — ready for roll number' },
-  roll_assigned:         { label: 'Roll assigned — subject selection pending' },
-  enrolled:              { label: 'Enrolled' },
-  rejected:              { label: 'Rejected' },
-  cancelled:             { label: 'Cancelled' },
+  submitted:                { label: 'Submitted — awaiting scrutiny' },
+  under_review:             { label: 'Under Review' },
+  scrutiny_accepted:        { label: 'Scrutiny Accepted — awaiting doc verification call' },
+  doc_verification_pending: { label: 'Called for Physical Document Verification' },
+  confirmed:                { label: 'Confirmed — waiting for fee payment' },
+  fees_paid:                { label: 'Fees paid — ready for roll number' },
+  roll_assigned:            { label: 'Roll assigned — subject selection pending' },
+  enrolled:                 { label: 'Enrolled' },
+  rejected:                 { label: 'Rejected' },
+  cancelled:                { label: 'Cancelled' },
 }
 
 export default function ApplicationDetail({ collegeId, appId }) {
   const navigate = useNavigate()
+  const { canWrite } = usePermissions()
+  const canReview   = canWrite('review_application')
+  const canUpload   = canWrite('upload_documents')
+  const canReviewD  = canWrite('review_documents')
+  const canFees     = canWrite('collect_fees')
   const [app, setApp]         = useState(null)
   const [loading, setLoading] = useState(true)
   const [acting, setActing]   = useState(false)
@@ -104,7 +110,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
       <Section title="Personal Details">
         <Row label="Full Name"     value={[d.app_surname, d.app_first_name, d.app_middle_name].filter(Boolean).join(' ')} />
         <Row label="Mother's Name" value={d.app_mother_name} />
-        <Row label="Sex"           value={d.app_sex} />
+        <Row label="Gender"        value={d.app_sex} />
         <Row label="Mobile"        value={d.app_mobile} />
         <Row label="Email"         value={d.app_email} />
         <Row label="Category"      value={d.app_category} />
@@ -224,53 +230,70 @@ export default function ApplicationDetail({ collegeId, appId }) {
         <p className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</p>
       )}
 
-      {/* ── Fee Installment Plan (shown once approved) ── */}
-      {['approved','document_verification','confirmed','fees_paid'].includes(d.status) && (
+      {/* ── Fee Installment Plan (shown once confirmed) ── */}
+      {['confirmed','fees_paid'].includes(d.status) && (
         <FeeInstallmentPanel
           collegeId={collegeId}
           admissionPeriodId={d.admission_period_id}
-          readonly={d.status === 'fees_paid'}
+          readonly={d.status === 'fees_paid' || !canFees}
         />
       )}
 
       {/* ── Actions ── */}
-      {['submitted', 'under_review'].includes(d.status) && (
-        <div className="flex gap-3">
-          <Button loading={acting} onClick={() => doAction('approve')}>
-            Approve
-          </Button>
-          <Button variant="secondary" onClick={() => setShowReject(v => !v)}>
-            Reject
-          </Button>
+
+      {/* Step 1: Scrutiny — accept or reject */}
+      {canReview && ['submitted', 'under_review'].includes(d.status) && (
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600">Review the application form and accept or reject after scrutiny.</p>
+          <div className="flex gap-3">
+            <Button loading={acting} onClick={() => doAction('approve')}>
+              Accept (Scrutiny Passed)
+            </Button>
+            <Button variant="secondary" onClick={() => setShowReject(v => !v)}>
+              Reject
+            </Button>
+          </div>
         </div>
       )}
 
-      {d.status === 'approved' && (
+      {/* Step 2: Call student for physical doc verification */}
+      {canReviewD && d.status === 'scrutiny_accepted' && (
         <div className="space-y-3">
           <p className="text-sm text-slate-600">
-            When the student arrives with physical documents, click below to start verification.
+            Select this student for physical document verification. The student will be notified to visit the college with original documents.
+            You can call the student multiple times if needed.
           </p>
-          <Button loading={acting} onClick={() => doAction('verify-docs', { document_ids_verified: docIds })}>
-            Mark Docs as Verified & Proceed
-          </Button>
-          <button onClick={() => setShowCancel(v => !v)} className="text-sm text-red-600 hover:underline">
-            Cancel application
-          </button>
+          <div className="flex gap-3">
+            <Button loading={acting} onClick={() => doAction('call-for-doc-verification')}>
+              Call for Doc Verification
+            </Button>
+            {canReview && (
+              <Button variant="secondary" onClick={() => setShowCancel(v => !v)}>Cancel</Button>
+            )}
+          </div>
         </div>
       )}
 
-      {d.status === 'document_verification' && (
-        <div className="flex gap-3">
-          <Button loading={acting} onClick={() => doAction('confirm')}>
-            Confirm Admission
-          </Button>
-          <Button variant="secondary" onClick={() => setShowCancel(v => !v)}>
-            Cancel
-          </Button>
+      {/* Step 3: Student visited — confirm after physical doc check */}
+      {canReview && d.status === 'doc_verification_pending' && (
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600">
+            Student has been called for physical document verification. Once all original documents are verified in person, confirm the admission.
+            If the student did not arrive, you can call again.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <Button loading={acting} onClick={() => doAction('confirm', { document_ids_verified: docIds })}>
+              Confirm Admission (Docs Verified)
+            </Button>
+            <Button variant="secondary" loading={acting} onClick={() => doAction('call-for-doc-verification')}>
+              Call Again
+            </Button>
+            <Button variant="secondary" onClick={() => setShowCancel(v => !v)}>Cancel</Button>
+          </div>
         </div>
       )}
 
-      {showReject && (
+      {canReview && showReject && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-3">
           <p className="text-sm font-semibold text-red-800">Rejection reason (shown to student)</p>
           <textarea
@@ -286,7 +309,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
         </div>
       )}
 
-      {showCancel && (
+      {canReview && showCancel && (
         <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 space-y-3">
           <p className="text-sm font-semibold text-orange-800">Cancellation reason</p>
           <textarea
@@ -329,22 +352,24 @@ function Row({ label, value, wide }) {
 
 function StatusBadge({ status }) {
   const colors = {
-    submitted:             'bg-blue-100 text-blue-700',
-    under_review:          'bg-blue-100 text-blue-700',
-    approved:              'bg-teal-100 text-teal-700',
-    document_verification: 'bg-orange-100 text-orange-700',
-    confirmed:             'bg-emerald-100 text-emerald-700',
-    fees_paid:             'bg-emerald-100 text-emerald-700',
-    roll_assigned:         'bg-violet-100 text-violet-700',
-    enrolled:              'bg-green-100 text-green-800',
-    rejected:              'bg-red-100 text-red-700',
-    cancelled:             'bg-slate-100 text-slate-500',
+    submitted:                'bg-blue-100 text-blue-700',
+    under_review:             'bg-blue-100 text-blue-700',
+    scrutiny_accepted:        'bg-teal-100 text-teal-700',
+    doc_verification_pending: 'bg-orange-100 text-orange-700',
+    confirmed:                'bg-emerald-100 text-emerald-700',
+    fees_paid:                'bg-emerald-100 text-emerald-700',
+    roll_assigned:            'bg-violet-100 text-violet-700',
+    enrolled:                 'bg-green-100 text-green-800',
+    rejected:                 'bg-red-100 text-red-700',
+    cancelled:                'bg-slate-100 text-slate-500',
   }
   const labels = {
-    submitted: 'Submitted', under_review: 'Under Review', approved: 'Approved',
-    document_verification: 'Doc Verification', confirmed: 'Confirmed',
-    fees_paid: 'Fees Paid', roll_assigned: 'Roll Assigned',
-    enrolled: 'Enrolled', rejected: 'Rejected', cancelled: 'Cancelled',
+    submitted: 'Submitted', under_review: 'Under Review',
+    scrutiny_accepted: 'Scrutiny Accepted',
+    doc_verification_pending: 'Doc Verification Pending',
+    confirmed: 'Confirmed', fees_paid: 'Fees Paid',
+    roll_assigned: 'Roll Assigned', enrolled: 'Enrolled',
+    rejected: 'Rejected', cancelled: 'Cancelled',
   }
   return (
     <span className={`rounded-full px-3 py-1 text-xs font-semibold ${colors[status] || 'bg-slate-100 text-slate-600'}`}>

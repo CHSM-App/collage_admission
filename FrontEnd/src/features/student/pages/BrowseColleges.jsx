@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../../services/api.js'
+import { useAuthContext } from '../../../context/AuthContext.jsx'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
+const ACTIVE_STATUSES = ['draft','submitted','under_review','scrutiny_accepted','doc_verification_pending','confirmed','fees_paid','roll_assigned','enrolled']
 
 export default function BrowseColleges() {
+  const { user } = useAuthContext()
   const [colleges, setColleges] = useState([])
   const [selected, setSelected] = useState(null)   // selected college id
   const [periods, setPeriods]   = useState([])
   const [loading, setLoading]   = useState(true)
   const [loadingPeriods, setLoadingPeriods] = useState(false)
+  const [myApps, setMyApps]     = useState([])  // student's existing applications
   const [error, setError]       = useState('')
   const navigate = useNavigate()
 
@@ -18,7 +22,12 @@ export default function BrowseColleges() {
       .then(r => setColleges(r.data.data || []))
       .catch(() => setError('Failed to load colleges.'))
       .finally(() => setLoading(false))
-  }, [])
+    if (user?.id) {
+      api.get(`applications?student_id=${user.id}`)
+        .then(r => setMyApps(r.data.data || []))
+        .catch(() => {})
+    }
+  }, [user?.id])
 
   function selectCollege(id) {
     if (selected === id) {
@@ -90,12 +99,26 @@ export default function BrowseColleges() {
                             Last date: {new Date(period.end_date).toLocaleDateString('en-IN')}
                           </p>
                         </div>
-                        <button
-                          onClick={() => handleApply(period, college.id)}
-                          className="ml-4 rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 transition"
-                        >
-                          Apply
-                        </button>
+                        {(() => {
+                          const alreadyApplied = myApps.some(a =>
+                            a.college_id === college.id &&
+                            a.course_id === period.course_id &&
+                            a.year_of_study === period.year_of_study &&
+                            ACTIVE_STATUSES.includes(a.status)
+                          )
+                          return alreadyApplied ? (
+                            <span className="ml-4 rounded-md bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-400 cursor-not-allowed">
+                              Applied
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleApply(period, college.id)}
+                              className="ml-4 rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 transition"
+                            >
+                              Apply
+                            </button>
+                          )
+                        })()}
                       </div>
                     ))}
                   </div>

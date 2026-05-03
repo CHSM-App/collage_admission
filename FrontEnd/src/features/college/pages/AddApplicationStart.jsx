@@ -42,7 +42,7 @@ export default function AddApplicationStart() {
 
   // ── Load all admission periods ──────────────────────────────
   useEffect(() => {
-    api.get(`college-admin/${collegeId}/admission-periods`)
+    api.get(`college-admin/${collegeId}/admission-periods?active=1`)
       .then(r => setPeriods(r.data.data || []))
       .catch(() => setError('Failed to load admission periods.'))
       .finally(() => setPeriodsLoad(false))
@@ -94,6 +94,8 @@ export default function AddApplicationStart() {
     const { full_name, email, password, phone } = regForm
     if (!full_name.trim()) { setRegError('Full name is required.'); return }
     if (!email.trim())     { setRegError('Email is required.'); return }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setRegError('Enter a valid email address.'); return }
+    if (phone.trim() && !/^[6-9]\d{9}$/.test(phone.trim())) { setRegError('Mobile number must be 10 digits starting with 6–9.'); return }
     if (!password)         { setRegError('Password is required.'); return }
     if (password.length < 6) { setRegError('Password must be at least 6 characters.'); return }
 
@@ -247,6 +249,7 @@ export default function AddApplicationStart() {
               value={regForm.phone}
               onChange={v => setRegForm(f => ({ ...f, phone: v }))}
               placeholder="10-digit mobile"
+              maxLength={10}
             />
             <RegField
               label="Password" required type="password"
@@ -278,7 +281,7 @@ export default function AddApplicationStart() {
       {/* ── Admission period ── */}
       <div>
         <label className="block text-sm font-semibold text-slate-700 mb-1">
-          Admission Period <span className="text-red-500">*</span>
+          Admission Course <span className="text-red-500">*</span>
         </label>
         {periodsLoading ? (
           <p className="text-sm text-slate-400">Loading periods…</p>
@@ -316,7 +319,7 @@ export default function AddApplicationStart() {
   )
 }
 
-function RegField({ label, value, onChange, placeholder, type = 'text', required }) {
+function RegField({ label, value, onChange, placeholder, type = 'text', required, maxLength }) {
   return (
     <div>
       <label className="block text-xs font-semibold text-slate-600 mb-1">
@@ -327,6 +330,8 @@ function RegField({ label, value, onChange, placeholder, type = 'text', required
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
+        autoComplete="off"
+        maxLength={maxLength}
         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
       />
     </div>

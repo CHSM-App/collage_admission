@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import FormField from '../../../../shared/components/FormField.jsx'
 import { StepHeader, StepFooter } from './Step1Context.jsx'
 import Button from '../../../../shared/components/Button.jsx'
@@ -12,6 +12,7 @@ const RESULT_OPTIONS = [
 export default function Step4Exam({ data, errors, globalError, saving, onChange, setField, onBack, onNext, extraFooter }) {
   const isFY = data.year_of_study === 1
   const e    = errors
+  const [localError, setLocalError] = useState('')
 
   // Computed percentage
   const pct = computePct(data.total_marks_obtained, data.total_marks_max)
@@ -32,6 +33,11 @@ export default function Step4Exam({ data, errors, globalError, saving, onChange,
   }
 
   function handleNext() {
+    const yr = parseInt(data.year_of_passing)
+    if (data.year_of_passing && (isNaN(yr) || yr > new Date().getFullYear())) {
+      setLocalError('Year of passing cannot be in the future.'); return
+    }
+    setLocalError('')
     onNext({
       board_or_college_name:     data.board_or_college_name,
       school_or_college_address: data.school_or_college_address,
@@ -93,7 +99,7 @@ export default function Step4Exam({ data, errors, globalError, saving, onChange,
 
           <FormField label="Year of Passing" name="year_of_passing" type="number"
             value={data.year_of_passing} onChange={onChange} error={e.year_of_passing}
-            required placeholder={new Date().getFullYear()} />
+            required placeholder={new Date().getFullYear()} max={new Date().getFullYear()} />
 
           {!isFY && (
             <FormField label="Result" name="result" type="select" value={data.result}
@@ -183,8 +189,8 @@ export default function Step4Exam({ data, errors, globalError, saving, onChange,
           )}
         </div>
 
-        {globalError && (
-          <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{globalError}</p>
+        {(localError || globalError) && (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{localError || globalError}</p>
         )}
 
         <StepFooter onBack={onBack} onNext={handleNext} saving={saving} extraFooter={extraFooter} />

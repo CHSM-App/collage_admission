@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react'
 import api from '../../../../services/api.js'
+import { usePermissions } from '../../hooks/usePermissions.js'
 
 const EMPTY = { bank_account_number: '', bank_name: '', branch: '', ifsc_code: '', account_type: 'Savings', is_active: true }
 
 export default function BankMaster({ collegeId }) {
+  const { canWrite } = usePermissions()
+  const rw = canWrite('masters')
   const [rows, setRows]       = useState([])
   const [loading, setLoading] = useState(true)
   const [modal, setModal]     = useState(null)
@@ -47,7 +50,7 @@ export default function BankMaster({ collegeId }) {
     <div>
       <div className="flex items-center justify-between mb-4 gap-2">
         <h2 className="text-lg font-semibold text-slate-800">Bank Master</h2>
-        <button onClick={openNew} className="shrink-0 px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700">+ New</button>
+        {rw && <button onClick={openNew} className="shrink-0 px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700">+ New</button>}
       </div>
 
       {loading ? <p className="text-sm text-slate-400">Loading…</p> : (
@@ -81,8 +84,8 @@ export default function BankMaster({ collegeId }) {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right space-x-2">
-                      <button onClick={() => openEdit(r)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>
-                      {r.is_active && <button onClick={() => softDelete(r)} className="text-xs text-red-400 hover:text-red-600 underline">Deactivate</button>}
+                      {rw && <button onClick={() => openEdit(r)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>}
+                      {rw && r.is_active && <button onClick={() => softDelete(r)} className="text-xs text-red-400 hover:text-red-600 underline">Deactivate</button>}
                     </td>
                   </tr>
                 ))}

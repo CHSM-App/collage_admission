@@ -16,6 +16,9 @@ export default function FormField({
   options,       // for type='select': [{ value, label }]
   rows,          // for type='textarea'
   readOnly,
+  min,
+  max,
+  maxLength,
   className = '',
   inputClassName = '',
   children,      // slot for custom content instead of standard input
@@ -74,6 +77,9 @@ export default function FormField({
           readOnly={readOnly}
           required={required}
           placeholder={placeholder}
+          min={min}
+          max={max}
+          maxLength={maxLength}
           className={`${base} ${readOnly ? 'cursor-default bg-slate-50' : ''} ${inputClassName}`}
         />
       )}

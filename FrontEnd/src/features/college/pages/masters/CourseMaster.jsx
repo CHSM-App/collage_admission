@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import api from '../../../../services/api.js'
+import { usePermissions } from '../../hooks/usePermissions.js'
 
 const SUBJECT_TYPES = ['Core','Elective','Practical','Project','Foundation','AbilityEnhancement']
 const SEMESTERS     = [1,2,3,4,5,6]
@@ -12,7 +13,20 @@ const EMPTY_ROW = () => ({
   id: null, is_new: true,
 })
 
+function autoCalcTotal(row, field, val) {
+  const updated = { ...row, [field]: val }
+  const maxInt = parseFloat(updated.max_internal) || 0
+  const maxSE  = parseFloat(updated.max_sem_end)  || 0
+  const minInt = parseFloat(updated.min_internal) || 0
+  const minSE  = parseFloat(updated.min_sem_end)  || 0
+  if (maxInt || maxSE) updated.max_total = String(maxInt + maxSE)
+  if (minInt || minSE) updated.min_total = String(minInt + minSE)
+  return updated
+}
+
 export default function CourseMaster({ collegeId }) {
+  const { canWrite } = usePermissions()
+  const rw = canWrite('masters')
   const [faculty, setFaculty]     = useState([])
   const [selFaculty, setSelFaculty] = useState('')
   const [selSem, setSelSem]       = useState(1)
@@ -21,6 +35,7 @@ export default function CourseMaster({ collegeId }) {
   const [saving, setSaving]       = useState(false)
   const [error, setError]         = useState('')
   const [success, setSuccess]     = useState('')
+  const [dirty, setDirty]         = useState(false)
 
   useEffect(() => {
     api.get(`masters/${collegeId}/faculty`)
@@ -33,27 +48,42 @@ export default function CourseMaster({ collegeId }) {
 
   const loadRows = useCallback(() => {
     if (!selFaculty) return
-    setLoading(true); setError('')
+    setLoading(true); setError(''); setSuccess('')
     api.get(`masters/${collegeId}/course?faculty_id=${selFaculty}&semester=${selSem}`)
-      .then(r => setRows((r.data.data || []).map(row => ({ ...row, _key: row.id, is_new: false }))))
+      .then(r => { setRows((r.data.data || []).filter(row => row.is_active !== false).map(row => ({ ...row, _key: row.id, is_new: false }))); setDirty(false) })
       .catch(() => setError('Failed to load subjects.'))
       .finally(() => setLoading(false))
   }, [collegeId, selFaculty, selSem])
 
   useEffect(() => { loadRows() }, [loadRows])
 
-  function addRow() { setRows(r => [...r, EMPTY_ROW()]) }
-
-  function updateRow(key, field, val) {
-    setRows(rs => rs.map(r => r._key === key ? { ...r, [field]: val } : r))
+  function switchSem(s) {
+    if (dirty && !confirm('You have unsaved changes. Switch semester and discard them?')) return
+    setSelSem(s)
   }
 
-  function removeRow(key) { setRows(rs => rs.filter(r => r._key !== key)) }
+  function switchFaculty(v) {
+    if (dirty && !confirm('You have unsaved changes. Switch course and discard them?')) return
+    setSelFaculty(v)
+  }
+
+  function addRow() { setRows(r => [...r, EMPTY_ROW()]); setDirty(true) }
+
+  function updateRow(key, field, val) {
+    setRows(rs => rs.map(r => {
+      if (r._key !== key) return r
+      const isMarkField = ['max_internal','min_internal','max_sem_end','min_sem_end'].includes(field)
+      return isMarkField ? autoCalcTotal(r, field, val) : { ...r, [field]: val }
+    }))
+    setDirty(true)
+  }
+
+  function removeRow(key) { setRows(rs => rs.filter(r => r._key !== key)); setDirty(true) }
 
   async function saveAll() {
     setError(''); setSuccess('')
-    for (const r of rows) {
-      if (!r.course_code.trim() || !r.course_title.trim()) continue
+    const valid = rows.filter(r => r.course_code.trim() && r.course_title.trim())
+    for (const r of valid) {
       if (r.max_internal && r.min_internal && parseInt(r.min_internal) > parseInt(r.max_internal))
         return setError(`Row "${r.course_title}": min_internal > max_internal.`)
       if (r.max_sem_end && r.min_sem_end && parseInt(r.min_sem_end) > parseInt(r.max_sem_end))
@@ -61,12 +91,34 @@ export default function CourseMaster({ collegeId }) {
     }
     setSaving(true)
     try {
-      await api.post(`masters/${collegeId}/course/bulk-save`, {
-        faculty_master_id: selFaculty,
-        semester: selSem,
-        rows: rows.filter(r => r.course_code.trim() && r.course_title.trim()),
-      })
+      // Existing rows: update individually by id (avoids creating duplicates when course_code is edited)
+      const existingRows = valid.filter(r => !r.is_new && r.id)
+      const newRows      = valid.filter(r => r.is_new || !r.id)
+
+      for (const r of existingRows) {
+        await api.put(`masters/${collegeId}/course/${r.id}`, {
+          faculty_master_id: selFaculty, semester: selSem,
+          course_code: r.course_code, course_title: r.course_title,
+          credits: r.credits, subject_type: r.subject_type,
+          max_internal: r.max_internal, min_internal: r.min_internal,
+          max_sem_end: r.max_sem_end, min_sem_end: r.min_sem_end,
+          max_total: r.max_total, min_total: r.min_total,
+          display_order: r.display_order, is_active: 1,
+        })
+      }
+
+      // New rows: use bulk-save (MERGE insert)
+      if (newRows.length > 0) {
+        await api.post(`masters/${collegeId}/course/bulk-save`, {
+          faculty_master_id: selFaculty,
+          semester: selSem,
+          rows: newRows,
+        })
+      }
+
       setSuccess('Saved successfully.')
+      setDirty(false)
+      setTimeout(() => setSuccess(''), 3000)
       loadRows()
     } catch (e) { setError(e?.response?.data?.message || 'Save failed.') }
     finally { setSaving(false) }
@@ -74,10 +126,10 @@ export default function CourseMaster({ collegeId }) {
 
   async function deleteRow(row) {
     if (row.is_new) { removeRow(row._key); return }
-    if (!confirm(`Delete "${row.course_title}"?`)) return
+    if (!confirm(`Delete "${row.course_title}"? This cannot be undone.`)) return
     try {
       await api.delete(`masters/${collegeId}/course/${row.id}`)
-      loadRows()
+      setRows(rs => rs.filter(r => r._key !== row._key))
     } catch { alert('Delete failed.') }
   }
 
@@ -88,10 +140,10 @@ export default function CourseMaster({ collegeId }) {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3">
         <h2 className="text-lg font-semibold text-slate-800">Course Master <span className="text-sm font-normal text-slate-400">(Subjects per Semester)</span></h2>
         <div className="flex gap-2">
-          <button onClick={addRow} className="px-3 py-1.5 border border-slate-300 text-slate-700 text-sm rounded-lg hover:bg-slate-50">+ Add Row</button>
-          <button onClick={saveAll} disabled={saving} className="px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700 disabled:opacity-50">
+          {rw && <button onClick={addRow} className="px-3 py-1.5 border border-slate-300 text-slate-700 text-sm rounded-lg hover:bg-slate-50">+ Add Row</button>}
+          {rw && <button onClick={saveAll} disabled={saving} className="px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700 disabled:opacity-50">
             {saving ? 'Saving…' : 'Save All'}
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -99,7 +151,7 @@ export default function CourseMaster({ collegeId }) {
       <div className="flex flex-col sm:flex-row flex-wrap gap-3 mb-4">
         <div className="flex flex-col gap-1">
           <label className="text-xs font-semibold text-slate-500">Degree Course</label>
-          <select value={selFaculty} onChange={e => setSelFaculty(e.target.value)}
+          <select value={selFaculty} onChange={e => switchFaculty(e.target.value)}
             className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300 w-full sm:min-w-[200px]">
             {faculty.map(f => <option key={f.code_no} value={f.code_no}>{f.degree_course_code} — {f.degree_course_name}</option>)}
           </select>
@@ -108,7 +160,7 @@ export default function CourseMaster({ collegeId }) {
           <label className="text-xs font-semibold text-slate-500">Semester</label>
           <div className="flex gap-1 flex-wrap">
             {SEMESTERS.map(s => (
-              <button key={s} onClick={() => setSelSem(s)}
+              <button key={s} onClick={() => switchSem(s)}
                 className={`w-9 h-9 rounded-lg text-sm font-medium border transition ${selSem === s ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
                 {s}
               </button>
@@ -130,8 +182,8 @@ export default function CourseMaster({ collegeId }) {
             <table className="w-full text-xs">
               <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                 <tr>
-                  <th className="px-3 py-2 text-left w-28">Course Code</th>
-                  <th className="px-3 py-2 text-left">Course Title</th>
+                  <th className="px-3 py-2 text-left w-28">Subject Code</th>
+                  <th className="px-3 py-2 text-left">Subject Title</th>
                   <th className="px-3 py-2 text-center w-16">Credits</th>
                   <th className="px-3 py-2 text-center w-20">Type</th>
                   <th className="px-3 py-2 text-center w-20">Max Int.</th>

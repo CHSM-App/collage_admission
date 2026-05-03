@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
 import api from '../../../services/api.js'
 import Button from '../../../shared/components/Button.jsx'
+import { usePermissions } from '../hooks/usePermissions.js'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
 
 export default function AdmissionPeriods({ collegeId }) {
+  const { canWrite } = usePermissions()
+  const rw = canWrite('masters')
   const [periods, setPeriods]   = useState([])
   const [courses, setCourses]   = useState([])
   const [loading, setLoading]   = useState(true)
@@ -13,7 +16,7 @@ export default function AdmissionPeriods({ collegeId }) {
   const [error, setError]       = useState('')
   const [form, setForm]         = useState({
     course_id: '', year_of_study: '1', academic_year: '2026-27',
-    start_date: '', end_date: '', total_seats: '', application_fee: '',
+    start_date: '', end_date: '', total_seats: '',
   })
 
   // Which period's installment editor is open
@@ -36,12 +39,16 @@ export default function AdmissionPeriods({ collegeId }) {
 
   async function handleCreate(e) {
     e.preventDefault()
-    setSaving(true)
     setError('')
+    if (form.start_date && form.end_date && form.end_date < form.start_date) {
+      setError('End date must be on or after the start date.')
+      return
+    }
+    setSaving(true)
     try {
       await api.post(`college-admin/${collegeId}/admission-periods`, form)
       setShowForm(false)
-      setForm({ course_id: '', year_of_study: '1', academic_year: '2026-27', start_date: '', end_date: '', total_seats: '', application_fee: '' })
+      setForm({ course_id: '', year_of_study: '1', academic_year: '2026-27', start_date: '', end_date: '', total_seats: '' })
       fetchData()
     } catch (err) {
       setError(err?.response?.data?.message || 'Failed to create period.')
@@ -59,6 +66,16 @@ export default function AdmissionPeriods({ collegeId }) {
     }
   }
 
+  async function deletePeriod(period) {
+    if (!confirm(`Delete "${period.course_name} — ${YEAR_LABEL[period.year_of_study]} · ${period.academic_year}"?\nThis cannot be undone.`)) return
+    try {
+      await api.delete(`college-admin/${collegeId}/admission-periods/${period.id}`)
+      fetchData()
+    } catch (err) {
+      alert(err?.response?.data?.message || 'Delete failed.')
+    }
+  }
+
   return (
     <section className="space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -67,9 +84,9 @@ export default function AdmissionPeriods({ collegeId }) {
           <h1 className="mt-2 text-3xl font-bold text-slate-950">Admission Periods</h1>
           <p className="mt-1 text-slate-600">Control when students can apply and set up fee installment plans.</p>
         </div>
-        <Button onClick={() => setShowForm(v => !v)}>
+        {rw && <Button onClick={() => setShowForm(v => !v)}>
           {showForm ? 'Cancel' : '+ New Period'}
-        </Button>
+        </Button>}
       </div>
 
       {showForm && (
@@ -113,11 +130,6 @@ export default function AdmissionPeriods({ collegeId }) {
               <input required type="date" value={form.end_date} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))}
                 className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" />
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Application Fee (₹)</label>
-              <input required type="number" min="0" value={form.application_fee} onChange={e => setForm(f => ({ ...f, application_fee: e.target.value }))}
-                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" />
-            </div>
           </div>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <Button type="submit" loading={saving}>Create Period</Button>
@@ -149,9 +161,12 @@ export default function AdmissionPeriods({ collegeId }) {
                 <span className={`rounded-full px-3 py-1 text-xs font-semibold ${p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
                   {p.is_active ? 'Active' : 'Closed'}
                 </span>
-                <button onClick={() => toggleActive(p)} className="text-xs font-semibold text-blue-600 hover:underline">
+                {rw && <button onClick={() => toggleActive(p)} className="text-xs font-semibold text-blue-600 hover:underline">
                   {p.is_active ? 'Close' : 'Reopen'}
-                </button>
+                </button>}
+                {rw && <button onClick={() => deletePeriod(p)} className="text-xs font-semibold text-red-500 hover:underline">
+                  Delete
+                </button>}
                 <button
                   onClick={() => setEditingInstallments(editingInstallments === p.id ? null : p.id)}
                   className="text-xs font-semibold text-indigo-600 hover:underline"
@@ -176,6 +191,8 @@ export default function AdmissionPeriods({ collegeId }) {
 
 // ── Installment plan editor ───────────────────────────────────
 function InstallmentEditor({ collegeId, period, onClose }) {
+  const { canWrite } = usePermissions()
+  const rw = canWrite('masters')
   const [rows, setRows]       = useState([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
@@ -308,10 +325,10 @@ function InstallmentEditor({ collegeId, period, onClose }) {
       {error   && <p className="text-sm text-red-600">{error}</p>}
       {success && <p className="text-sm text-emerald-600">{success}</p>}
 
-      <div className="flex gap-3">
+      {rw && <div className="flex gap-3">
         <Button onClick={handleSave} loading={saving}>Save Plan</Button>
         <Button variant="secondary" onClick={handleClear} disabled={saving}>Clear Plan</Button>
-      </div>
+      </div>}
     </div>
   )
 }

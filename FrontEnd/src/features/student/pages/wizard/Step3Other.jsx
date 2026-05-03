@@ -41,7 +41,7 @@ export default function Step3Other({ data, errors, globalError, saving, onChange
             <FormField label="Age" value={calcAge(data.birth_date)} readOnly
               hint="Auto-calculated from date of birth" />
             <FormField label="Birth Place" name="birth_place" value={data.birth_place}
-              onChange={onChange} error={e.birth_place} required placeholder="Vengurla" />
+              onChange={onChange} error={e.birth_place} placeholder="Vengurla" />
             <FormField label="Birth Taluka" name="birth_taluka" value={data.birth_taluka}
               onChange={onChange} placeholder="Vengurla" />
             <FormField label="Birth District" name="birth_district" value={data.birth_district}
@@ -89,7 +89,7 @@ export default function Step3Other({ data, errors, globalError, saving, onChange
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <FormField label="Aadhaar Number" name="aadhaar" value={data.aadhaar}
               onChange={onChange} error={e.aadhaar} required placeholder="123456789012"
-              hint="12 digits, no spaces" />
+              hint="12 digits, no spaces" maxLength={12} />
             <FormField label="ABC ID (Academic Bank of Credits)" name="abc_id" value={data.abc_id}
               onChange={onChange} error={e.abc_id} required placeholder="Your UGC ABC ID" />
             <FormField

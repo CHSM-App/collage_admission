@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import api from '../../../../services/api.js'
+import { usePermissions } from '../../hooks/usePermissions.js'
 
 const FEES_TYPES = ['Student','Misc','ExamFees']
 const YEAR_LEVELS = ['FY','SY','TY']
@@ -14,6 +15,8 @@ const EMPTY_FEE = {
 }
 
 export default function FeesMaster({ collegeId }) {
+  const { canWrite } = usePermissions()
+  const rw = canWrite('masters')
   const [rows, setRows]           = useState([])
   const [banks, setBanks]         = useState([])
   const [loading, setLoading]     = useState(true)
@@ -131,7 +134,7 @@ export default function FeesMaster({ collegeId }) {
           <button onClick={openCw} className="px-3 py-1.5 border border-slate-300 text-slate-700 text-sm rounded-lg hover:bg-slate-50">
             Classwise Fees
           </button>
-          <button onClick={openNew} className="px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700">+ New Fee Head</button>
+          {rw && <button onClick={openNew} className="px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700">+ New Fee Head</button>}
         </div>
       </div>
 
@@ -183,8 +186,8 @@ export default function FeesMaster({ collegeId }) {
                       </span>
                     </td>
                     <td className="px-3 py-2 text-right space-x-1">
-                      <button onClick={() => openEdit(r)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>
-                      {r.is_active && <button onClick={() => softDelete(r)} className="text-xs text-red-400 hover:text-red-600 underline">Off</button>}
+                      {rw && <button onClick={() => openEdit(r)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>}
+                      {rw && r.is_active && <button onClick={() => softDelete(r)} className="text-xs text-red-400 hover:text-red-600 underline">Off</button>}
                     </td>
                   </tr>
                 ))}
@@ -218,8 +221,8 @@ export default function FeesMaster({ collegeId }) {
                   </span>
                 </div>
                 <div className="flex gap-3 mt-3">
-                  <button onClick={() => openEdit(r)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>
-                  {r.is_active && <button onClick={() => softDelete(r)} className="text-xs text-red-400 hover:text-red-600 underline">Deactivate</button>}
+                  {rw && <button onClick={() => openEdit(r)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>}
+                  {rw && r.is_active && <button onClick={() => softDelete(r)} className="text-xs text-red-400 hover:text-red-600 underline">Deactivate</button>}
                 </div>
               </div>
             ))}

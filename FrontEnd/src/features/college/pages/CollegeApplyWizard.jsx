@@ -188,6 +188,9 @@ export default function CollegeApplyWizard() {
     setField(e.target.name, e.target.value)
   }, [setField])
 
+  // Scroll to top on every step change
+  useEffect(() => { window.scrollTo({ top: 0, behavior: 'smooth' }) }, [state.currentStep])
+
   function goStep(n) {
     dispatch({ type: 'SET_STEP', step: n })
   }
@@ -351,7 +354,7 @@ export default function CollegeApplyWizard() {
             />
           )}
 
-          {/* Step 4 — Documents (optional) */}
+          {/* Step 4 — Documents */}
           {currentStep === 4 && (
             <Step5Documents
               {...stepProps}
@@ -360,7 +363,6 @@ export default function CollegeApplyWizard() {
               onBack={() => goStep(3)}
               onNext={() => skip(5)}
               onDocumentsChange={(linked) => dispatch({ type: 'SET_DATA', patch: { linked_documents: linked } })}
-              extraFooter={<SkipButton onClick={() => skip(5)} saving={saving} />}
             />
           )}
 
@@ -395,16 +397,23 @@ function SkipButton({ onClick, saving }) {
   )
 }
 
-// ── Review step (college-specific — no declaration checkbox, direct submit) ──
+// ── Review step (college-specific — shows fee info, checks required docs) ──
 function CollegeReviewStep({ data, saving, submitError, onBack, onEditStep, onSubmit }) {
   const d = data
+
+  const linkedMap = Object.fromEntries((d.linked_documents || []).map(doc => [doc.document_type_id, doc]))
+  const missingMandatory = (d.required_documents || [])
+    .filter(rd => rd.is_mandatory && !linkedMap[rd.document_type_id])
+    .map(rd => rd.document_name)
+
+  const canSubmit = missingMandatory.length === 0
 
   return (
     <div>
       <div className="border-b border-slate-100 px-5 py-5">
         <h2 className="text-base font-bold text-slate-950">Review & Submit</h2>
         <p className="mt-1 text-sm text-slate-500">
-          Check all details before submitting. Steps marked — were skipped and can be filled later.
+          Check all details before submitting.
         </p>
       </div>
 
@@ -416,8 +425,8 @@ function CollegeReviewStep({ data, saving, submitError, onBack, onEditStep, onSu
           onEdit={() => onEditStep(1)}
           rows={[
             ['Name', [d.surname, d.first_name, d.middle_name].filter(Boolean).join(' ')],
-            ['Mother', d.mother_name],
-            ['Sex', d.sex],
+            ["Mother's First Name", d.mother_name],
+            ['Gender', d.sex],
             ['Mobile', d.mobile],
             ['Email', d.email],
             ['Category', d.app_category || d.category],
@@ -452,16 +461,70 @@ function CollegeReviewStep({ data, saving, submitError, onBack, onEditStep, onSu
         />
 
         {/* Documents */}
-        <ReviewSection
-          title="Documents"
-          optional
-          onEdit={() => onEditStep(4)}
-          rows={
-            d.linked_documents?.length
-              ? d.linked_documents.map(doc => [doc.document_name || doc.document_type_id, doc.file_name])
-              : [['', 'No documents uploaded']]
-          }
-        />
+        <div className="rounded-lg border border-slate-200 overflow-hidden">
+          <div className="flex items-center justify-between bg-slate-50 px-4 py-2.5 border-b border-slate-100">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-600">Documents</p>
+            <button onClick={() => onEditStep(4)} className="text-xs text-blue-600 hover:underline">Edit</button>
+          </div>
+          <div className="px-4 py-3 space-y-1.5">
+            {(d.required_documents || []).length === 0 && (
+              <p className="text-sm text-slate-400 italic">No documents required.</p>
+            )}
+            {(d.required_documents || []).map(rd => {
+              const uploaded = linkedMap[rd.document_type_id]
+              return (
+                <div key={rd.document_type_id} className="flex items-center gap-2 text-sm">
+                  {uploaded
+                    ? <span className="text-emerald-600 font-bold shrink-0">✓</span>
+                    : <span className={`shrink-0 font-bold ${rd.is_mandatory ? 'text-red-500' : 'text-slate-300'}`}>
+                        {rd.is_mandatory ? '!' : '○'}
+                      </span>
+                  }
+                  <span className={uploaded ? 'text-slate-700' : rd.is_mandatory ? 'text-red-700 font-medium' : 'text-slate-400'}>
+                    {rd.document_name}
+                    {rd.is_mandatory && !uploaded && <span className="ml-1 text-xs">(required)</span>}
+                  </span>
+                  {uploaded && <span className="text-xs text-slate-400 truncate">— {uploaded.file_name}</span>}
+                </div>
+              )
+            })}
+            {(d.linked_documents || [])
+              .filter(doc => !(d.required_documents || []).find(rd => rd.document_type_id === doc.document_type_id))
+              .map(doc => (
+                <div key={doc.document_type_id} className="flex items-center gap-2 text-sm">
+                  <span className="text-emerald-600 font-bold shrink-0">✓</span>
+                  <span className="text-slate-700">{doc.document_name || doc.document_type_id}</span>
+                  <span className="text-xs text-slate-400 truncate">— {doc.file_name}</span>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+
+        {/* Missing mandatory docs warning */}
+        {missingMandatory.length > 0 && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <p className="font-semibold mb-1">Required documents missing:</p>
+            <ul className="list-disc list-inside space-y-0.5">
+              {missingMandatory.map(name => <li key={name}>{name}</li>)}
+            </ul>
+            <button onClick={() => onEditStep(4)} className="mt-2 text-xs font-semibold text-red-700 underline underline-offset-2">
+              Go to Documents step →
+            </button>
+          </div>
+        )}
+
+        {/* Application fee info */}
+        {d.application_fee > 0 && (
+          <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
+            <p className="text-sm font-semibold text-blue-900">
+              Application Fee: ₹{Number(d.application_fee).toLocaleString('en-IN')}
+            </p>
+            <p className="text-xs text-blue-600 mt-0.5">
+              This fee will be recorded as collected on behalf of the student.
+            </p>
+          </div>
+        )}
 
         {submitError && (
           <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
@@ -471,10 +534,20 @@ function CollegeReviewStep({ data, saving, submitError, onBack, onEditStep, onSu
 
         <div className="flex flex-col-reverse sm:flex-row gap-3 pt-2">
           <Button variant="secondary" onClick={onBack} disabled={saving}>← Back</Button>
-          <Button onClick={onSubmit} loading={saving} className="sm:ml-auto">
+          <Button
+            onClick={onSubmit}
+            loading={saving}
+            disabled={!canSubmit || saving}
+            className={`sm:ml-auto ${!canSubmit ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
             Submit Application →
           </Button>
         </div>
+        {!canSubmit && (
+          <p className="text-xs text-center text-red-500">
+            Upload all required documents before submitting.
+          </p>
+        )}
       </div>
     </div>
   )

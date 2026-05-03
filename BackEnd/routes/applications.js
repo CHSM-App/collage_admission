@@ -171,6 +171,29 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ success: false, message: 'No seats available.' });
     }
 
+    // Check for existing draft to avoid duplicate key error
+    const existing = await db.request()
+      .input('sid',  parseInt(student_id))
+      .input('col',  parseInt(college_id))
+      .input('crs',  parseInt(course_id))
+      .input('yr',   parseInt(year_of_study))
+      .input('ay',   academic_year)
+      .input('apid', parseInt(admission_period_id))
+      .query(`
+        SELECT id FROM applications
+        WHERE student_id=@sid AND college_id=@col AND course_id=@crs
+          AND year_of_study=@yr AND academic_year=@ay AND admission_period_id=@apid
+          AND status='draft'
+      `);
+
+    if (existing.recordset.length > 0) {
+      return res.status(200).json({
+        success: true,
+        message: 'Resumed existing draft application.',
+        data: { id: existing.recordset[0].id },
+      });
+    }
+
     const result = await db.request()
       .input('sid',  parseInt(student_id))
       .input('col',  parseInt(college_id))

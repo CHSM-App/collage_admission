@@ -41,6 +41,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
   const [determined, setDetermined]         = useState({ category: '', reason: '' })
   const [overrideMode, setOverrideMode]     = useState(!!data.fees_category_override)
   const [overrideRemark, setOverrideRemark] = useState(data.fees_category_override_remark || '')
+  const [localError, setLocalError]         = useState('')
 
   // Masters data
   const [divisions, setDivisions]       = useState([])    // from division_master
@@ -138,6 +139,11 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
   }
 
   function handleNext() {
+    // Validate mobile
+    if (data.mobile && !/^[6-9]\d{9}$/.test(data.mobile.trim())) {
+      setLocalError('Mobile number must be 10 digits starting with 6–9.'); return
+    }
+    setLocalError('')
     onNext({
       surname: data.surname, first_name: data.first_name,
       middle_name: data.middle_name, mother_name: data.mother_name,
@@ -153,6 +159,13 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
     })
   }
 
+  // Auto-capitalize first letter for name fields
+  function onNameChange(e) {
+    const val = e.target.value
+    const capitalized = val.length > 0 ? val.charAt(0).toUpperCase() + val.slice(1) : val
+    onChange({ target: { name: e.target.name, value: capitalized } })
+  }
+
   const e = errors
   const selectedDivision = divisions.find(d => d.division_letter === data.division)
 
@@ -166,21 +179,19 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
         {/* Name */}
         <div>
           <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-400">Full Name</p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <FormField label="Surname"                name="surname"     value={data.surname}     onChange={onChange} error={e.surname}     required placeholder="Shetty" />
-            <FormField label="First Name"             name="first_name"  value={data.first_name}  onChange={onChange} error={e.first_name}  required placeholder="Aarav" />
-            <FormField label="Middle / Father's Name" name="middle_name" value={data.middle_name} onChange={onChange} error={e.middle_name} required placeholder="Ramesh" />
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <FormField label="Surname"                name="surname"     value={data.surname}     onChange={onNameChange} error={e.surname}     required placeholder="Shetty" />
+            <FormField label="First Name"             name="first_name"  value={data.first_name}  onChange={onNameChange} error={e.first_name}  required placeholder="Aarav" />
+            <FormField label="Middle / Father's Name" name="middle_name" value={data.middle_name} onChange={onNameChange} error={e.middle_name} required placeholder="Ramesh" />
+            <FormField label="Mother's First Name"    name="mother_name" value={data.mother_name} onChange={onNameChange} error={e.mother_name} required placeholder="Sunita" />
           </div>
         </div>
 
-        <FormField label="Mother's Name / Maiden Name" name="mother_name" value={data.mother_name}
-          onChange={onChange} error={e.mother_name} required placeholder="Sunita Shetty" />
-
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <FormField label="Sex" name="sex" type="select" value={data.sex} onChange={onChange}
-            error={e.sex} required options={SEX_OPTIONS} placeholder="Select sex…" />
+          <FormField label="Gender" name="sex" type="select" value={data.sex} onChange={onChange}
+            error={e.sex} required options={SEX_OPTIONS} placeholder="Select gender…" />
           <FormField label="Mobile Number" name="mobile" type="tel" value={data.mobile} onChange={onChange}
-            error={e.mobile} required placeholder="9876543210" hint="10 digits, starting with 6-9" />
+            error={e.mobile} required placeholder="9876543210" hint="10 digits, starting with 6-9" maxLength={10} />
         </div>
 
         <FormField label="Email Address" name="email" type="email" value={data.email}
@@ -344,8 +355,8 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
         {/* Fee Breakdown */}
         <FeeBreakdown result={feeResult} loading={feeLoading} />
 
-        {globalError && (
-          <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{globalError}</p>
+        {(localError || globalError) && (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{localError || globalError}</p>
         )}
 
         <StepFooter onBack={onBack} onNext={handleNext} saving={saving} />

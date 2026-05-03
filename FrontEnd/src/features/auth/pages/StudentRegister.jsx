@@ -26,6 +26,10 @@ export default function StudentRegister() {
 
   async function handleSubmit(e) {
     e.preventDefault()
+    if (form.phone && !/^[6-9]\d{9}$/.test(form.phone.trim())) {
+      setError('Phone number must be 10 digits starting with 6–9.')
+      return
+    }
     if (form.password !== form.confirm_password) {
       setError('Passwords do not match.')
       return
@@ -81,7 +85,7 @@ export default function StudentRegister() {
         <div className="grid grid-cols-2 gap-3">
           <Input
             id="phone" label="Phone" name="phone" type="tel"
-            placeholder="9876543210"
+            placeholder="9876543210" maxLength={10}
             value={form.phone} onChange={handleChange}
             disabled={loading}
           />

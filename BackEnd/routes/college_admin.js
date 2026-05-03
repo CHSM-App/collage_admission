@@ -9,10 +9,10 @@
  * Application review:
  *   GET  /college-admin/:collegeId/applications              — inbox (filter by status/course/year)
  *   GET  /college-admin/:collegeId/applications/:appId       — full detail
- *   POST /college-admin/:collegeId/applications/:appId/approve
- *   POST /college-admin/:collegeId/applications/:appId/reject
- *   POST /college-admin/:collegeId/applications/:appId/verify-docs
- *   POST /college-admin/:collegeId/applications/:appId/confirm
+ *   POST /college-admin/:collegeId/applications/:appId/approve              (scrutiny accept → scrutiny_accepted)
+ *   POST /college-admin/:collegeId/applications/:appId/reject               (reject at scrutiny)
+ *   POST /college-admin/:collegeId/applications/:appId/call-for-doc-verification (→ doc_verification_pending)
+ *   POST /college-admin/:collegeId/applications/:appId/confirm              (physical docs ok → confirmed)
  *   POST /college-admin/:collegeId/applications/:appId/cancel
  *
  * Roll numbers:
@@ -26,6 +26,7 @@ const db      = require('./db');
 // ── Admission Periods ───────────────────────────────────────
 
 router.get('/:collegeId/admission-periods', async (req, res) => {
+  const activeOnly = req.query.active === '1';
   try {
     const result = await db.request()
       .input('col', parseInt(req.params.collegeId))
@@ -38,6 +39,7 @@ router.get('/:collegeId/admission-periods', async (req, res) => {
         FROM admission_periods ap
         JOIN faculty_master fm ON fm.code_no = ap.course_id AND fm.college_id = ap.college_id
         WHERE ap.college_id = @col
+          ${activeOnly ? 'AND ap.is_active = 1' : ''}
         ORDER BY ap.academic_year DESC, fm.degree_course_name, ap.year_of_study
       `);
     return res.json({ success: true, data: result.recordset });
@@ -102,6 +104,36 @@ router.put('/:collegeId/admission-periods/:periodId', async (req, res) => {
       `);
 
     return res.json({ success: true, message: 'Admission period updated.' });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+router.delete('/:collegeId/admission-periods/:periodId', async (req, res) => {
+  const periodId  = parseInt(req.params.periodId);
+  const collegeId = parseInt(req.params.collegeId);
+  try {
+    // Block delete if any applications exist for this period
+    const check = await db.request()
+      .input('pid', periodId)
+      .query(`SELECT COUNT(*) AS cnt FROM applications WHERE period_id = @pid`);
+    const cnt = check.recordset[0]?.cnt || 0;
+    if (cnt > 0) {
+      return res.status(400).json({ success: false, message: `Cannot delete — ${cnt} application(s) exist for this period.` });
+    }
+    // Remove installment plans first
+    await db.request()
+      .input('pid', periodId)
+      .query(`DELETE FROM fee_installment_plans WHERE admission_period_id = @pid`);
+    const del = await db.request()
+      .input('pid', periodId)
+      .input('cid', collegeId)
+      .query(`DELETE FROM admission_periods WHERE id = @pid AND college_id = @cid`);
+    if (!del.rowsAffected[0]) {
+      return res.status(404).json({ success: false, message: 'Period not found.' });
+    }
+    return res.json({ success: true, message: 'Admission period deleted.' });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });
@@ -309,7 +341,7 @@ router.get('/:collegeId/applications/:appId', async (req, res) => {
   }
 });
 
-// ── Approve ─────────────────────────────────────────────────
+// ── Scrutiny Accept (submitted → scrutiny_accepted) ─────────
 router.post('/:collegeId/applications/:appId/approve', async (req, res) => {
   try {
     const appRes = await db.request()
@@ -320,8 +352,8 @@ router.post('/:collegeId/applications/:appId/approve', async (req, res) => {
     if (appRes.recordset.length === 0) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
-    if (appRes.recordset[0].status !== 'submitted') {
-      return res.status(400).json({ success: false, message: 'Application must be in submitted status to approve.' });
+    if (!['submitted', 'under_review'].includes(appRes.recordset[0].status)) {
+      return res.status(400).json({ success: false, message: 'Application must be submitted/under_review to accept.' });
     }
 
     // Hold a seat
@@ -333,11 +365,11 @@ router.post('/:collegeId/applications/:appId/approve', async (req, res) => {
       .input('id', parseInt(req.params.appId))
       .query(`
         UPDATE applications
-        SET status = 'approved', approved_at = GETDATE(), updated_at = GETDATE()
+        SET status = 'scrutiny_accepted', approved_at = GETDATE(), updated_at = GETDATE()
         WHERE id = @id
       `);
 
-    return res.json({ success: true, message: 'Application approved. Student notified.' });
+    return res.json({ success: true, message: 'Scrutiny accepted. Application accepted.' });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });
@@ -357,7 +389,7 @@ router.post('/:collegeId/applications/:appId/reject', async (req, res) => {
     if (appRes.recordset.length === 0) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
-    if (!['submitted', 'under_review'].includes(appRes.recordset[0].status)) {
+    if (!['submitted', 'under_review', 'scrutiny_accepted'].includes(appRes.recordset[0].status)) {
       return res.status(400).json({ success: false, message: 'Application cannot be rejected in current status.' });
     }
 
@@ -377,9 +409,60 @@ router.post('/:collegeId/applications/:appId/reject', async (req, res) => {
   }
 });
 
-// ── Move to document_verification (student arrived) ─────────
+// ── Call for physical doc verification (scrutiny_accepted → doc_verification_pending) ──
+// College selects this student for physical document visit. Can be triggered multiple times
+// (e.g. student didn't come, re-invite). Always sets status to doc_verification_pending.
+router.post('/:collegeId/applications/:appId/call-for-doc-verification', async (req, res) => {
+  try {
+    const appRes = await db.request()
+      .input('id',  parseInt(req.params.appId))
+      .input('col', parseInt(req.params.collegeId))
+      .query('SELECT id, status FROM applications WHERE id=@id AND college_id=@col');
+
+    if (appRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: 'Application not found.' });
+    }
+    // Allow from scrutiny_accepted or re-trigger from doc_verification_pending
+    if (!['scrutiny_accepted', 'doc_verification_pending'].includes(appRes.recordset[0].status)) {
+      return res.status(400).json({ success: false, message: 'Application must be scrutiny accepted to call for doc verification.' });
+    }
+
+    await db.request()
+      .input('id', parseInt(req.params.appId))
+      .query(`
+        UPDATE applications
+        SET status = 'doc_verification_pending', updated_at = GETDATE()
+        WHERE id = @id
+      `);
+
+    return res.json({ success: true, message: 'Student called for physical document verification.' });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── Verify-docs alias (kept for backward compat) ─────────────
 router.post('/:collegeId/applications/:appId/verify-docs', async (req, res) => {
-  const { document_ids_verified } = req.body; // array of application_documents ids
+  req.url = req.url.replace('verify-docs', 'call-for-doc-verification');
+  // Forward to call-for-doc-verification
+  const appRes = await db.request()
+    .input('id',  parseInt(req.params.appId))
+    .input('col', parseInt(req.params.collegeId))
+    .query('SELECT id, status FROM applications WHERE id=@id AND college_id=@col');
+  if (!appRes.recordset.length) return res.status(404).json({ success: false, message: 'Not found.' });
+  if (!['scrutiny_accepted', 'doc_verification_pending', 'approved'].includes(appRes.recordset[0].status)) {
+    return res.status(400).json({ success: false, message: 'Invalid status for doc verification.' });
+  }
+  await db.request().input('id', parseInt(req.params.appId)).query(`
+    UPDATE applications SET status = 'doc_verification_pending', updated_at = GETDATE() WHERE id = @id
+  `);
+  return res.json({ success: true, message: 'Student called for physical document verification.' });
+});
+
+// ── Confirm admission (after physical doc check) ─────────────
+router.post('/:collegeId/applications/:appId/confirm', async (req, res) => {
+  const { document_ids_verified } = req.body; // optional: array of application_documents ids to mark verified
 
   try {
     const appRes = await db.request()
@@ -390,11 +473,12 @@ router.post('/:collegeId/applications/:appId/verify-docs', async (req, res) => {
     if (appRes.recordset.length === 0) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
-    if (appRes.recordset[0].status !== 'approved') {
-      return res.status(400).json({ success: false, message: 'Application must be approved before document verification.' });
+    if (appRes.recordset[0].status !== 'doc_verification_pending') {
+      return res.status(400).json({ success: false, message: 'Application must be in doc_verification_pending status to confirm.' });
     }
 
-    if (Array.isArray(document_ids_verified)) {
+    // Mark submitted documents as physically verified
+    if (Array.isArray(document_ids_verified) && document_ids_verified.length > 0) {
       for (const docId of document_ids_verified) {
         await db.request()
           .input('docId', parseInt(docId))
@@ -405,36 +489,6 @@ router.post('/:collegeId/applications/:appId/verify-docs', async (req, res) => {
             WHERE id = @docId AND application_id = @appId
           `);
       }
-    }
-
-    await db.request()
-      .input('id', parseInt(req.params.appId))
-      .query(`
-        UPDATE applications
-        SET status = 'document_verification', updated_at = GETDATE()
-        WHERE id = @id
-      `);
-
-    return res.json({ success: true, message: 'Documents marked for verification.' });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, message: 'Server error.' });
-  }
-});
-
-// ── Confirm admission (after physical doc check) ─────────────
-router.post('/:collegeId/applications/:appId/confirm', async (req, res) => {
-  try {
-    const appRes = await db.request()
-      .input('id',  parseInt(req.params.appId))
-      .input('col', parseInt(req.params.collegeId))
-      .query('SELECT id, status FROM applications WHERE id=@id AND college_id=@col');
-
-    if (appRes.recordset.length === 0) {
-      return res.status(404).json({ success: false, message: 'Application not found.' });
-    }
-    if (appRes.recordset[0].status !== 'document_verification') {
-      return res.status(400).json({ success: false, message: 'Application must be in document_verification status to confirm.' });
     }
 
     await db.request()
@@ -468,8 +522,8 @@ router.post('/:collegeId/applications/:appId/cancel', async (req, res) => {
 
     const { status, admission_period_id } = appRes.recordset[0];
 
-    // Free the seat if one was held (approved or later)
-    if (['approved', 'document_verification', 'confirmed'].includes(status)) {
+    // Free the seat if one was held (scrutiny_accepted or later)
+    if (['scrutiny_accepted', 'doc_verification_pending', 'confirmed'].includes(status)) {
       await db.request()
         .input('pid', admission_period_id)
         .query('UPDATE admission_periods SET filled_seats = filled_seats - 1 WHERE id = @pid AND filled_seats > 0');
