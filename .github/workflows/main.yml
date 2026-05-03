@@ -35,15 +35,17 @@ jobs:
 
       - name: Build project
         run: npm run build
+        env:
+          VITE_API_URL: https://collegeadmission.vengurlatech.com/
         working-directory: ${{ env.FRONTEND_DIR }}
 
-      - name: Prepare dist output folder
+      - name: Prepare output folder
         run: |
           mkdir -p ./output
-          cp -r ./${{ env.FRONTEND_DIR }}/dist ./output/dist
+          cp -r ./${{ env.FRONTEND_DIR }}/dist/. ./output/
           cp -r ./${{ env.BACKEND_DIR }} ./output/BackEnd
 
-      - name: Push frontend dist + backend to deploy branch
+      - name: Push to deploy branch
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
