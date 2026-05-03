@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import api from '../../../services/api.js'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 
-const API_BASE = 'http://localhost:8000'
+const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000/').replace(/\/$/, '')
 
 // ── Photo validation ─────────────────────────────────────────
 // Returns { ok: true } or { ok: false, reason: string }
@@ -290,7 +290,7 @@ function UploadButton({ documentTypeId, documentName, studentId, isPhoto, isLock
     fd.append('document_type_id', documentTypeId)
 
     try {
-      await api.post('student-documents', fd, {
+      await api.post(`student-documents?student_id=${studentId}`, fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       onSuccess()

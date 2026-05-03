@@ -22,7 +22,8 @@ const UPLOAD_ROOT = path.join(__dirname, '..', 'public', 'uploads', 'students')
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const studentId = req.body.student_id || req.query.student_id || 'unknown'
+    // req.body is not yet parsed when multer runs destination, so use query param
+    const studentId = req.query.student_id || 'unknown'
     const dir = path.join(UPLOAD_ROOT, String(studentId))
     fs.mkdirSync(dir, { recursive: true })
     cb(null, dir)
@@ -109,7 +110,8 @@ router.get('/student-documents', async (req, res) => {
 
 // ── POST /student-documents (multipart) ─────────────────────
 router.post('/student-documents', upload.single('file'), async (req, res) => {
-  const { student_id, document_type_id } = req.body
+  const student_id = req.query.student_id || req.body.student_id
+  const { document_type_id } = req.body
 
   if (!student_id || !document_type_id) {
     // Clean up uploaded file if validation fails

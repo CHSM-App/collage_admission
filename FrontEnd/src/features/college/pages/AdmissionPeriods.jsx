@@ -22,11 +22,11 @@ export default function AdmissionPeriods({ collegeId }) {
   function fetchData() {
     Promise.all([
       api.get(`college-admin/${collegeId}/admission-periods`),
-      api.get(`colleges/${collegeId}/courses`),
+      api.get(`masters/${collegeId}/faculty`),
     ])
       .then(([pRes, cRes]) => {
         setPeriods(pRes.data.data || [])
-        setCourses(cRes.data.data || [])
+        setCourses((cRes.data.data || []).filter(f => f.is_active))
       })
       .catch(() => setError('Failed to load data.'))
       .finally(() => setLoading(false))
@@ -81,7 +81,7 @@ export default function AdmissionPeriods({ collegeId }) {
               <select required value={form.course_id} onChange={e => setForm(f => ({ ...f, course_id: e.target.value }))}
                 className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
                 <option value="">Select course…</option>
-                {courses.map(c => <option key={c.id} value={c.id}>{c.name} ({c.category})</option>)}
+                {courses.map(c => <option key={c.code_no} value={c.code_no}>{c.degree_course_code} — {c.degree_course_name}</option>)}
               </select>
             </div>
             <div>

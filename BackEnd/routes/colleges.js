@@ -48,10 +48,13 @@ router.get('/:id/courses', async (req, res) => {
     const result = await db.request()
       .input('id', parseInt(req.params.id))
       .query(`
-        SELECT c.id, c.name, c.duration_years, c.category
-        FROM courses c
-        WHERE c.college_id = @id
-        ORDER BY c.name
+        SELECT fm.code_no AS id,
+               CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS name,
+               fm.duration_years,
+               fm.degree_course_code AS category
+        FROM faculty_master fm
+        WHERE fm.college_id = @id AND fm.is_active = 1
+        ORDER BY fm.degree_course_name
       `);
     return res.json({ success: true, data: result.recordset });
   } catch (err) {
@@ -73,18 +76,18 @@ router.get('/:id/admission-periods', async (req, res) => {
           ap.id, ap.year_of_study, ap.academic_year,
           ap.start_date, ap.end_date,
           ap.total_seats, ap.filled_seats, ap.application_fee, ap.is_active,
-          c.id   AS course_id,
-          c.name AS course_name,
-          c.duration_years,
-          c.category AS course_category
+          fm.code_no AS course_id,
+          CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name,
+          fm.duration_years,
+          fm.degree_course_code AS course_category
         FROM admission_periods ap
-        JOIN courses c ON c.id = ap.course_id
+        JOIN faculty_master fm ON fm.code_no = ap.course_id AND fm.college_id = ap.college_id
         WHERE ap.college_id = @id
           AND ap.is_active  = 1
           AND ap.start_date <= @today
           AND ap.end_date   >= @today
           AND ap.filled_seats < ap.total_seats
-        ORDER BY c.name, ap.year_of_study
+        ORDER BY fm.degree_course_name, ap.year_of_study
       `);
 
     return res.json({ success: true, data: result.recordset });

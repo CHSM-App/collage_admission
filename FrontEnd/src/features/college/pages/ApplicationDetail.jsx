@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '../../../services/api.js'
 import Button from '../../../shared/components/Button.jsx'
 
-const API_BASE = 'http://localhost:8000'
+const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000/').replace(/\/$/, '')
 
 const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year' }
 

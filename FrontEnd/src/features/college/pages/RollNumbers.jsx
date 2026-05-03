@@ -15,8 +15,8 @@ export default function RollNumbers({ collegeId }) {
   })
 
   useEffect(() => {
-    api.get(`colleges/${collegeId}/courses`)
-      .then(r => setCourses(r.data.data || []))
+    api.get(`masters/${collegeId}/faculty`)
+      .then(r => setCourses((r.data.data || []).filter(f => f.is_active)))
       .catch(() => setError('Failed to load courses.'))
       .finally(() => setLoading(false))
   }, [collegeId])
@@ -74,7 +74,7 @@ export default function RollNumbers({ collegeId }) {
                 >
                   <option value="">Select course…</option>
                   {courses.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
+                    <option key={c.code_no} value={c.code_no}>{c.degree_course_code} — {c.degree_course_name}</option>
                   ))}
                 </select>
               )

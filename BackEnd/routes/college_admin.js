@@ -33,11 +33,12 @@ router.get('/:collegeId/admission-periods', async (req, res) => {
         SELECT ap.id, ap.year_of_study, ap.academic_year,
                ap.start_date, ap.end_date, ap.total_seats, ap.filled_seats,
                ap.application_fee, ap.is_active,
-               c.id AS course_id, c.name AS course_name
+               fm.code_no AS course_id,
+               CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name
         FROM admission_periods ap
-        JOIN courses c ON c.id = ap.course_id
+        JOIN faculty_master fm ON fm.code_no = ap.course_id AND fm.college_id = ap.college_id
         WHERE ap.college_id = @col
-        ORDER BY ap.academic_year DESC, c.name, ap.year_of_study
+        ORDER BY ap.academic_year DESC, fm.degree_course_name, ap.year_of_study
       `);
     return res.json({ success: true, data: result.recordset });
   } catch (err) {
