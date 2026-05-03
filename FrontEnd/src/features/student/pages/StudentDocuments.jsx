@@ -149,7 +149,7 @@ export default function StudentDocuments() {
     <section className="space-y-6">
       <div>
         <p className="text-sm font-semibold uppercase tracking-wide text-emerald-600">Student portal</p>
-        <h1 className="mt-2 text-3xl font-bold text-slate-950">My Documents</h1>
+        <h1 className="mt-2 text-2xl sm:text-3xl font-bold text-slate-950">My Documents</h1>
         <p className="mt-1 max-w-xl text-slate-600">
           Documents uploaded here are reused across all your applications. Upload once, use everywhere.
           Documents linked to active applications cannot be removed.
@@ -169,7 +169,7 @@ export default function StudentDocuments() {
             const isPhoto  = isPhotoType(dt.name)
             return (
               <div key={dt.id} className="rounded-lg border border-slate-200 bg-white px-5 py-4">
-                <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
                   <div className="flex items-start gap-3">
                     {/* Thumbnail / icon */}
                     {existing ? (
@@ -225,7 +225,7 @@ export default function StudentDocuments() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-2 flex-wrap sm:shrink-0">
                     {existing && (
                       <>
                         <a

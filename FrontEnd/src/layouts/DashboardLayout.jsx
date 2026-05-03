@@ -48,10 +48,16 @@ export default function DashboardLayout() {
   const location = useLocation()
   const { user, role, logout } = useAuth()
   const [hasPayments, setHasPayments] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const currentPath = `${location.pathname}${location.search}`
 
   const isStaff       = !!user?.is_staff
   const permissions   = user?.permissions || {}
+
+  // Close sidebar on route change (mobile)
+  useEffect(() => {
+    setSidebarOpen(false)
+  }, [location.pathname, location.search])
 
   useEffect(() => {
     if (role === 'student' && user?.id) {
@@ -67,52 +73,74 @@ export default function DashboardLayout() {
     : baseItems
 
   // For staff: hide items they have no permission for at all
-  // (items with perm=null are always shown; items where perm has no entry are hidden for staff)
   if (role === 'college' && isStaff) {
-    // Filter out separator if all items below it are hidden
     currentItems = currentItems.filter((item, idx, arr) => {
       if (!item.to) {
-        // separator — keep only if there's a visible item after it
         const nextVisible = arr.slice(idx + 1).some(
           i => i.to && (i.perm === null || i.perm === undefined || permissions[i.perm] !== undefined)
         )
         return nextVisible
       }
       if (item.perm === null || item.perm === undefined) return true
-      // Show if the staff member has any entry for this permission (true=write, false=read-only)
       return item.perm in permissions
     })
   }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-950 lg:flex">
-      <aside className="border-b border-slate-200 bg-white lg:fixed lg:inset-y-0 lg:left-0 lg:w-64 lg:border-b-0 lg:border-r">
-        <div className="flex h-full flex-col p-5">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-wide text-emerald-600">College Admission</p>
-            <h2 className="mt-1 text-lg font-bold text-slate-950">{roleLabels[role]}</h2>
-            {isStaff && (
-              <p className="mt-0.5 text-xs text-blue-600 font-semibold">{user.role_name}</p>
-            )}
+
+      {/* ── Mobile overlay backdrop ── */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-20 bg-black/40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* ── Sidebar ── */}
+      <aside className={`
+        fixed inset-y-0 left-0 z-30 w-72 bg-white border-r border-slate-200 flex flex-col
+        transform transition-transform duration-300 ease-in-out
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        lg:translate-x-0 lg:w-64 lg:z-auto
+      `}>
+        <div className="flex h-full flex-col p-5 overflow-y-auto">
+          {/* Header with close button on mobile */}
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wide text-emerald-600">College Admission</p>
+              <h2 className="mt-1 text-lg font-bold text-slate-950">{roleLabels[role]}</h2>
+              {isStaff && (
+                <p className="mt-0.5 text-xs text-blue-600 font-semibold">{user.role_name}</p>
+              )}
+            </div>
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="lg:hidden ml-2 mt-1 p-1 rounded-md text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+              aria-label="Close sidebar"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
 
-          <nav className="mt-6 flex gap-1 overflow-x-auto lg:flex-col lg:overflow-visible">
+          <nav className="mt-6 flex flex-col gap-1">
             {currentItems.map((item, idx) => {
               if (!item.to) {
                 return (
-                  <p key={`sep-${idx}`} className="px-3 pt-3 pb-1 text-xs font-bold uppercase tracking-wider text-slate-400 hidden lg:block">
+                  <p key={`sep-${idx}`} className="px-3 pt-3 pb-1 text-xs font-bold uppercase tracking-wider text-slate-400">
                     {item.label.replace(/—/g, '').trim()}
                   </p>
                 )
               }
               const isActive  = currentPath === item.to
-              // Read-only badge: staff has the perm but can_write=false
               const readOnly  = isStaff && item.perm && permissions[item.perm] === false
               return (
                 <Link
                   key={item.to}
                   to={item.to}
-                  className={`whitespace-nowrap rounded-md px-3 py-2 text-sm font-semibold transition flex items-center justify-between gap-2 ${
+                  className={`rounded-md px-3 py-2 text-sm font-semibold transition flex items-center justify-between gap-2 ${
                     isActive
                       ? 'bg-slate-950 text-white'
                       : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'
@@ -142,22 +170,38 @@ export default function DashboardLayout() {
         </div>
       </aside>
 
-      <div className="flex-1 lg:pl-64">
-        <header className="border-b border-slate-200 bg-white px-5 py-4">
-          <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
-            <div>
-              <p className="text-sm text-slate-500">Welcome back,</p>
-              <p className="text-base font-bold text-slate-950">
-                {isStaff ? user.staff_name : getDisplayName(user)}
-              </p>
+      {/* ── Main content ── */}
+      <div className="flex-1 min-w-0 lg:pl-64">
+
+        {/* Top header bar */}
+        <header className="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 py-3 sm:px-5 sm:py-4">
+          <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              {/* Hamburger — visible only on mobile */}
+              <button
+                onClick={() => setSidebarOpen(true)}
+                className="lg:hidden shrink-0 rounded-md p-2 text-slate-600 hover:bg-slate-100 transition"
+                aria-label="Open menu"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+              </button>
+              <div className="min-w-0">
+                <p className="text-xs text-slate-500 hidden sm:block">Welcome back,</p>
+                <p className="text-sm font-bold text-slate-950 truncate">
+                  {isStaff ? user.staff_name : getDisplayName(user)}
+                </p>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
+
+            <div className="flex items-center gap-2 shrink-0">
               {isStaff && (
-                <span className="rounded-full px-3 py-1 text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                <span className="hidden sm:inline-flex rounded-full px-3 py-1 text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
                   {user.role_name}
                 </span>
               )}
-              <span className={`rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wide ${
+              <span className={`rounded-full px-2.5 py-1 text-xs font-bold uppercase tracking-wide ${
                 role === 'student' ? 'bg-emerald-50 text-emerald-700' :
                 role === 'college' ? 'bg-blue-50 text-blue-700' :
                 'bg-violet-50 text-violet-700'
@@ -166,7 +210,7 @@ export default function DashboardLayout() {
               </span>
               <button
                 onClick={() => { if (confirm('Are you sure you want to logout?')) logout() }}
-                className="lg:hidden rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                className="lg:hidden rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
               >
                 Logout
               </button>
@@ -174,7 +218,7 @@ export default function DashboardLayout() {
           </div>
         </header>
 
-        <main className="mx-auto max-w-5xl px-5 py-8">
+        <main className="mx-auto max-w-5xl px-4 py-6 sm:px-5 sm:py-8">
           <Outlet />
         </main>
       </div>

@@ -92,15 +92,15 @@ export default function MyApplications() {
 
   return (
     <section className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-wide text-emerald-600">Student portal</p>
-          <h1 className="mt-2 text-3xl font-bold text-slate-950">My Applications</h1>
+          <h1 className="mt-2 text-2xl sm:text-3xl font-bold text-slate-950">My Applications</h1>
           <p className="mt-1 text-slate-600">All your college applications across all years.</p>
         </div>
         <button
           onClick={() => navigate('/student/dashboard?section=browse')}
-          className="shrink-0 rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+          className="self-start sm:shrink-0 rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
         >
           + New Application
         </button>
@@ -271,7 +271,7 @@ export default function MyApplications() {
                 </div>
               )}
 
-              <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                 <span className="text-xs text-slate-400">
                   Submitted: {app.submitted_at ? new Date(app.submitted_at).toLocaleDateString('en-IN') : '—'}
                 </span>

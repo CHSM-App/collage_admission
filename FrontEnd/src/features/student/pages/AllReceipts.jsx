@@ -25,7 +25,7 @@ export default function AllReceipts() {
     <section className="space-y-6">
       <div>
         <p className="text-sm font-semibold uppercase tracking-wide text-emerald-600">Student portal</p>
-        <h1 className="mt-2 text-3xl font-bold text-slate-950">My Receipts</h1>
+        <h1 className="mt-2 text-2xl sm:text-3xl font-bold text-slate-950">My Receipts</h1>
         <p className="mt-1 text-slate-600">Download or share receipts for all your payments.</p>
       </div>
 

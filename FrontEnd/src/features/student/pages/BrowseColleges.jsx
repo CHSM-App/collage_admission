@@ -87,15 +87,15 @@ export default function BrowseColleges() {
                     {periods.map(period => (
                       <div
                         key={period.id}
-                        className="flex items-center justify-between rounded-md border border-slate-100 bg-slate-50 px-4 py-3"
+                        className="flex flex-col gap-3 rounded-md border border-slate-100 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
                       >
                         <div>
                           <p className="font-medium text-slate-800">
                             {period.course_name} — {YEAR_LABEL[period.year_of_study]}
                           </p>
-                          <p className="text-xs text-slate-500 mt-0.5">
-                            Seats: {period.total_seats - period.filled_seats} available of {period.total_seats} ·
-                            Application fee: ₹{Number(period.application_fee).toLocaleString('en-IN')} ·
+                          <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">
+                            Seats: {period.total_seats - period.filled_seats} available of {period.total_seats} ·{' '}
+                            Application fee: ₹{Number(period.application_fee).toLocaleString('en-IN')} ·{' '}
                             Last date: {new Date(period.end_date).toLocaleDateString('en-IN')}
                           </p>
                         </div>
@@ -107,13 +107,13 @@ export default function BrowseColleges() {
                             ACTIVE_STATUSES.includes(a.status)
                           )
                           return alreadyApplied ? (
-                            <span className="ml-4 rounded-md bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-400 cursor-not-allowed">
+                            <span className="self-start rounded-md bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-400 cursor-not-allowed">
                               Applied
                             </span>
                           ) : (
                             <button
                               onClick={() => handleApply(period, college.id)}
-                              className="ml-4 rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 transition"
+                              className="self-start rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 transition"
                             >
                               Apply
                             </button>
@@ -137,7 +137,7 @@ function PageShell({ children }) {
     <section className="space-y-6">
       <div>
         <p className="text-sm font-semibold uppercase tracking-wide text-emerald-600">Student portal</p>
-        <h1 className="mt-2 text-3xl font-bold text-slate-950">Browse Colleges</h1>
+        <h1 className="mt-2 text-2xl sm:text-3xl font-bold text-slate-950">Browse Colleges</h1>
         <p className="mt-2 max-w-2xl text-slate-600">
           Click on a college to see its open admissions for 2026-27.
         </p>

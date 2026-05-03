@@ -33,13 +33,13 @@ function Overview({ user }) {
     <section className="space-y-6">
       <div>
         <p className="text-sm font-semibold uppercase tracking-wide text-emerald-600">Student portal</p>
-        <h1 className="mt-2 text-3xl font-bold text-slate-950">Welcome, {user?.name}</h1>
+        <h1 className="mt-2 text-2xl sm:text-3xl font-bold text-slate-950">Welcome, {user?.name}</h1>
         <p className="mt-2 max-w-2xl text-slate-600">
           Apply to colleges, track your applications, and manage your documents — all in one place.
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
         <ActionCard
           title="Browse & Apply"
           desc="Find colleges with open admissions and submit your application."

@@ -201,7 +201,7 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
   return (
     <div className="rounded-xl border border-emerald-200 bg-white overflow-hidden">
       {/* Header */}
-      <div className="bg-emerald-50 border-b border-emerald-100 px-5 py-4 flex items-start justify-between gap-3">
+      <div className="bg-emerald-50 border-b border-emerald-100 px-4 py-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
         <div>
           <p className="font-bold text-emerald-900">College Fee Payment</p>
           <p className="text-sm text-emerald-700 mt-0.5">{application.college_name} · {application.course_name}</p>
@@ -214,7 +214,7 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
 
       <div className="px-5 py-4 space-y-4">
         {/* Fee summary */}
-        <div className="grid grid-cols-3 gap-3 text-sm">
+        <div className="grid grid-cols-3 gap-2 sm:gap-3 text-sm">
           <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-center">
             <p className="text-xs text-slate-400">Total Fee</p>
             <p className="font-bold text-slate-950 mt-0.5">
@@ -264,7 +264,7 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
               {fs.installments.map(ins => (
                 <div
                   key={ins.id}
-                  className={`flex items-center justify-between rounded-lg border px-4 py-3 ${
+                  className={`flex flex-col gap-2 rounded-lg border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${
                     ins.is_paid ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'
                   }`}
                 >
@@ -297,7 +297,7 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
 
             {/* Pay full balance at once */}
             {fs.remaining > 0 && (
-              <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 flex items-center justify-between gap-3">
+              <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-semibold text-blue-900">Pay Full Amount</p>
                   <p className="text-xs text-blue-600 mt-0.5">Clear all remaining dues in one payment</p>
@@ -329,7 +329,7 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
                 <p className="text-sm text-slate-600">
                   Enter any amount to pay now. You can pay in multiple partial payments.
                 </p>
-                <div className="flex gap-3 items-start">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
                   <div className="flex-1">
                     <div className="flex items-center rounded-lg border border-slate-300 bg-white overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500">
                       <span className="px-3 text-slate-500 font-semibold text-sm border-r border-slate-200 bg-slate-50 py-2.5">₹</span>
