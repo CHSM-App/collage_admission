@@ -250,7 +250,7 @@ router.get('/applications/:id/form', async (req, res) => {
       .query(`
         SELECT a.*,
                c.name  AS college_name,  c.city AS college_city, c.address AS college_address,
-               cr.name AS course_name,
+               CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name,
                ap.academic_year AS period_ay,
                ap.application_fee,
                s.email AS student_email, s.full_name AS student_name, s.phone AS student_phone,
@@ -263,7 +263,7 @@ router.get('/applications/:id/form', async (req, res) => {
                s.bank_account_number, s.bank_ifsc, s.bank_name, s.bank_branch
         FROM applications a
         JOIN colleges         c  ON c.id  = a.college_id
-        JOIN courses          cr ON cr.id = a.course_id
+        JOIN faculty_master   fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
         JOIN admission_periods ap ON ap.id = a.admission_period_id
         JOIN students         s  ON s.id  = a.student_id
         WHERE a.id = @id

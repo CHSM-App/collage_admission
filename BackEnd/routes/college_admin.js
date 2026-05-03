@@ -206,10 +206,10 @@ router.get('/:collegeId/applications', async (req, res) => {
         a.id, a.registration_number, a.year_of_study, a.academic_year,
         a.status, a.submitted_at, a.roll_number,
         s.full_name AS student_name, s.email AS student_email, s.phone,
-        cr.name AS course_name
+        CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name
       FROM applications a
-      JOIN students  s  ON s.id  = a.student_id
-      JOIN courses   cr ON cr.id = a.course_id
+      JOIN students       s  ON s.id  = a.student_id
+      JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
       WHERE a.college_id = @col
     `;
 
@@ -256,12 +256,12 @@ router.get('/:collegeId/applications/:appId', async (req, res) => {
           a.*,
           s.full_name, s.email AS student_email, s.phone,
           s.dob, s.gender, s.address, s.city, s.category,
-          cr.name AS course_name,
+          CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name,
           col.name AS college_name
         FROM applications a
-        JOIN students s   ON s.id   = a.student_id
-        JOIN courses  cr  ON cr.id  = a.course_id
-        JOIN colleges col ON col.id = a.college_id
+        JOIN students       s   ON s.id      = a.student_id
+        JOIN faculty_master fm  ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+        JOIN colleges       col ON col.id    = a.college_id
         WHERE a.id = @id AND a.college_id = @col
       `);
 

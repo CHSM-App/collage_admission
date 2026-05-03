@@ -225,7 +225,7 @@ router.get('/receipts/:applicationId', async (req, res) => {
           col.city        AS college_city,
           col.phone       AS college_phone,
           col.email       AS college_email,
-          c.name          AS course_name,
+          CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name,
           s.full_name     AS student_name,
           s.email         AS student_email,
           s.phone         AS student_phone,
@@ -237,9 +237,9 @@ router.get('/receipts/:applicationId', async (req, res) => {
           a.app_mobile,
           a.app_email
         FROM applications a
-        JOIN colleges col ON col.id = a.college_id
-        JOIN courses   c   ON c.id  = a.course_id
-        JOIN students  s   ON s.id  = a.student_id
+        JOIN colleges       col ON col.id    = a.college_id
+        JOIN faculty_master fm  ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+        JOIN students       s   ON s.id      = a.student_id
         WHERE a.id = @id
       `);
 
