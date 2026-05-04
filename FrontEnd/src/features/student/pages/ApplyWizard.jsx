@@ -56,7 +56,7 @@ const initialState = {
     nationality:'Indian', marital_status:'', religion:'', caste:'', mother_tongue:'',
     height_cm:'', weight_kg:'', blood_group:'',
     father_full_name:'', son_daughter_number:'', father_occupation:'', annual_income:'',
-    aadhaar:'', prn:'', abc_id:'',
+    aadhaar:'', prn:'', abc_id:'', university_app_no:'',
     bank_account:'', bank_ifsc:'', bank_name:'', bank_branch:'',
     // Step 4
     board_or_college_name:'', school_or_college_address:'',
@@ -72,6 +72,8 @@ const initialState = {
   },
 }
 
+const EDITABLE_STATUSES = ['draft', 'submitted', 'under_review', 'correction_requested']
+
 function reducer(state, action) {
   switch (action.type) {
     case 'SET_LOADING':    return { ...state, loading: action.value }
@@ -86,6 +88,7 @@ function reducer(state, action) {
         applicationId: action.applicationId,
         currentStep:   action.currentStep,
         maxStep:       action.currentStep,
+        appStatus:     action.appStatus,
         loading:       false,
       }
     case 'SET_DATA':
@@ -186,7 +189,7 @@ export default function ApplyWizard() {
         })
 
         const resumeStep = app.current_step || 1
-        dispatch({ type: 'INIT_APP', applicationId: appId, currentStep: resumeStep })
+        dispatch({ type: 'INIT_APP', applicationId: appId, currentStep: resumeStep, appStatus: app.status })
       } catch (err) {
         dispatch({ type: 'SET_GLOBAL_ERR', message: err?.response?.data?.message || 'Failed to load application.' })
         dispatch({ type: 'SET_LOADING', value: false })
@@ -236,7 +239,8 @@ export default function ApplyWizard() {
     }
   }
 
-  const { data, currentStep, loading, saving, errors, globalError, applicationId } = state
+  const { data, currentStep, loading, saving, errors, globalError, applicationId, appStatus } = state
+  const readOnly = !!appStatus && !EDITABLE_STATUSES.includes(appStatus)
 
   if (loading) {
     return (
@@ -262,7 +266,7 @@ export default function ApplyWizard() {
     )
   }
 
-  const stepProps = { data, errors, globalError, saving, onChange: handleChange, setField }
+  const stepProps = { data, errors, globalError, saving, onChange: handleChange, setField, readOnly }
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -288,6 +292,21 @@ export default function ApplyWizard() {
       <div className="mx-auto max-w-3xl px-4 py-6 space-y-6">
         {/* Step indicator */}
         <StepIndicator steps={STEPS} current={currentStep} />
+
+        {/* Read-only banner */}
+        {readOnly && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 font-medium">
+            Your application has been accepted by the college and can no longer be edited.
+          </div>
+        )}
+
+        {/* Correction requested banner */}
+        {appStatus === 'correction_requested' && !readOnly && (
+          <div className="rounded-lg border border-orange-300 bg-orange-50 px-4 py-3 text-sm text-orange-800">
+            <p className="font-semibold">The college has requested corrections to your application.</p>
+            <p className="mt-0.5">Please make the required changes and resubmit.</p>
+          </div>
+        )}
 
         {/* Global error */}
         {globalError && (
@@ -418,6 +437,7 @@ function buildAutofill(app, lastApp, profile, user) {
     aadhaar:            appPrefix('aadhaar')         || profile.aadhaar        || '',
     prn:                appPrefix('prn')             || profile.prn            || '',
     abc_id:             appPrefix('abc_id')          || profile.abc_id         || '',
+    university_app_no:  appPrefix('university_app_no') || '',
     bank_account:       appPrefix('bank_account')    || profile.bank_account   || '',
     bank_ifsc:          appPrefix('bank_ifsc')       || profile.bank_ifsc      || '',
     bank_name:          appPrefix('bank_name')       || profile.bank_name      || '',

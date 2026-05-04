@@ -4,7 +4,7 @@ import { StepHeader, StepFooter } from './Step1Context.jsx'
 const MARITAL = [{ value:'Unmarried', label:'Unmarried' }, { value:'Married', label:'Married' }]
 const BLOOD   = ['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(v => ({ value: v, label: v }))
 
-export default function Step3Other({ data, errors, globalError, saving, onChange, onBack, onNext, extraFooter }) {
+export default function Step3Other({ data, errors, globalError, saving, onChange, onBack, onNext, extraFooter, readOnly }) {
   function handleNext() {
     onNext({
       birth_date: data.birth_date, birth_place: data.birth_place,
@@ -16,6 +16,7 @@ export default function Step3Other({ data, errors, globalError, saving, onChange
       father_full_name: data.father_full_name, son_daughter_number: data.son_daughter_number,
       father_occupation: data.father_occupation, annual_income: data.annual_income,
       aadhaar: data.aadhaar, prn: data.prn, abc_id: data.abc_id,
+      university_app_no: data.university_app_no || null,
       bank_account: data.bank_account, bank_ifsc: data.bank_ifsc,
       bank_name: data.bank_name, bank_branch: data.bank_branch,
     })
@@ -98,6 +99,14 @@ export default function Step3Other({ data, errors, globalError, saving, onChange
               placeholder={data.year_of_study > 1 ? 'Required for SY/TY' : 'Leave blank for FY'}
               hint={data.year_of_study === 1 ? 'Assigned after FY enrollment — leave blank' : 'Mandatory for SY and TY'}
             />
+            <FormField
+              label="University Application No."
+              name="university_app_no"
+              value={data.university_app_no || ''}
+              onChange={onChange}
+              placeholder="Enter university application number"
+              hint="Optional — as issued by the university"
+            />
           </div>
         </Section>
 
@@ -122,7 +131,7 @@ export default function Step3Other({ data, errors, globalError, saving, onChange
           <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{globalError}</p>
         )}
 
-        <StepFooter onBack={onBack} onNext={handleNext} saving={saving} extraFooter={extraFooter} />
+        <StepFooter onBack={onBack} onNext={handleNext} saving={saving} extraFooter={extraFooter} readOnly={readOnly} />
       </div>
     </div>
   )

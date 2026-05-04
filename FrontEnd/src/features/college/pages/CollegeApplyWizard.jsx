@@ -52,7 +52,7 @@ const initialState = {
     nationality:'Indian', marital_status:'', religion:'', caste:'', mother_tongue:'',
     height_cm:'', weight_kg:'', blood_group:'',
     father_full_name:'', son_daughter_number:'', father_occupation:'', annual_income:'',
-    aadhaar:'', prn:'', abc_id:'',
+    aadhaar:'', prn:'', abc_id:'', university_app_no:'',
     bank_account:'', bank_ifsc:'', bank_name:'', bank_branch:'',
     // Step 3 (exam)
     board_or_college_name:'', school_or_college_address:'',
@@ -629,6 +629,7 @@ function buildAutofill(app, lastApp, profile) {
     aadhaar:            ap('aadhaar')          || profile.aadhaar        || '',
     prn:                ap('prn')              || '',
     abc_id:             ap('abc_id')           || '',
+    university_app_no:  ap('university_app_no') || '',
     bank_account:       ap('bank_account')     || '',
     bank_ifsc:          ap('bank_ifsc')        || '',
     bank_name:          ap('bank_name')        || '',

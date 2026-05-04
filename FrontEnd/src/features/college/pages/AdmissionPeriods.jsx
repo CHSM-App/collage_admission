@@ -19,8 +19,11 @@ export default function AdmissionPeriods({ collegeId }) {
     start_date: '', end_date: '', total_seats: '',
   })
 
-  // Which period's installment editor is open
-  const [editingInstallments, setEditingInstallments] = useState(null) // periodId
+  // Edit state (end_date only)
+  const [editingId, setEditingId]     = useState(null)
+  const [editEndDate, setEditEndDate] = useState('')
+  const [editSaving, setEditSaving]   = useState(false)
+  const [editError, setEditError]     = useState('')
 
   function fetchData() {
     Promise.all([
@@ -37,11 +40,28 @@ export default function AdmissionPeriods({ collegeId }) {
 
   useEffect(() => { fetchData() }, [collegeId])
 
+  // Active open periods first, then closed (but reopenable), then disabled at bottom
+  const sortedPeriods = [
+    ...periods.filter(p => p.is_active && !p.is_disabled),
+    ...periods.filter(p => !p.is_active && !p.is_disabled),
+    ...periods.filter(p => p.is_disabled),
+  ]
+
   async function handleCreate(e) {
     e.preventDefault()
     setError('')
     if (form.start_date && form.end_date && form.end_date < form.start_date) {
       setError('End date must be on or after the start date.')
+      return
+    }
+    // Only one active open period per course+year
+    const conflict = periods.find(
+      p => p.is_active && !p.is_disabled &&
+           String(p.course_id) === String(form.course_id) &&
+           String(p.year_of_study) === String(form.year_of_study)
+    )
+    if (conflict) {
+      setError(`An open admission period already exists for ${conflict.course_name} — ${YEAR_LABEL[form.year_of_study]}. Close it before creating a new one.`)
       return
     }
     setSaving(true)
@@ -57,22 +77,71 @@ export default function AdmissionPeriods({ collegeId }) {
     }
   }
 
-  async function toggleActive(period) {
-    try {
-      await api.put(`college-admin/${collegeId}/admission-periods/${period.id}`, { is_active: !period.is_active })
-      fetchData()
-    } catch {
-      alert('Failed to update.')
+  // Close / Reopen (is_active toggle — reversible)
+  async function toggleClose(period) {
+    if (period.is_disabled) return
+    if (period.is_active) {
+      // Closing
+      try {
+        await api.put(`college-admin/${collegeId}/admission-periods/${period.id}`, { is_active: false })
+        fetchData()
+      } catch { alert('Failed to update.') }
+    } else {
+      // Reopening — check conflict
+      const conflict = periods.find(
+        p => p.is_active && !p.is_disabled &&
+             p.course_id === period.course_id &&
+             p.year_of_study === period.year_of_study &&
+             p.id !== period.id
+      )
+      if (conflict) {
+        alert(`Cannot reopen: an active period for ${period.course_name} — ${YEAR_LABEL[period.year_of_study]} already exists. Close it first.`)
+        return
+      }
+      try {
+        await api.put(`college-admin/${collegeId}/admission-periods/${period.id}`, { is_active: true })
+        fetchData()
+      } catch { alert('Failed to update.') }
     }
   }
 
-  async function deletePeriod(period) {
-    if (!confirm(`Delete "${period.course_name} — ${YEAR_LABEL[period.year_of_study]} · ${period.academic_year}"?\nThis cannot be undone.`)) return
+  // Disable (permanent read-only, admission closed — no reopen)
+  async function disablePeriod(period) {
+    if (!confirm(`Disable "${period.course_name} — ${YEAR_LABEL[period.year_of_study]} · ${period.academic_year}"?\nThis will permanently close admissions for this period. It cannot be reopened.`)) return
     try {
-      await api.delete(`college-admin/${collegeId}/admission-periods/${period.id}`)
+      await api.put(`college-admin/${collegeId}/admission-periods/${period.id}`, { is_active: false, is_disabled: true })
+      fetchData()
+    } catch { alert('Failed to disable.') }
+  }
+
+  function startEdit(period) {
+    setEditingId(period.id)
+    setEditEndDate(period.end_date ? period.end_date.slice(0, 10) : '')
+    setEditError('')
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setEditEndDate('')
+    setEditError('')
+  }
+
+  async function saveEdit(period) {
+    setEditError('')
+    if (!editEndDate) { setEditError('End date is required.'); return }
+    if (editEndDate < period.start_date.slice(0, 10)) {
+      setEditError('End date cannot be before start date.')
+      return
+    }
+    setEditSaving(true)
+    try {
+      await api.put(`college-admin/${collegeId}/admission-periods/${period.id}`, { end_date: editEndDate })
+      setEditingId(null)
       fetchData()
     } catch (err) {
-      alert(err?.response?.data?.message || 'Delete failed.')
+      setEditError(err?.response?.data?.message || 'Failed to save.')
+    } finally {
+      setEditSaving(false)
     }
   }
 
@@ -82,16 +151,19 @@ export default function AdmissionPeriods({ collegeId }) {
         <div>
           <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">College portal</p>
           <h1 className="mt-2 text-3xl font-bold text-slate-950">Admission Periods</h1>
-          <p className="mt-1 text-slate-600">Control when students can apply and set up fee installment plans.</p>
+          <p className="mt-1 text-slate-600">Control when students can apply for each course and year.</p>
         </div>
-        {rw && <Button onClick={() => setShowForm(v => !v)}>
+        {rw && <Button onClick={() => { setShowForm(v => !v); setError('') }}>
           {showForm ? 'Cancel' : '+ New Period'}
         </Button>}
       </div>
 
       {showForm && (
         <form onSubmit={handleCreate} className="rounded-lg border border-blue-200 bg-blue-50 p-5 space-y-4 max-w-2xl">
-          <p className="font-semibold text-slate-950">Create Admission Period</p>
+          <div className="flex items-center justify-between">
+            <p className="font-semibold text-slate-950">Create Admission Period</p>
+            <button type="button" onClick={() => { setShowForm(false); setError('') }} className="text-slate-400 hover:text-slate-600 text-lg leading-none">✕</button>
+          </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Course</label>
@@ -142,193 +214,116 @@ export default function AdmissionPeriods({ collegeId }) {
       )}
 
       <div className="space-y-4">
-        {periods.map(p => (
-          <div key={p.id} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-            {/* Period header row */}
-            <div className="px-5 py-4 flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="font-semibold text-slate-950">
-                  {p.course_name} — {YEAR_LABEL[p.year_of_study]} · {p.academic_year}
-                </p>
-                <p className="text-sm text-slate-500">
-                  {new Date(p.start_date).toLocaleDateString('en-IN')} →{' '}
-                  {new Date(p.end_date).toLocaleDateString('en-IN')} ·
-                  Seats: {p.filled_seats}/{p.total_seats} ·
-                  App fee: ₹{Number(p.application_fee).toLocaleString('en-IN')}
-                </p>
-              </div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${p.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                  {p.is_active ? 'Active' : 'Closed'}
-                </span>
-                {rw && <button onClick={() => toggleActive(p)} className="text-xs font-semibold text-blue-600 hover:underline">
-                  {p.is_active ? 'Close' : 'Reopen'}
-                </button>}
-                {rw && <button onClick={() => deletePeriod(p)} className="text-xs font-semibold text-red-500 hover:underline">
-                  Delete
-                </button>}
-                <button
-                  onClick={() => setEditingInstallments(editingInstallments === p.id ? null : p.id)}
-                  className="text-xs font-semibold text-indigo-600 hover:underline"
-                >
-                  {editingInstallments === p.id ? 'Hide Installments' : 'Fee Installments'}
-                </button>
-              </div>
-            </div>
+        {sortedPeriods.map(p => {
+          const isDisabled = !!p.is_disabled
+          const isOpen     = p.is_active && !isDisabled
+          const isClosed   = !p.is_active && !isDisabled
+          const isEditing  = editingId === p.id
 
-            {/* Installment plan editor */}
-            {editingInstallments === p.id && (
-              <div className="border-t border-slate-100 bg-slate-50 px-5 py-4">
-                <InstallmentEditor collegeId={collegeId} period={p} onClose={() => setEditingInstallments(null)} />
+          return (
+            <div
+              key={p.id}
+              className={`rounded-xl border overflow-hidden transition-opacity ${
+                isDisabled ? 'border-slate-100 bg-slate-50 opacity-50' : 'border-slate-200 bg-white'
+              }`}
+            >
+              {/* Header row */}
+              <div className="px-5 py-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className={`font-semibold ${isDisabled ? 'text-slate-400' : 'text-slate-950'}`}>
+                    {p.course_name} — {YEAR_LABEL[p.year_of_study]} · {p.academic_year}
+                  </p>
+                  <p className="text-sm text-slate-400">
+                    {new Date(p.start_date).toLocaleDateString('en-IN')} →{' '}
+                    {new Date(p.end_date).toLocaleDateString('en-IN')} ·
+                    Seats: {p.filled_seats}/{p.total_seats} ·
+                    App fee: ₹{Number(p.application_fee).toLocaleString('en-IN')}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-3 flex-wrap">
+                  {/* Status badge */}
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                    isDisabled ? 'bg-red-50 text-red-400' :
+                    isOpen     ? 'bg-emerald-100 text-emerald-700' :
+                                 'bg-slate-100 text-slate-500'
+                  }`}>
+                    {isDisabled ? 'Disabled' : isOpen ? 'Open' : 'Closed'}
+                  </span>
+
+                  {/* Edit — only active non-disabled periods */}
+                  {rw && isOpen && !isEditing && (
+                    <button onClick={() => startEdit(p)} className="text-xs font-semibold text-blue-600 hover:underline">
+                      Edit
+                    </button>
+                  )}
+
+                  {/* Close / Reopen — not shown for disabled */}
+                  {rw && !isDisabled && (
+                    <button
+                      onClick={() => toggleClose(p)}
+                      className="text-xs font-semibold text-slate-500 hover:underline"
+                    >
+                      {isOpen ? 'Close' : 'Reopen'}
+                    </button>
+                  )}
+
+                  {/* Disable — only for non-disabled periods */}
+                  {rw && !isDisabled && (
+                    <button
+                      onClick={() => disablePeriod(p)}
+                      className="text-xs font-semibold text-red-500 hover:underline"
+                    >
+                      Disable
+                    </button>
+                  )}
+                </div>
               </div>
-            )}
-          </div>
-        ))}
+
+              {/* Inline edit — end_date only */}
+              {isEditing && (
+                <div className="border-t border-slate-100 bg-slate-50 px-5 py-4">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Edit Period</p>
+                  <div className="flex flex-wrap items-end gap-4">
+                    <div>
+                      <p className="text-xs text-slate-400 mb-1">Course</p>
+                      <p className="text-sm font-medium text-slate-600">{p.course_name}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-400 mb-1">Year</p>
+                      <p className="text-sm font-medium text-slate-600">{YEAR_LABEL[p.year_of_study]}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-400 mb-1">Academic Year</p>
+                      <p className="text-sm font-medium text-slate-600">{p.academic_year}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-400 mb-1">Start Date</p>
+                      <p className="text-sm font-medium text-slate-600">{new Date(p.start_date).toLocaleDateString('en-IN')}</p>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">End Date</label>
+                      <input
+                        type="date"
+                        value={editEndDate}
+                        onChange={e => { setEditEndDate(e.target.value); setEditError('') }}
+                        className="rounded-md border border-blue-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  </div>
+                  {editError && <p className="mt-2 text-sm text-red-600">{editError}</p>}
+                  <div className="flex gap-3 mt-4">
+                    <Button onClick={() => saveEdit(p)} loading={editSaving}>Save</Button>
+                    <button onClick={cancelEdit} className="text-sm text-slate-500 hover:text-slate-700 font-medium">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
     </section>
-  )
-}
-
-// ── Installment plan editor ───────────────────────────────────
-function InstallmentEditor({ collegeId, period, onClose }) {
-  const { canWrite } = usePermissions()
-  const rw = canWrite('masters')
-  const [rows, setRows]       = useState([])
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving]   = useState(false)
-  const [error, setError]     = useState('')
-  const [success, setSuccess] = useState('')
-
-  useEffect(() => {
-    api.get(`college-admin/${collegeId}/admission-periods/${period.id}/installments`)
-      .then(r => {
-        const data = r.data.data || []
-        setRows(data.length > 0 ? data : [{ label: 'First Installment', amount: '', due_date: '' }])
-      })
-      .catch(() => setRows([{ label: 'First Installment', amount: '', due_date: '' }]))
-      .finally(() => setLoading(false))
-  }, [period.id, collegeId])
-
-  function addRow() {
-    const labels = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth']
-    setRows(r => [...r, { label: `${labels[r.length] || (r.length + 1) + 'th'} Installment`, amount: '', due_date: '' }])
-  }
-
-  function removeRow(i) {
-    setRows(r => r.filter((_, idx) => idx !== i))
-  }
-
-  function updateRow(i, field, value) {
-    setRows(r => r.map((row, idx) => idx === i ? { ...row, [field]: value } : row))
-  }
-
-  const totalInstallments = rows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
-
-  async function handleSave() {
-    setError('')
-    setSuccess('')
-    for (const row of rows) {
-      if (!row.label.trim() || !row.amount || parseFloat(row.amount) <= 0) {
-        setError('Each installment needs a label and a positive amount.')
-        return
-      }
-    }
-    setSaving(true)
-    try {
-      await api.post(`college-admin/${collegeId}/admission-periods/${period.id}/installments`, {
-        installments: rows.map(r => ({
-          label:    r.label.trim(),
-          amount:   parseFloat(r.amount),
-          due_date: r.due_date || null,
-        })),
-      })
-      setSuccess('Installment plan saved.')
-    } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to save.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  async function handleClear() {
-    if (!confirm('Remove installment plan? Students will pay the full fee in one payment.')) return
-    setSaving(true)
-    try {
-      await api.post(`college-admin/${collegeId}/admission-periods/${period.id}/installments`, { installments: [] })
-      setRows([{ label: 'First Installment', amount: '', due_date: '' }])
-      setSuccess('Installment plan cleared.')
-    } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to clear.')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  if (loading) return <p className="text-sm text-slate-400">Loading…</p>
-
-  return (
-    <div className="space-y-3 max-w-2xl">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-bold text-slate-700">Fee Installment Plan</p>
-        <p className="text-xs text-slate-400">
-          If no plan is set, students pay the full college fee in one shot.
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        {rows.map((row, i) => (
-          <div key={i} className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-semibold text-slate-400 w-4">{i + 1}.</span>
-            <input
-              value={row.label}
-              onChange={e => updateRow(i, 'label', e.target.value)}
-              placeholder="Label (e.g. First Installment)"
-              className="flex-1 min-w-32 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-            />
-            <div className="flex items-center gap-1">
-              <span className="text-slate-400 text-sm">₹</span>
-              <input
-                type="number" min="1"
-                value={row.amount}
-                onChange={e => updateRow(i, 'amount', e.target.value)}
-                placeholder="Amount"
-                className="w-28 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-              />
-            </div>
-            <input
-              type="date"
-              value={row.due_date || ''}
-              onChange={e => updateRow(i, 'due_date', e.target.value)}
-              className="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
-              title="Due date (optional)"
-            />
-            {rows.length > 1 && (
-              <button onClick={() => removeRow(i)} className="text-red-400 hover:text-red-600 text-sm font-bold px-1">✕</button>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div className="flex items-center gap-3 flex-wrap">
-        {rows.length < 6 && (
-          <button onClick={addRow} className="text-sm text-indigo-600 hover:underline font-semibold">
-            + Add installment
-          </button>
-        )}
-        {totalInstallments > 0 && (
-          <span className="text-xs text-slate-500">
-            Total: ₹{totalInstallments.toLocaleString('en-IN')}
-          </span>
-        )}
-      </div>
-
-      {error   && <p className="text-sm text-red-600">{error}</p>}
-      {success && <p className="text-sm text-emerald-600">{success}</p>}
-
-      {rw && <div className="flex gap-3">
-        <Button onClick={handleSave} loading={saving}>Save Plan</Button>
-        <Button variant="secondary" onClick={handleClear} disabled={saving}>Clear Plan</Button>
-      </div>}
-    </div>
   )
 }

@@ -43,7 +43,7 @@ router.get('/', async (req, res) => {
       SELECT
         a.id, a.registration_number, a.year_of_study, a.academic_year,
         a.status, a.roll_number, a.submitted_at, a.created_at,
-        a.rejection_reason, a.cancellation_reason,
+        a.rejection_reason, a.cancellation_reason, a.correction_note,
         a.application_fee_paid, a.college_fee_paid,
         c.id   AS college_id,   c.name  AS college_name,  c.city AS college_city,
         a.course_id,    COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,

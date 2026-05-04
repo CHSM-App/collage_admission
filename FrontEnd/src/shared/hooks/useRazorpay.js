@@ -1,40 +1,61 @@
 /**
- * useRazorpay — loads the Razorpay checkout script once and exposes openCheckout().
+ * useRazorpay — loads the Razorpay checkout script once (module-level singleton)
+ * and exposes openCheckout().
  *
  * Usage:
- *   const { openCheckout, loading, error } = useRazorpay()
+ *   const { openCheckout, scriptError } = useRazorpay()
  *   openCheckout({ orderData, onSuccess, onFailure })
- *
- *   orderData = response from POST /payments/create-order  (data field)
- *   onSuccess(response) — called after Razorpay confirms payment
- *   onFailure(err)      — called on modal close without payment
  */
 import { useState, useEffect } from 'react'
 
 const SCRIPT_URL = 'https://checkout.razorpay.com/v1/checkout.js'
 
-function loadRazorpayScript() {
-  return new Promise((resolve) => {
-    if (document.querySelector(`script[src="${SCRIPT_URL}"]`)) {
-      resolve(!!window.Razorpay)
+// Module-level singleton — shared across all hook instances.
+// null  = not started yet
+// Promise = load in progress or already done
+let scriptPromise = null
+
+function getScriptPromise() {
+  if (scriptPromise) return scriptPromise
+
+  scriptPromise = new Promise((resolve) => {
+    // Already loaded by a previous page visit (SPA navigation)
+    if (window.Razorpay) {
+      resolve(true)
       return
     }
+
+    // Script tag already in DOM but still loading (e.g. two components mounted at once)
+    const existing = document.querySelector(`script[src="${SCRIPT_URL}"]`)
+    if (existing) {
+      existing.addEventListener('load',  () => resolve(true),  { once: true })
+      existing.addEventListener('error', () => resolve(false), { once: true })
+      // If it already finished loading before we attached the listener,
+      // window.Razorpay will be set — check once with a short delay.
+      setTimeout(() => { if (window.Razorpay) resolve(true) }, 200)
+      return
+    }
+
     const script = document.createElement('script')
-    script.src = SCRIPT_URL
+    script.src   = SCRIPT_URL
+    script.async = true
     script.onload  = () => resolve(true)
-    script.onerror = () => resolve(false)
+    script.onerror = () => { scriptPromise = null; resolve(false) }  // reset so retry is possible
     document.body.appendChild(script)
   })
+
+  return scriptPromise
 }
 
 export function useRazorpay() {
-  const [scriptLoaded, setScriptLoaded] = useState(false)
-  const [scriptError,  setScriptError]  = useState(false)
+  const [scriptError, setScriptError] = useState(false)
 
   useEffect(() => {
-    loadRazorpayScript().then(ok => {
-      if (ok) setScriptLoaded(true)
-      else    setScriptError(true)
+    // If already loaded, no state update needed — avoids flicker
+    if (window.Razorpay) return
+
+    getScriptPromise().then(ok => {
+      if (!ok) setScriptError(true)
     })
   }, [])
 
@@ -46,7 +67,7 @@ export function useRazorpay() {
 
     const options = {
       key:         orderData.key_id,
-      amount:      orderData.amount,        // paise
+      amount:      orderData.amount,
       currency:    orderData.currency,
       order_id:    orderData.order_id,
       name:        'College Admission',
@@ -73,5 +94,5 @@ export function useRazorpay() {
     rzp.open()
   }
 
-  return { openCheckout, scriptLoaded, scriptError }
+  return { openCheckout, scriptError }
 }

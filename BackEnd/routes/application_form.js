@@ -381,7 +381,7 @@ router.get('/student-profile/autofill', async (req, res) => {
           app_nationality, app_marital_status, app_religion, app_caste, app_mother_tongue,
           app_height_cm, app_weight_kg, app_blood_group,
           app_father_full_name, app_son_daughter_no, app_father_occupation, app_annual_income,
-          app_aadhaar, app_prn, app_abc_id,
+          app_aadhaar, app_prn, app_abc_id, app_university_app_no,
           app_bank_account, app_bank_ifsc, app_bank_name, app_bank_branch
         FROM applications
         WHERE student_id = @sid AND status NOT IN ('draft','rejected','cancelled')
@@ -398,13 +398,19 @@ router.get('/student-profile/autofill', async (req, res) => {
 });
 
 // ── Helper: assert draft and ownership ──────────────────────
+// Editable statuses: student can edit form until scrutiny_accepted
+const EDITABLE_STATUSES = ['draft', 'submitted', 'under_review', 'correction_requested'];
+
 async function assertDraft(appId, res) {
   const r = await db.request()
     .input('id', mssql.Int, appId)
     .query('SELECT id, status, student_id, year_of_study FROM applications WHERE id = @id');
   if (!r.recordset.length) { res.status(404).json({ success: false, message: 'Application not found.' }); return null; }
   const app = r.recordset[0];
-  if (app.status !== 'draft') { res.status(400).json({ success: false, message: 'Application is no longer in draft status.' }); return null; }
+  if (!EDITABLE_STATUSES.includes(app.status)) {
+    res.status(400).json({ success: false, message: 'Application can no longer be edited after scrutiny acceptance.' });
+    return null;
+  }
   return app;
 }
 
@@ -498,7 +504,7 @@ router.patch('/applications/:id/other-details', async (req, res) => {
     birth_date, birth_place, birth_taluka, birth_district, birth_state, nationality,
     marital_status, religion, caste, mother_tongue, height_cm, weight_kg, blood_group,
     father_full_name, son_daughter_number, father_occupation, annual_income,
-    aadhaar, prn, abc_id,
+    aadhaar, prn, abc_id, university_app_no,
     bank_account, bank_ifsc, bank_name, bank_branch,
   } = req.body;
 
@@ -553,8 +559,9 @@ router.patch('/applications/:id/other-details', async (req, res) => {
       .input('fo',   mssql.NVarChar, father_occupation)
       .input('ai',   mssql.Decimal,  parseFloat(annual_income))
       .input('adh',  mssql.NVarChar, aadhaar)
-      .input('prn',  mssql.NVarChar, prn            || null)
+      .input('prn',  mssql.NVarChar, prn              || null)
       .input('abc',  mssql.NVarChar, abc_id)
+      .input('uano', mssql.NVarChar, university_app_no || null)
       .input('bacc', mssql.NVarChar, bank_account   || null)
       .input('bifc', mssql.NVarChar, bank_ifsc      || null)
       .input('bnm',  mssql.NVarChar, bank_name      || null)
@@ -568,6 +575,7 @@ router.patch('/applications/:id/other-details', async (req, res) => {
           app_mother_tongue=@mtg, app_height_cm=@hgt, app_weight_kg=@wgt, app_blood_group=@bg,
           app_father_full_name=@ffn, app_son_daughter_no=@sdn, app_father_occupation=@fo,
           app_annual_income=@ai, app_aadhaar=@adh, app_prn=@prn, app_abc_id=@abc,
+          app_university_app_no=@uano,
           app_bank_account=@bacc, app_bank_ifsc=@bifc, app_bank_name=@bnm, app_bank_branch=@bbr,
           current_step = CASE WHEN current_step < @step THEN @step ELSE current_step END,
           updated_at=GETDATE()

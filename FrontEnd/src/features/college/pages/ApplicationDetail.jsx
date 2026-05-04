@@ -11,6 +11,7 @@ const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY —
 const STATUS_FLOW = {
   submitted:                { label: 'Submitted — awaiting scrutiny' },
   under_review:             { label: 'Under Review' },
+  correction_requested:     { label: 'Correction Requested — waiting for student to resubmit' },
   scrutiny_accepted:        { label: 'Scrutiny Accepted — awaiting doc verification call' },
   doc_verification_pending: { label: 'Called for Physical Document Verification' },
   confirmed:                { label: 'Confirmed — waiting for fee payment' },
@@ -32,8 +33,10 @@ export default function ApplicationDetail({ collegeId, appId }) {
   const [loading, setLoading] = useState(true)
   const [acting, setActing]   = useState(false)
   const [reason, setReason]   = useState('')
-  const [showReject, setShowReject] = useState(false)
-  const [showCancel, setShowCancel] = useState(false)
+  const [showReject, setShowReject]         = useState(false)
+  const [showCancel, setShowCancel]         = useState(false)
+  const [showCorrection, setShowCorrection] = useState(false)
+  const [correctionNote, setCorrectionNote] = useState('')
   const [error, setError]     = useState('')
 
   function fetchApp() {
@@ -53,7 +56,9 @@ export default function ApplicationDetail({ collegeId, appId }) {
       fetchApp()
       setShowReject(false)
       setShowCancel(false)
+      setShowCorrection(false)
       setReason('')
+      setCorrectionNote('')
     } catch (err) {
       setError(err?.response?.data?.message || 'Action failed.')
     } finally {
@@ -241,15 +246,26 @@ export default function ApplicationDetail({ collegeId, appId }) {
 
       {/* ── Actions ── */}
 
-      {/* Step 1: Scrutiny — accept or reject */}
-      {canReview && ['submitted', 'under_review'].includes(d.status) && (
+      {/* Correction note — shown when correction was requested */}
+      {d.correction_note && (
+        <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 space-y-1">
+          <p className="text-xs font-bold uppercase tracking-wide text-orange-700">Correction Note sent to student</p>
+          <p className="text-sm text-orange-900">{d.correction_note}</p>
+        </div>
+      )}
+
+      {/* Step 1: Scrutiny — accept, request correction, or reject */}
+      {canReview && ['submitted', 'under_review', 'correction_requested'].includes(d.status) && (
         <div className="space-y-3">
-          <p className="text-sm text-slate-600">Review the application form and accept or reject after scrutiny.</p>
-          <div className="flex gap-3">
+          <p className="text-sm text-slate-600">Review the application form and accept, request corrections, or reject.</p>
+          <div className="flex flex-wrap gap-3">
             <Button loading={acting} onClick={() => doAction('approve')}>
               Accept (Scrutiny Passed)
             </Button>
-            <Button variant="secondary" onClick={() => setShowReject(v => !v)}>
+            <Button variant="secondary" onClick={() => { setShowCorrection(v => !v); setShowReject(false) }}>
+              Request Correction
+            </Button>
+            <Button variant="secondary" onClick={() => { setShowReject(v => !v); setShowCorrection(false) }}>
               Reject
             </Button>
           </div>
@@ -290,6 +306,23 @@ export default function ApplicationDetail({ collegeId, appId }) {
             </Button>
             <Button variant="secondary" onClick={() => setShowCancel(v => !v)}>Cancel</Button>
           </div>
+        </div>
+      )}
+
+      {canReview && showCorrection && (
+        <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 space-y-3">
+          <p className="text-sm font-semibold text-orange-800">Correction note (sent to student)</p>
+          <p className="text-xs text-orange-600">Describe clearly what needs to be corrected. The student will see this and can edit and resubmit their application.</p>
+          <textarea
+            rows={4}
+            value={correctionNote}
+            onChange={e => setCorrectionNote(e.target.value)}
+            placeholder="e.g. Please correct your Aadhaar number — the one entered appears to be invalid. Also update your father's occupation field."
+            className="w-full rounded-md border border-orange-200 bg-white px-3 py-2 text-sm"
+          />
+          <Button loading={acting} disabled={!correctionNote.trim()} onClick={() => doAction('request-correction', { note: correctionNote })}>
+            Send Correction Request
+          </Button>
         </div>
       )}
 
@@ -354,6 +387,7 @@ function StatusBadge({ status }) {
   const colors = {
     submitted:                'bg-blue-100 text-blue-700',
     under_review:             'bg-blue-100 text-blue-700',
+    correction_requested:     'bg-orange-100 text-orange-700',
     scrutiny_accepted:        'bg-teal-100 text-teal-700',
     doc_verification_pending: 'bg-orange-100 text-orange-700',
     confirmed:                'bg-emerald-100 text-emerald-700',
@@ -365,6 +399,7 @@ function StatusBadge({ status }) {
   }
   const labels = {
     submitted: 'Submitted', under_review: 'Under Review',
+    correction_requested: 'Correction Requested',
     scrutiny_accepted: 'Scrutiny Accepted',
     doc_verification_pending: 'Doc Verification Pending',
     confirmed: 'Confirmed', fees_paid: 'Fees Paid',

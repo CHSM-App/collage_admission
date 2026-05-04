@@ -5,6 +5,7 @@ import { useAuthContext } from '../../../context/AuthContext.jsx'
 import SubjectSelection from './SubjectSelection.jsx'
 import CollegeFeePayment from './CollegeFeePayment.jsx'
 import PaymentReceipts from './PaymentReceipts.jsx'
+import ApplicationPrintView from './ApplicationPrintView.jsx'
 
 const YEAR_LABEL  = { 1: 'FY', 2: 'SY', 3: 'TY' }
 const STATUS_META = {
@@ -12,6 +13,7 @@ const STATUS_META = {
   payment_pending:          { label: 'Payment Pending',            color: 'bg-yellow-100 text-yellow-700' },
   submitted:                { label: 'Submitted',                  color: 'bg-blue-100 text-blue-700' },
   under_review:             { label: 'Under Review',               color: 'bg-blue-100 text-blue-700' },
+  correction_requested:     { label: 'Correction Required',        color: 'bg-orange-100 text-orange-700' },
   scrutiny_accepted:        { label: 'Scrutiny Accepted',          color: 'bg-teal-100 text-teal-700' },
   doc_verification_pending: { label: 'Doc Verification Pending',   color: 'bg-orange-100 text-orange-700' },
   confirmed:                { label: 'Confirmed',                  color: 'bg-emerald-100 text-emerald-700' },
@@ -23,11 +25,12 @@ const STATUS_META = {
 }
 
 const SECTIONS = [
-  { key: 'all',       label: 'All' },
-  { key: 'scrutiny',  label: 'Under Scrutiny',     statuses: ['draft','submitted','under_review'] },
-  { key: 'accepted',  label: 'Accepted',            statuses: ['scrutiny_accepted','doc_verification_pending'] },
-  { key: 'merit',     label: 'In Merit',            statuses: ['confirmed'] },
-  { key: 'confirmed', label: 'Confirmed Admission', statuses: ['fees_paid','roll_assigned','enrolled'] },
+  { key: 'all',        label: 'All' },
+  { key: 'scrutiny',   label: 'Under Scrutiny',     statuses: ['draft','submitted','under_review'] },
+  { key: 'correction', label: 'Correction Required', statuses: ['correction_requested'] },
+  { key: 'accepted',   label: 'Accepted',            statuses: ['scrutiny_accepted','doc_verification_pending'] },
+  { key: 'merit',      label: 'In Merit',            statuses: ['confirmed'] },
+  { key: 'confirmed',  label: 'Confirmed Admission', statuses: ['fees_paid','roll_assigned','enrolled'] },
 ]
 
 export default function MyApplications() {
@@ -39,6 +42,7 @@ export default function MyApplications() {
   const [feePayApp, setFeePayApp]     = useState(null)
   const [receiptsAppId, setReceiptsAppId] = useState(null)
   const [selectSubjectsApp, setSelectSubjectsApp] = useState(null)
+  const [viewAppId, setViewAppId]     = useState(null)  // id of app whose print view is open
 
   function fetchApps() {
     api.get(`applications?student_id=${user.id}`)
@@ -156,7 +160,8 @@ export default function MyApplications() {
           const meta = STATUS_META[app.status] || { label: app.status, color: 'bg-slate-100 text-slate-600' }
 
           return (
-            <article key={app.id} className="rounded-lg border border-slate-200 bg-white p-5">
+            <div key={app.id}>
+            <article className="rounded-lg border border-slate-200 bg-white p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="font-semibold text-slate-950">{app.college_name}</p>
@@ -176,6 +181,21 @@ export default function MyApplications() {
               </div>
 
               {/* Status-specific actions and messages */}
+              {app.status === 'correction_requested' && (
+                <div className="mt-3 rounded-md bg-orange-50 border border-orange-200 px-3 py-3 space-y-2">
+                  <p className="text-sm font-semibold text-orange-800">The college has requested corrections to your application.</p>
+                  {app.correction_note && (
+                    <p className="text-sm text-orange-700 whitespace-pre-wrap">{app.correction_note}</p>
+                  )}
+                  <button
+                    onClick={() => navigate(`/apply/${app.id}`)}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-orange-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-orange-700 transition"
+                  >
+                    Edit &amp; Resubmit Application
+                  </button>
+                </div>
+              )}
+
               {app.status === 'submitted' && (
                 <div className="mt-3 rounded-md bg-blue-50 border border-blue-100 px-3 py-2">
                   <p className="text-sm text-blue-800">
@@ -278,13 +298,13 @@ export default function MyApplications() {
                 <div className="flex items-center gap-2 flex-wrap">
                   {app.status !== 'draft' && app.registration_number && (
                     <button
-                      onClick={() => navigate(`/apply/${app.id}`)}
+                      onClick={() => setViewAppId(viewAppId === app.id ? null : app.id)}
                       className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 border border-slate-200 rounded-md px-2.5 py-1 hover:bg-slate-50 transition"
                     >
                       <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
                       </svg>
-                      View / Print
+                      {viewAppId === app.id ? 'Hide' : 'View / Print'}
                     </button>
                   )}
                   {app.application_fee_paid && (
@@ -301,6 +321,14 @@ export default function MyApplications() {
                 </div>
               </div>
             </article>
+            {viewAppId === app.id && (
+              <ApplicationPrintView
+                appId={app.id}
+                regNumber={app.registration_number}
+                onClose={() => setViewAppId(null)}
+              />
+            )}
+            </div>
           )
         })}
       </div>

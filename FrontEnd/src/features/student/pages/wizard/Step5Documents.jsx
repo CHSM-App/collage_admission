@@ -8,7 +8,7 @@ const ALLOWED_EXTS  = ['pdf', 'jpg', 'jpeg', 'png']
 
 export default function Step5Documents({
   data, errors, globalError, saving, appId, studentId,
-  onBack, onNext, onDocumentsChange, extraFooter,
+  onBack, onNext, onDocumentsChange, extraFooter, readOnly,
 }) {
   const required = data.required_documents || []
   const linked   = data.linked_documents   || []  // [{ document_type_id, document_name, file_name, file_path, ... }]
@@ -238,6 +238,7 @@ export default function Step5Documents({
           saving={saving}
           nextLabel={missingMandatory.length > 0 ? `${missingMandatory.length} required doc(s) missing` : 'Save & Continue'}
           extraFooter={extraFooter}
+          readOnly={readOnly}
         />
       </div>
     </div>

@@ -199,7 +199,7 @@ CREATE TABLE application_subjects (
 CREATE TABLE payments (
     id                  INT IDENTITY(1,1) PRIMARY KEY,
     application_id      INT NOT NULL REFERENCES applications(id),
-    payment_type        NVARCHAR(20) NOT NULL CHECK (payment_type IN ('application_fee','college_fee')),
+    payment_type        NVARCHAR(30) NOT NULL CHECK (payment_type IN ('application_fee','college_fee','college_fee_installment')),
     amount              DECIMAL(10,2) NOT NULL,
     gateway_order_id    NVARCHAR(100) NULL,
     gateway_payment_id  NVARCHAR(100) NULL,

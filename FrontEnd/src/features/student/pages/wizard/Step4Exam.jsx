@@ -9,7 +9,7 @@ const RESULT_OPTIONS = [
   { value: 'fail', label: 'Fail' },
 ]
 
-export default function Step4Exam({ data, errors, globalError, saving, onChange, setField, onBack, onNext, extraFooter }) {
+export default function Step4Exam({ data, errors, globalError, saving, onChange, setField, onBack, onNext, extraFooter, readOnly }) {
   const isFY = data.year_of_study === 1
   const e    = errors
   const [localError, setLocalError] = useState('')
@@ -193,7 +193,7 @@ export default function Step4Exam({ data, errors, globalError, saving, onChange,
           <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{localError || globalError}</p>
         )}
 
-        <StepFooter onBack={onBack} onNext={handleNext} saving={saving} extraFooter={extraFooter} />
+        <StepFooter onBack={onBack} onNext={handleNext} saving={saving} extraFooter={extraFooter} readOnly={readOnly} />
       </div>
     </div>
   )

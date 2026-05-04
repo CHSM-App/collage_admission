@@ -21,6 +21,9 @@ export default function AllReceipts() {
       .finally(() => setLoading(false))
   }, [user.id])
 
+
+
+  
   return (
     <section className="space-y-6">
       <div>

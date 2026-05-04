@@ -7,6 +7,7 @@ const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
 const STATUS_META = {
   submitted:                { label: 'Submitted',               color: 'bg-blue-100 text-blue-700' },
   under_review:             { label: 'Under Review',            color: 'bg-blue-100 text-blue-700' },
+  correction_requested:     { label: 'Correction Requested',    color: 'bg-orange-100 text-orange-700' },
   scrutiny_accepted:        { label: 'Scrutiny Accepted',       color: 'bg-teal-100 text-teal-700' },
   doc_verification_pending: { label: 'Doc Verification Pending',color: 'bg-orange-100 text-orange-700' },
   confirmed:                { label: 'Confirmed',               color: 'bg-emerald-100 text-emerald-700' },
@@ -19,12 +20,13 @@ const STATUS_META = {
 
 // key is what gets sent as ?status= to the API (comma-separated = multi-status query)
 const TABS = [
-  { key: 'submitted,under_review',                          label: 'Pending Scrutiny' },
-  { key: 'scrutiny_accepted',                               label: 'Scrutiny Accepted' },
-  { key: 'doc_verification_pending',                        label: 'Doc Verification' },
-  { key: 'confirmed',                                       label: 'Confirmed' },
-  { key: 'fees_paid',                                       label: 'Fees Paid' },
-  { key: 'rejected,cancelled',                              label: 'Rejected / Cancelled' },
+  { key: 'submitted,under_review',  label: 'Pending Scrutiny' },
+  { key: 'correction_requested',    label: 'Awaiting Correction' },
+  { key: 'scrutiny_accepted',       label: 'Scrutiny Accepted' },
+  { key: 'doc_verification_pending',label: 'Doc Verification' },
+  { key: 'confirmed',               label: 'Confirmed' },
+  { key: 'fees_paid',               label: 'Fees Paid' },
+  { key: 'rejected,cancelled',      label: 'Rejected / Cancelled' },
 ]
 
 export default function ApplicationInbox({ collegeId }) {

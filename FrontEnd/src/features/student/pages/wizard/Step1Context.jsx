@@ -61,7 +61,7 @@ export function StepHeader({ step, title, desc }) {
   )
 }
 
-export function StepFooter({ onBack, onNext, saving, nextLabel = 'Save & Continue', hideBack, extraFooter }) {
+export function StepFooter({ onBack, onNext, saving, nextLabel = 'Save & Continue', hideBack, extraFooter, readOnly }) {
   return (
     <div className="space-y-2 pt-2">
       <div className="flex flex-col-reverse sm:flex-row gap-3">
@@ -70,9 +70,11 @@ export function StepFooter({ onBack, onNext, saving, nextLabel = 'Save & Continu
             ← Back
           </Button>
         )}
-        <Button onClick={onNext} loading={saving} className="w-full sm:w-auto sm:ml-auto">
-          {nextLabel} →
-        </Button>
+        {!readOnly && (
+          <Button onClick={onNext} loading={saving} className="w-full sm:w-auto sm:ml-auto">
+            {nextLabel} →
+          </Button>
+        )}
       </div>
       {extraFooter && <div className="flex justify-end">{extraFooter}</div>}
     </div>

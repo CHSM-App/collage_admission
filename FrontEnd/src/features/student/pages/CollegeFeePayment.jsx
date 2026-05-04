@@ -27,7 +27,7 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
         const data = r.data.data
         setFeeStatus(data)
         // Pre-fill input with remaining amount
-        if (data && !data.has_installment_plan && data.remaining > 0) {
+        if (data && data.remaining > 0) {
           setInputAmount(String(data.remaining))
         }
       })
@@ -256,69 +256,11 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
           </div>
         )}
 
-        {/* ── Installment plan (college-defined) ── */}
-        {fs.has_installment_plan && !allPaid && (
-          <div className="space-y-3">
-            <p className="text-sm font-semibold text-slate-700">Pay by Installment</p>
-            <div className="space-y-2">
-              {fs.installments.map(ins => (
-                <div
-                  key={ins.id}
-                  className={`flex flex-col gap-2 rounded-lg border px-4 py-3 sm:flex-row sm:items-center sm:justify-between ${
-                    ins.is_paid ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-slate-200'
-                  }`}
-                >
-                  <div>
-                    <p className={`text-sm font-semibold ${ins.is_paid ? 'text-emerald-700' : 'text-slate-900'}`}>
-                      {ins.installment_no}. {ins.label}
-                    </p>
-                    <div className="flex gap-3 text-xs text-slate-400 mt-0.5">
-                      <span>₹{Number(ins.amount).toLocaleString('en-IN')}</span>
-                      {ins.due_date && <span>Due: {new Date(ins.due_date).toLocaleDateString('en-IN')}</span>}
-                      {ins.is_paid && ins.paid_at && (
-                        <span className="text-emerald-600">Paid on {new Date(ins.paid_at).toLocaleDateString('en-IN')}</span>
-                      )}
-                    </div>
-                  </div>
-                  {ins.is_paid ? (
-                    <span className="text-emerald-600 text-sm font-bold">✓ Paid</span>
-                  ) : (
-                    <Button
-                      onClick={() => payInstallment(ins.id)}
-                      loading={payingId === ins.id}
-                      disabled={!!payingId || !!paying || scriptError}
-                    >
-                      Pay ₹{Number(ins.amount).toLocaleString('en-IN')}
-                    </Button>
-                  )}
-                </div>
-              ))}
-            </div>
+        {/* ── College-defined installment plan (commented out — students use free-form entry below) ── */}
+        {/* {fs.has_installment_plan && !allPaid && ( ... )} */}
 
-            {/* Pay full balance at once */}
-            {fs.remaining > 0 && (
-              <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-blue-900">Pay Full Amount</p>
-                  <p className="text-xs text-blue-600 mt-0.5">Clear all remaining dues in one payment</p>
-                </div>
-                <Button
-                  onClick={() => {
-                    setInputAmount(String(fs.remaining))
-                    payFullAmount(fs.remaining)
-                  }}
-                  loading={paying}
-                  disabled={!!payingId || !!paying || scriptError}
-                >
-                  Pay ₹{Number(fs.remaining).toLocaleString('en-IN')}
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Free-form partial payment (no installment plan) ── */}
-        {!fs.has_installment_plan && !allPaid && (
+        {/* ── Free-form partial payment ── */}
+        {!allPaid && (
           <div className="space-y-3">
             {fs.total_fee === 0 ? (
               <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">

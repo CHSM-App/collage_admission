@@ -33,13 +33,13 @@ router.get('/:collegeId/admission-periods', async (req, res) => {
       .query(`
         SELECT ap.id, ap.year_of_study, ap.academic_year,
                ap.start_date, ap.end_date, ap.total_seats, ap.filled_seats,
-               ap.application_fee, ap.is_active,
+               ap.application_fee, ap.is_active, ap.is_disabled,
                fm.code_no AS course_id,
                CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name
         FROM admission_periods ap
         JOIN faculty_master fm ON fm.code_no = ap.course_id AND fm.college_id = ap.college_id
         WHERE ap.college_id = @col
-          ${activeOnly ? 'AND ap.is_active = 1' : ''}
+          ${activeOnly ? 'AND ap.is_active = 1 AND ap.is_disabled = 0' : ''}
         ORDER BY ap.academic_year DESC, fm.degree_course_name, ap.year_of_study
       `);
     return res.json({ success: true, data: result.recordset });
@@ -81,17 +81,19 @@ router.post('/:collegeId/admission-periods', async (req, res) => {
 });
 
 router.put('/:collegeId/admission-periods/:periodId', async (req, res) => {
-  const { start_date, end_date, total_seats, application_fee, is_active } = req.body;
+  const { start_date, end_date, total_seats, application_fee, is_active, is_disabled } = req.body;
 
   try {
+    const mssql = require('mssql');
     await db.request()
-      .input('id',    parseInt(req.params.periodId))
-      .input('col',   parseInt(req.params.collegeId))
-      .input('sd',    start_date    || null)
-      .input('ed',    end_date      || null)
-      .input('seats', total_seats   ? parseInt(total_seats)         : null)
-      .input('fee',   application_fee ? parseFloat(application_fee) : null)
-      .input('act',   is_active !== undefined ? (is_active ? 1 : 0) : null)
+      .input('id',    mssql.Int,  parseInt(req.params.periodId))
+      .input('col',   mssql.Int,  parseInt(req.params.collegeId))
+      .input('sd',    mssql.NVarChar, start_date    || null)
+      .input('ed',    mssql.NVarChar, end_date      || null)
+      .input('seats', mssql.Int,  total_seats   ? parseInt(total_seats)         : null)
+      .input('fee',   mssql.Decimal, application_fee ? parseFloat(application_fee) : null)
+      .input('act',   mssql.Bit,  is_active    !== undefined ? (is_active    ? 1 : 0) : null)
+      .input('dis',   mssql.Bit,  is_disabled  !== undefined ? (is_disabled  ? 1 : 0) : null)
       .query(`
         UPDATE admission_periods
         SET
@@ -99,7 +101,8 @@ router.put('/:collegeId/admission-periods/:periodId', async (req, res) => {
           end_date        = COALESCE(@ed,    end_date),
           total_seats     = COALESCE(@seats, total_seats),
           application_fee = COALESCE(@fee,   application_fee),
-          is_active       = COALESCE(@act,   is_active)
+          is_active       = COALESCE(@act,   is_active),
+          is_disabled     = COALESCE(@dis,   is_disabled)
         WHERE id = @id AND college_id = @col
       `);
 
@@ -341,7 +344,43 @@ router.get('/:collegeId/applications/:appId', async (req, res) => {
   }
 });
 
-// ── Scrutiny Accept (submitted → scrutiny_accepted) ─────────
+// ── Request Correction (submitted/under_review → correction_requested) ──────
+router.post('/:collegeId/applications/:appId/request-correction', async (req, res) => {
+  const { note } = req.body;
+  if (!note || !note.trim()) {
+    return res.status(400).json({ success: false, message: 'A correction note is required.' });
+  }
+  try {
+    const appRes = await db.request()
+      .input('id',  parseInt(req.params.appId))
+      .input('col', parseInt(req.params.collegeId))
+      .query('SELECT id, status FROM applications WHERE id=@id AND college_id=@col');
+
+    if (appRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: 'Application not found.' });
+    }
+    if (!['submitted', 'under_review', 'correction_requested'].includes(appRes.recordset[0].status)) {
+      return res.status(400).json({ success: false, message: 'Correction can only be requested for submitted or under-review applications.' });
+    }
+
+    const mssql = require('mssql');
+    await db.request()
+      .input('id',   mssql.Int,      parseInt(req.params.appId))
+      .input('note', mssql.NVarChar, note.trim())
+      .query(`
+        UPDATE applications
+        SET status = 'correction_requested', correction_note = @note, updated_at = GETDATE()
+        WHERE id = @id
+      `);
+
+    return res.json({ success: true, message: 'Correction requested. Student has been notified.' });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── Scrutiny Accept (submitted/correction_requested → scrutiny_accepted) ─────
 router.post('/:collegeId/applications/:appId/approve', async (req, res) => {
   try {
     const appRes = await db.request()
@@ -352,7 +391,7 @@ router.post('/:collegeId/applications/:appId/approve', async (req, res) => {
     if (appRes.recordset.length === 0) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
-    if (!['submitted', 'under_review'].includes(appRes.recordset[0].status)) {
+    if (!['submitted', 'under_review', 'correction_requested'].includes(appRes.recordset[0].status)) {
       return res.status(400).json({ success: false, message: 'Application must be submitted/under_review to accept.' });
     }
 
@@ -365,7 +404,8 @@ router.post('/:collegeId/applications/:appId/approve', async (req, res) => {
       .input('id', parseInt(req.params.appId))
       .query(`
         UPDATE applications
-        SET status = 'scrutiny_accepted', approved_at = GETDATE(), updated_at = GETDATE()
+        SET status = 'scrutiny_accepted', approved_at = GETDATE(), updated_at = GETDATE(),
+            correction_note = NULL
         WHERE id = @id
       `);
 

@@ -37,7 +37,7 @@ const FUNDING_COLORS = {
   Both:       'bg-blue-50 text-blue-700 border-blue-200',
 }
 
-export default function Step2Personal({ data, errors, globalError, saving, onChange, onBack, onNext }) {
+export default function Step2Personal({ data, errors, globalError, saving, onChange, onBack, onNext, readOnly }) {
   const [determined, setDetermined]         = useState({ category: '', reason: '' })
   const [overrideMode, setOverrideMode]     = useState(!!data.fees_category_override)
   const [overrideRemark, setOverrideRemark] = useState(data.fees_category_override_remark || '')
@@ -359,7 +359,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
           <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{localError || globalError}</p>
         )}
 
-        <StepFooter onBack={onBack} onNext={handleNext} saving={saving} />
+        <StepFooter onBack={onBack} onNext={handleNext} saving={saving} readOnly={readOnly} />
       </div>
     </div>
   )
