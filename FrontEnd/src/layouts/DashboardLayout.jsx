@@ -1,8 +1,9 @@
-import { Link, Outlet, useLocation } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
 import { DASHBOARD_PATHS } from '../app/routePaths.js'
 import Button from '../shared/components/Button.jsx'
 import { useAuth } from '../features/auth/hooks/useAuth.js'
+import { useNotifications } from '../features/student/hooks/useNotifications.js'
 import api from '../services/api.js'
 
 const roleLabels = {
@@ -18,6 +19,7 @@ const sidebarItems = {
     { label: 'Browse & Apply', to: `${DASHBOARD_PATHS.student}?section=browse` },
     { label: 'My Applications',to: `${DASHBOARD_PATHS.student}?section=applications` },
     { label: 'My Documents',   to: `${DASHBOARD_PATHS.student}?section=documents` },
+    { label: 'Notifications',  to: `${DASHBOARD_PATHS.student}?section=notifications` },
   ],
   college: [
     { label: 'Overview',          to: DASHBOARD_PATHS.college,                                   perm: null },
@@ -46,6 +48,7 @@ function getDisplayName(user) {
 
 export default function DashboardLayout() {
   const location = useLocation()
+  const navigate  = useNavigate()
   const { user, role, logout } = useAuth()
   const [hasPayments, setHasPayments] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -53,6 +56,38 @@ export default function DashboardLayout() {
 
   const isStaff       = !!user?.is_staff
   const permissions   = user?.permissions || {}
+
+  // ── Notifications (student only) ──────────────────────────
+  const { notifications, unread, markSeen, clearAll } = useNotifications(
+    role === 'student' ? user?.id : null
+  )
+  const [bellOpen, setBellOpen]   = useState(false)
+  const [popup, setPopup]         = useState(false)
+  const bellRef                   = useRef(null)
+
+  // Show one-time popup per session when there are unread notifications
+  useEffect(() => {
+    if (role === 'student' && unread > 0 && !sessionStorage.getItem('notif_popup_shown')) {
+      setPopup(true)
+      sessionStorage.setItem('notif_popup_shown', '1')
+    }
+  }, [role, unread])
+
+  // Close bell dropdown on outside click
+  useEffect(() => {
+    function handleOutside(e) {
+      if (bellRef.current && !bellRef.current.contains(e.target)) setBellOpen(false)
+    }
+    document.addEventListener('mousedown', handleOutside)
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [])
+
+  function goToNotifications() {
+    markSeen()
+    setBellOpen(false)
+    setPopup(false)
+    navigate(`${DASHBOARD_PATHS.student}?section=notifications`)
+  }
 
   // Close sidebar on route change (mobile)
   useEffect(() => {
@@ -136,6 +171,7 @@ export default function DashboardLayout() {
               }
               const isActive  = currentPath === item.to
               const readOnly  = isStaff && item.perm && permissions[item.perm] === false
+              const isNotifItem = item.to?.includes('section=notifications')
               return (
                 <Link
                   key={item.to}
@@ -150,6 +186,11 @@ export default function DashboardLayout() {
                   {readOnly && (
                     <span className={`text-xs font-normal rounded px-1.5 py-0.5 ${isActive ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-500'}`}>
                       view
+                    </span>
+                  )}
+                  {isNotifItem && unread > 0 && (
+                    <span className={`ml-auto text-xs font-bold rounded-full px-1.5 py-0.5 min-w-[1.25rem] text-center ${isActive ? 'bg-white text-slate-950' : 'bg-red-500 text-white'}`}>
+                      {unread > 9 ? '9+' : unread}
                     </span>
                   )}
                 </Link>
@@ -208,6 +249,59 @@ export default function DashboardLayout() {
               }`}>
                 {role}
               </span>
+
+              {/* Bell icon — student only */}
+              {role === 'student' && (
+                <div className="relative" ref={bellRef}>
+                  <button
+                    onClick={() => { setBellOpen(o => !o); if (!bellOpen) markSeen() }}
+                    className="relative rounded-md p-1.5 text-slate-500 hover:bg-slate-100 transition"
+                    aria-label="Notifications"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                    </svg>
+                    {unread > 0 && (
+                      <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold">
+                        {unread > 9 ? '9+' : unread}
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Dropdown preview */}
+                  {bellOpen && (
+                    <div className="absolute right-0 top-full mt-2 w-80 rounded-xl border border-slate-200 bg-white shadow-lg z-50 overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-100">
+                        <p className="text-sm font-bold text-slate-800">Notifications</p>
+                        <div className="flex items-center gap-3">
+                          {notifications.length > 0 && (
+                            <button onClick={() => { clearAll(); setBellOpen(false) }} className="text-xs text-slate-400 hover:text-slate-600 font-semibold">Clear all</button>
+                          )}
+                          <button onClick={goToNotifications} className="text-xs text-blue-600 hover:underline font-semibold">View all</button>
+                        </div>
+                      </div>
+                      {notifications.length === 0 ? (
+                        <p className="px-4 py-5 text-sm text-slate-400 text-center">No notifications</p>
+                      ) : (
+                        <ul className="divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                          {notifications.slice(0, 5).map((n, i) => (
+                            <li key={i}>
+                              <button
+                                onClick={() => { markSeen(); setBellOpen(false); navigate(n.link) }}
+                                className="w-full text-left px-4 py-3 hover:bg-slate-50 transition"
+                              >
+                                <p className="text-sm font-semibold text-slate-800 truncate">{n.title}</p>
+                                <p className="text-xs text-slate-500 truncate mt-0.5">{n.body}</p>
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <button
                 onClick={() => { if (confirm('Are you sure you want to logout?')) logout() }}
                 className="lg:hidden rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
@@ -222,6 +316,50 @@ export default function DashboardLayout() {
           <Outlet />
         </main>
       </div>
+
+      {/* ── New notification popup (shown once per session on login) ── */}
+      {popup && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/30">
+          <div className="w-full max-w-sm rounded-2xl bg-white shadow-2xl overflow-hidden">
+            <div className="bg-emerald-600 px-5 py-4 flex items-center gap-3">
+              <svg className="w-6 h-6 text-white shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+              <p className="text-white font-bold text-base">You have new notifications</p>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              {notifications.slice(0, 3).map((n, i) => (
+                <div key={i} className="flex gap-2 items-start">
+                  <span className="text-base shrink-0">
+                    {n.type === 'action' || n.type === 'warning' ? '🔔' : n.type === 'error' ? '❌' : '✅'}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-slate-800 truncate">{n.title}</p>
+                    <p className="text-xs text-slate-500 truncate">{n.college}</p>
+                  </div>
+                </div>
+              ))}
+              {notifications.length > 3 && (
+                <p className="text-xs text-slate-400">+{notifications.length - 3} more notifications</p>
+              )}
+            </div>
+            <div className="px-5 pb-5 flex gap-2">
+              <button
+                onClick={goToNotifications}
+                className="flex-1 rounded-lg bg-emerald-600 py-2 text-sm font-semibold text-white hover:bg-emerald-700 transition"
+              >
+                View Notifications
+              </button>
+              <button
+                onClick={() => { setPopup(false); markSeen() }}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

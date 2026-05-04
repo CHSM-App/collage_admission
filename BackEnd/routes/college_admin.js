@@ -239,7 +239,7 @@ router.get('/:collegeId/applications', async (req, res) => {
     let query = `
       SELECT
         a.id, a.registration_number, a.year_of_study, a.academic_year,
-        a.status, a.submitted_at, a.roll_number,
+        a.status, a.submitted_at, a.roll_number, a.course_id,
         s.full_name AS student_name, s.email AS student_email, s.phone,
         COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name
       FROM applications a
@@ -369,7 +369,7 @@ router.post('/:collegeId/applications/:appId/request-correction', async (req, re
       .input('note', mssql.NVarChar, note.trim())
       .query(`
         UPDATE applications
-        SET status = 'correction_requested', correction_note = @note, updated_at = GETDATE()
+        SET status = 'correction_requested', correction_note = @note, updated_at = GETDATE(), status_updated_at = GETDATE()
         WHERE id = @id
       `);
 
@@ -404,7 +404,7 @@ router.post('/:collegeId/applications/:appId/approve', async (req, res) => {
       .input('id', parseInt(req.params.appId))
       .query(`
         UPDATE applications
-        SET status = 'scrutiny_accepted', approved_at = GETDATE(), updated_at = GETDATE(),
+        SET status = 'scrutiny_accepted', approved_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(),
             correction_note = NULL
         WHERE id = @id
       `);
@@ -438,7 +438,7 @@ router.post('/:collegeId/applications/:appId/reject', async (req, res) => {
       .input('reason', reason || null)
       .query(`
         UPDATE applications
-        SET status = 'rejected', rejection_reason = @reason, updated_at = GETDATE()
+        SET status = 'rejected', rejection_reason = @reason, updated_at = GETDATE(), status_updated_at = GETDATE()
         WHERE id = @id
       `);
 
@@ -471,7 +471,7 @@ router.post('/:collegeId/applications/:appId/call-for-doc-verification', async (
       .input('id', parseInt(req.params.appId))
       .query(`
         UPDATE applications
-        SET status = 'doc_verification_pending', updated_at = GETDATE()
+        SET status = 'doc_verification_pending', updated_at = GETDATE(), status_updated_at = GETDATE()
         WHERE id = @id
       `);
 
@@ -495,7 +495,7 @@ router.post('/:collegeId/applications/:appId/verify-docs', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Invalid status for doc verification.' });
   }
   await db.request().input('id', parseInt(req.params.appId)).query(`
-    UPDATE applications SET status = 'doc_verification_pending', updated_at = GETDATE() WHERE id = @id
+    UPDATE applications SET status = 'doc_verification_pending', updated_at = GETDATE(), status_updated_at = GETDATE() WHERE id = @id
   `);
   return res.json({ success: true, message: 'Student called for physical document verification.' });
 });
@@ -535,7 +535,7 @@ router.post('/:collegeId/applications/:appId/confirm', async (req, res) => {
       .input('id', parseInt(req.params.appId))
       .query(`
         UPDATE applications
-        SET status = 'confirmed', confirmed_at = GETDATE(), updated_at = GETDATE()
+        SET status = 'confirmed', confirmed_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE()
         WHERE id = @id
       `);
 
@@ -574,7 +574,7 @@ router.post('/:collegeId/applications/:appId/cancel', async (req, res) => {
       .input('reason', reason || null)
       .query(`
         UPDATE applications
-        SET status = 'cancelled', cancellation_reason = @reason, updated_at = GETDATE()
+        SET status = 'cancelled', cancellation_reason = @reason, updated_at = GETDATE(), status_updated_at = GETDATE()
         WHERE id = @id
       `);
 

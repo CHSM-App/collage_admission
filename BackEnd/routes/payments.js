@@ -287,7 +287,7 @@ router.post('/create-order', async (req, res) => {
   if (!application_id || !payment_type) {
     return res.status(400).json({ success: false, message: 'application_id and payment_type are required.' });
   }
-  if (!['application_fee', 'college_fee' /*, 'college_fee_installment' */].includes(payment_type)) {
+  if (!['application_fee', 'college_fee', 'college_fee_installment'].includes(payment_type)) {
     return res.status(400).json({ success: false, message: 'Invalid payment_type.' });
   }
 
@@ -359,36 +359,35 @@ router.post('/create-order', async (req, res) => {
       description = totalFee > 0 && parsedAmount >= remaining - 0.01 ? 'College Fee (Full)' : 'College Fee (Partial)';
 
     } else {
-      // college_fee_installment (disabled — college-defined plan feature commented out)
-      return res.status(400).json({ success: false, message: 'Invalid payment_type.' });
-      // if (!['approved', 'document_verification', 'confirmed'].includes(app.status)) {
-      //   return res.status(400).json({ success: false, message: 'Application must be approved or confirmed to pay college fee.' });
-      // }
-      // if (!installment_plan_id) {
-      //   return res.status(400).json({ success: false, message: 'installment_plan_id is required for installment payments.' });
-      // }
-      // const insRes = await db.request()
-      //   .input('insId', mssql.Int, parseInt(installment_plan_id))
-      //   .input('pid',   mssql.Int, app.admission_period_id)
-      //   .query(`
-      //     SELECT id, installment_no, label, amount, due_date
-      //     FROM fee_installment_plans
-      //     WHERE id = @insId AND admission_period_id = @pid
-      //   `);
-      // if (!insRes.recordset.length) {
-      //   return res.status(404).json({ success: false, message: 'Installment not found for this application.' });
-      // }
-      // const ins = insRes.recordset[0];
-      // const alreadyPaid = await db.request()
-      //   .input('appId', mssql.Int, parseInt(application_id))
-      //   .input('insId', mssql.Int, parseInt(installment_plan_id))
-      //   .query(`SELECT id FROM payments WHERE application_id = @appId AND installment_plan_id = @insId AND status = 'success'`);
-      // if (alreadyPaid.recordset.length > 0) {
-      //   return res.status(400).json({ success: false, message: `${ins.label} has already been paid.` });
-      // }
-      // amount = ins.amount;
-      // description = ins.label;
-      // installmentLabel = ins.label;
+      // college_fee_installment — college-defined installment plan
+      if (!['approved', 'document_verification', 'confirmed'].includes(app.status)) {
+        return res.status(400).json({ success: false, message: 'Application must be approved or confirmed to pay college fee.' });
+      }
+      if (!installment_plan_id) {
+        return res.status(400).json({ success: false, message: 'installment_plan_id is required for installment payments.' });
+      }
+      const insRes = await db.request()
+        .input('insId', mssql.Int, parseInt(installment_plan_id))
+        .input('pid',   mssql.Int, app.admission_period_id)
+        .query(`
+          SELECT id, installment_no, label, amount, due_date
+          FROM fee_installment_plans
+          WHERE id = @insId AND admission_period_id = @pid
+        `);
+      if (!insRes.recordset.length) {
+        return res.status(404).json({ success: false, message: 'Installment not found for this application.' });
+      }
+      const ins = insRes.recordset[0];
+      const alreadyPaid = await db.request()
+        .input('appId', mssql.Int, parseInt(application_id))
+        .input('insId', mssql.Int, parseInt(installment_plan_id))
+        .query(`SELECT id FROM payments WHERE application_id = @appId AND installment_plan_id = @insId AND status = 'success'`);
+      if (alreadyPaid.recordset.length > 0) {
+        return res.status(400).json({ success: false, message: `${ins.label} has already been paid.` });
+      }
+      amount = ins.amount;
+      description = ins.label;
+      installmentLabel = ins.label;
     }
 
     if (!amount || amount <= 0) {
@@ -491,7 +490,7 @@ router.post('/verify', async (req, res) => {
         .query(`
           UPDATE applications
           SET status = 'submitted', registration_number = @regNum,
-              application_fee_paid = 1, submitted_at = GETDATE(), updated_at = GETDATE()
+              application_fee_paid = 1, submitted_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE()
           WHERE id = @id
         `);
 
@@ -538,7 +537,7 @@ router.post('/verify', async (req, res) => {
           .input('id', mssql.Int, appId)
           .query(`
             UPDATE applications
-            SET status = 'fees_paid', college_fee_paid = 1, updated_at = GETDATE()
+            SET status = 'fees_paid', college_fee_paid = 1, updated_at = GETDATE(), status_updated_at = GETDATE()
             WHERE id = @id
           `);
       }
@@ -549,57 +548,56 @@ router.post('/verify', async (req, res) => {
         data: { all_paid: allPaid, total_paid: totalPaid, remaining: Math.max(0, totalFee - totalPaid) },
       });
 
-    // ── college_fee_installment (disabled — college-defined plan feature commented out) ──
+    // ── college_fee_installment — college-defined installment plan ──
     } else {
-      return res.status(400).json({ success: false, message: 'Invalid payment_type.' });
-      // if (!installment_plan_id) {
-      //   return res.status(400).json({ success: false, message: 'installment_plan_id required.' });
-      // }
-      // const insRes = await db.request()
-      //   .input('insId', mssql.Int, parseInt(installment_plan_id))
-      //   .query('SELECT id, installment_no, label, amount FROM fee_installment_plans WHERE id = @insId');
-      // if (!insRes.recordset.length) {
-      //   return res.status(404).json({ success: false, message: 'Installment plan not found.' });
-      // }
-      // const ins = insRes.recordset[0];
-      // await db.request()
-      //   .input('appId',   mssql.Int,      appId)
-      //   .input('ptype',   mssql.NVarChar, 'college_fee_installment')
-      //   .input('amount',  mssql.Decimal,  ins.amount)
-      //   .input('insId',   mssql.Int,      parseInt(installment_plan_id))
-      //   .input('insNo',   mssql.Int,      ins.installment_no)
-      //   .input('orderId', mssql.NVarChar, razorpay_order_id)
-      //   .input('payId',   mssql.NVarChar, razorpay_payment_id)
-      //   .query(`
-      //     INSERT INTO payments
-      //       (application_id, payment_type, amount, status, installment_plan_id, installment_no,
-      //        razorpay_order_id, razorpay_payment_id, completed_at)
-      //     VALUES (@appId, @ptype, @amount, 'success', @insId, @insNo, @orderId, @payId, GETDATE())
-      //   `);
-      // const allInstallments = await db.request()
-      //   .input('pid', mssql.Int, app.admission_period_id)
-      //   .query('SELECT id FROM fee_installment_plans WHERE admission_period_id = @pid');
-      // const paidInstallments = await db.request()
-      //   .input('appId', mssql.Int, appId)
-      //   .query(`
-      //     SELECT DISTINCT installment_plan_id FROM payments
-      //     WHERE application_id = @appId
-      //       AND payment_type = 'college_fee_installment'
-      //       AND status = 'success'
-      //   `);
-      // const allPlanIds = allInstallments.recordset.map(r => r.id).sort().join(',');
-      // const paidPlanIds = paidInstallments.recordset.map(r => r.installment_plan_id).sort().join(',');
-      // const allPaid = allPlanIds === paidPlanIds;
-      // if (allPaid) {
-      //   await db.request()
-      //     .input('id', mssql.Int, appId)
-      //     .query(`UPDATE applications SET status = 'fees_paid', college_fee_paid = 1, updated_at = GETDATE() WHERE id = @id`);
-      // }
-      // return res.json({
-      //   success: true,
-      //   message: allPaid ? `${ins.label} paid. All installments complete — fees fully paid!` : `${ins.label} paid successfully.`,
-      //   data: { all_paid: allPaid, installment_no: ins.installment_no },
-      // });
+      if (!installment_plan_id) {
+        return res.status(400).json({ success: false, message: 'installment_plan_id required.' });
+      }
+      const insRes = await db.request()
+        .input('insId', mssql.Int, parseInt(installment_plan_id))
+        .query('SELECT id, installment_no, label, amount FROM fee_installment_plans WHERE id = @insId');
+      if (!insRes.recordset.length) {
+        return res.status(404).json({ success: false, message: 'Installment plan not found.' });
+      }
+      const ins = insRes.recordset[0];
+      await db.request()
+        .input('appId',   mssql.Int,      appId)
+        .input('ptype',   mssql.NVarChar, 'college_fee_installment')
+        .input('amount',  mssql.Decimal,  ins.amount)
+        .input('insId',   mssql.Int,      parseInt(installment_plan_id))
+        .input('insNo',   mssql.Int,      ins.installment_no)
+        .input('orderId', mssql.NVarChar, razorpay_order_id)
+        .input('payId',   mssql.NVarChar, razorpay_payment_id)
+        .query(`
+          INSERT INTO payments
+            (application_id, payment_type, amount, status, installment_plan_id, installment_no,
+             razorpay_order_id, razorpay_payment_id, completed_at)
+          VALUES (@appId, @ptype, @amount, 'success', @insId, @insNo, @orderId, @payId, GETDATE())
+        `);
+      const allInstallments = await db.request()
+        .input('pid', mssql.Int, app.admission_period_id)
+        .query('SELECT id FROM fee_installment_plans WHERE admission_period_id = @pid');
+      const paidInstallments = await db.request()
+        .input('appId', mssql.Int, appId)
+        .query(`
+          SELECT DISTINCT installment_plan_id FROM payments
+          WHERE application_id = @appId
+            AND payment_type = 'college_fee_installment'
+            AND status = 'success'
+        `);
+      const allPlanIds  = allInstallments.recordset.map(r => r.id).sort().join(',');
+      const paidPlanIds = paidInstallments.recordset.map(r => r.installment_plan_id).sort().join(',');
+      const allPaid = allPlanIds === paidPlanIds;
+      if (allPaid) {
+        await db.request()
+          .input('id', mssql.Int, appId)
+          .query(`UPDATE applications SET status = 'fees_paid', college_fee_paid = 1, updated_at = GETDATE(), status_updated_at = GETDATE() WHERE id = @id`);
+      }
+      return res.json({
+        success: true,
+        message: allPaid ? `${ins.label} paid. All installments complete — fees fully paid!` : `${ins.label} paid successfully.`,
+        data: { all_paid: allPaid, installment_no: ins.installment_no },
+      });
     }
   } catch (err) {
     console.error('verify error:', err);

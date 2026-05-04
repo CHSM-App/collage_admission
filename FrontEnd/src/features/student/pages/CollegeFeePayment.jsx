@@ -256,11 +256,55 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
           </div>
         )}
 
-        {/* ── College-defined installment plan (commented out — students use free-form entry below) ── */}
-        {/* {fs.has_installment_plan && !allPaid && ( ... )} */}
+        {/* ── College-defined installment plan ── */}
+        {fs.has_installment_plan && !allPaid && (
+          <div className="space-y-2">
+            <p className="text-sm font-semibold text-slate-700">Installment Plan</p>
+            {fs.installments.map(ins => (
+              <div
+                key={ins.id}
+                className={`flex items-center justify-between gap-3 rounded-lg border px-4 py-3 ${
+                  ins.is_paid
+                    ? 'bg-emerald-50 border-emerald-200'
+                    : 'bg-white border-slate-200'
+                }`}
+              >
+                <div>
+                  <p className={`text-sm font-semibold ${ins.is_paid ? 'text-emerald-700' : 'text-slate-800'}`}>{ins.label}</p>
+                  <p className="text-xs text-slate-400">
+                    ₹{Number(ins.amount).toLocaleString('en-IN')}
+                    {ins.due_date ? ` · Due ${new Date(ins.due_date).toLocaleDateString('en-IN')}` : ''}
+                    {ins.is_paid && ins.paid_at ? ` · Paid ${new Date(ins.paid_at).toLocaleDateString('en-IN')}` : ''}
+                  </p>
+                </div>
+                {ins.is_paid ? (
+                  <span className="text-xs font-bold text-emerald-600">Paid</span>
+                ) : (
+                  <Button
+                    onClick={() => payInstallment(ins.id)}
+                    loading={payingId === ins.id}
+                    disabled={!!paying || !!payingId || scriptError}
+                    className="shrink-0 text-xs px-3 py-1.5"
+                  >
+                    Pay ₹{Number(ins.amount).toLocaleString('en-IN')}
+                  </Button>
+                )}
+              </div>
+            ))}
+            <p className="text-xs text-slate-400 mt-1">Or pay the full remaining balance at once:</p>
+            <Button
+              onClick={() => payFullAmount(fs.remaining)}
+              loading={paying && !payingId}
+              disabled={!!paying || !!payingId || scriptError}
+              className="w-full"
+            >
+              Pay Full Remaining ₹{Number(fs.remaining).toLocaleString('en-IN')}
+            </Button>
+          </div>
+        )}
 
-        {/* ── Free-form partial payment ── */}
-        {!allPaid && (
+        {/* ── Free-form partial payment (no installment plan) ── */}
+        {!fs.has_installment_plan && !allPaid && (
           <div className="space-y-3">
             {fs.total_fee === 0 ? (
               <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">

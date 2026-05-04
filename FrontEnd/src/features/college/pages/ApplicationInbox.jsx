@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import api from '../../../services/api.js'
 
@@ -18,7 +18,6 @@ const STATUS_META = {
   cancelled:                { label: 'Cancelled',               color: 'bg-slate-100 text-slate-500' },
 }
 
-// key is what gets sent as ?status= to the API (comma-separated = multi-status query)
 const TABS = [
   { key: 'submitted,under_review',  label: 'Pending Scrutiny' },
   { key: 'correction_requested',    label: 'Awaiting Correction' },
@@ -34,9 +33,14 @@ export default function ApplicationInbox({ collegeId }) {
   const [searchParams] = useSearchParams()
   const initialStatus = searchParams.get('status') || 'submitted,under_review'
 
-  const [activeTab, setActiveTab] = useState(initialStatus)
-  const [apps, setApps]           = useState([])
-  const [loading, setLoading]     = useState(true)
+  const [activeTab, setActiveTab]   = useState(initialStatus)
+  const [apps, setApps]             = useState([])
+  const [loading, setLoading]       = useState(true)
+
+  // Filter state
+  const [search, setSearch]         = useState('')
+  const [filterCourse, setFilterCourse] = useState('')
+  const [filterYear, setFilterYear]     = useState('')
 
   function fetchApps(status) {
     setLoading(true)
@@ -46,14 +50,52 @@ export default function ApplicationInbox({ collegeId }) {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { fetchApps(activeTab) }, [activeTab, collegeId])
+  useEffect(() => {
+    fetchApps(activeTab)
+    // Reset filters on tab change
+    setSearch('')
+    setFilterCourse('')
+    setFilterYear('')
+  }, [activeTab, collegeId])
+
+  // Derive unique course options from fetched apps
+  const courseOptions = useMemo(() => {
+    const map = new Map()
+    apps.forEach(a => { if (a.course_id) map.set(a.course_id, a.course_name) })
+    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
+  }, [apps])
+
+  // Derive unique year options from fetched apps
+  const yearOptions = useMemo(() => {
+    const set = new Set(apps.map(a => a.year_of_study).filter(Boolean))
+    return [...set].sort()
+  }, [apps])
+
+  // Client-side filtering
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return apps.filter(a => {
+      if (filterCourse && String(a.course_id) !== String(filterCourse)) return false
+      if (filterYear   && String(a.year_of_study) !== String(filterYear)) return false
+      if (q) {
+        const haystack = [
+          a.student_name, a.student_email, a.phone,
+          a.registration_number, a.course_name, a.academic_year,
+        ].join(' ').toLowerCase()
+        if (!haystack.includes(q)) return false
+      }
+      return true
+    })
+  }, [apps, search, filterCourse, filterYear])
+
+  const hasFilters = search || filterCourse || filterYear
 
   function openApp(appId) {
     navigate(`/college/dashboard?section=app&app_id=${appId}`)
   }
 
   return (
-    <section className="space-y-6">
+    <section className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">College portal</p>
@@ -85,41 +127,124 @@ export default function ApplicationInbox({ collegeId }) {
         ))}
       </div>
 
-      {loading && <p className="text-slate-500">Loading…</p>}
+      {/* Search + Filters */}
+      <div className="flex flex-col sm:flex-row gap-3">
+        {/* Search */}
+        <div className="relative flex-1">
+          <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/>
+          </svg>
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search by name, email, reg. no…"
+            className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs">✕</button>
+          )}
+        </div>
 
-      {!loading && apps.length === 0 && (
-        <p className="text-slate-500">No applications in this category.</p>
+        {/* Course filter */}
+        <select
+          value={filterCourse}
+          onChange={e => setFilterCourse(e.target.value)}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0 sm:w-56"
+        >
+          <option value="">All Courses</option>
+          {courseOptions.map(([id, name]) => (
+            <option key={id} value={id}>{name}</option>
+          ))}
+        </select>
+
+        {/* Year filter */}
+        <select
+          value={filterYear}
+          onChange={e => setFilterYear(e.target.value)}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-36"
+        >
+          <option value="">All Years</option>
+          {yearOptions.map(y => (
+            <option key={y} value={y}>{YEAR_LABEL[y]} — Year {y}</option>
+          ))}
+        </select>
+
+        {/* Clear filters */}
+        {hasFilters && (
+          <button
+            onClick={() => { setSearch(''); setFilterCourse(''); setFilterYear('') }}
+            className="text-sm text-slate-400 hover:text-slate-700 font-medium whitespace-nowrap self-center"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
+      {/* Result count */}
+      {!loading && (
+        <p className="text-xs text-slate-400">
+          {hasFilters
+            ? `${filtered.length} of ${apps.length} application${apps.length !== 1 ? 's' : ''}`
+            : `${apps.length} application${apps.length !== 1 ? 's' : ''}`
+          }
+        </p>
       )}
 
-      <div className="space-y-3">
-        {apps.map(app => {
+      {loading && <p className="text-slate-500">Loading…</p>}
+
+      {!loading && filtered.length === 0 && (
+        <p className="text-slate-500">
+          {hasFilters ? 'No applications match your filters.' : 'No applications in this category.'}
+        </p>
+      )}
+
+      <div className="rounded-lg border border-slate-200 overflow-hidden">
+        {/* Table header */}
+        <div className="hidden sm:grid grid-cols-[1fr_1fr_9rem_auto_6rem] bg-slate-50 border-b border-slate-200 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <span>Student</span>
+          <span>Course / Year</span>
+          <span>Reg No.</span>
+          <span>Status</span>
+          <span className="text-right">Date</span>
+        </div>
+
+        {filtered.map((app, i) => {
           const meta = STATUS_META[app.status] || { label: app.status, color: 'bg-slate-100 text-slate-600' }
           return (
             <button
               key={app.id}
               onClick={() => openApp(app.id)}
-              className="w-full text-left rounded-lg border border-slate-200 bg-white px-5 py-4 hover:border-blue-200 hover:bg-blue-50 transition"
+              className={`w-full text-left grid sm:grid-cols-[1fr_1fr_9rem_auto_6rem] px-4 py-2.5 hover:bg-blue-50 transition items-center ${
+                i !== 0 ? 'border-t border-slate-100' : ''
+              }`}
             >
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <p className="font-semibold text-slate-950">{app.student_name}</p>
-                  <p className="text-sm text-slate-500">{app.student_email} · {app.phone}</p>
-                  <p className="text-sm text-slate-600 mt-0.5">
-                    {app.course_name} — {YEAR_LABEL[app.year_of_study]} · {app.academic_year}
-                  </p>
-                  {app.registration_number && (
-                    <p className="font-mono text-xs text-slate-400 mt-0.5">Reg: {app.registration_number}</p>
-                  )}
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${meta.color}`}>
-                    {meta.label}
-                  </span>
-                  <span className="text-xs text-slate-400">
-                    {app.submitted_at ? new Date(app.submitted_at).toLocaleDateString('en-IN') : '—'}
-                  </span>
-                </div>
+              {/* Student name + contact */}
+              <div className="min-w-0 pr-3">
+                <p className="font-medium text-sm text-slate-900 truncate">{app.student_name}</p>
+                <p className="text-xs text-slate-400 truncate">{app.student_email} · {app.phone}</p>
               </div>
+
+              {/* Course */}
+              <div className="min-w-0 pr-3">
+                <p className="text-sm text-slate-700 truncate">{app.course_name}</p>
+                <p className="text-xs text-slate-400">{YEAR_LABEL[app.year_of_study]} · {app.academic_year}</p>
+              </div>
+
+              {/* Reg no */}
+              <span className="font-mono text-xs text-slate-400 truncate pr-3">
+                {app.registration_number || '—'}
+              </span>
+
+              {/* Status badge */}
+              <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap ${meta.color}`}>
+                {meta.label}
+              </span>
+
+              {/* Date */}
+              <span className="text-xs text-slate-400 whitespace-nowrap text-right">
+                {app.submitted_at ? new Date(app.submitted_at).toLocaleDateString('en-IN') : '—'}
+              </span>
             </button>
           )
         })}

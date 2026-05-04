@@ -6,6 +6,7 @@ import MyApplications from './MyApplications.jsx'
 import StudentDocuments from './StudentDocuments.jsx'
 import ApplyForm from './ApplyForm.jsx'
 import AllReceipts from './AllReceipts.jsx'
+import StudentNotifications from './StudentNotifications.jsx'
 
 export default function StudentDashboard() {
   const [searchParams] = useSearchParams()
@@ -19,6 +20,7 @@ export default function StudentDashboard() {
   if (section === 'applications') return <MyApplications />
   if (section === 'documents') return <StudentDocuments />
   if (section === 'receipts') return <AllReceipts />
+  if (section === 'notifications') return <StudentNotifications />
   if (section === 'apply' && applyPeriodId && applyCollegeId) {
     return <ApplyForm periodId={applyPeriodId} collegeId={applyCollegeId} />
   }

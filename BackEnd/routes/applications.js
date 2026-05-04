@@ -302,7 +302,8 @@ router.post('/:id/submit', async (req, res) => {
             registration_number = @regNum,
             application_fee_paid = 1,
             submitted_at = GETDATE(),
-            updated_at   = GETDATE()
+            updated_at   = GETDATE(),
+            status_updated_at = GETDATE()
         WHERE id = @id
       `);
 
@@ -375,7 +376,8 @@ router.post('/:id/pay-college-fee', async (req, res) => {
         UPDATE applications
         SET status = 'fees_paid',
             college_fee_paid = 1,
-            updated_at = GETDATE()
+            updated_at = GETDATE(),
+            status_updated_at = GETDATE()
         WHERE id = @id
       `);
 
@@ -475,7 +477,7 @@ router.post('/:id/subjects', async (req, res) => {
       .input('id', appId)
       .query(`
         UPDATE applications
-        SET status = 'enrolled', enrolled_at = GETDATE(), updated_at = GETDATE()
+        SET status = 'enrolled', enrolled_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE()
         WHERE id = @id
       `);
 
