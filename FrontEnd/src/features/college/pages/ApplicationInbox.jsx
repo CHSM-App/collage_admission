@@ -7,7 +7,8 @@ const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
 const STATUS_META = {
   submitted:                { label: 'Submitted',               color: 'bg-blue-100 text-blue-700' },
   under_review:             { label: 'Under Review',            color: 'bg-blue-100 text-blue-700' },
-  correction_requested:     { label: 'Correction Requested',    color: 'bg-orange-100 text-orange-700' },
+  correction_requested:     { label: 'Correction Pending',      color: 'bg-orange-100 text-orange-700' },
+  correction_done:          { label: 'Correction Done',         color: 'bg-sky-100 text-sky-700' },
   scrutiny_accepted:        { label: 'Scrutiny Accepted',       color: 'bg-teal-100 text-teal-700' },
   doc_verification_pending: { label: 'Doc Verification Pending',color: 'bg-orange-100 text-orange-700' },
   confirmed:                { label: 'Confirmed',               color: 'bg-emerald-100 text-emerald-700' },
@@ -20,7 +21,7 @@ const STATUS_META = {
 
 const TABS = [
   { key: 'submitted,under_review',  label: 'Pending Scrutiny' },
-  { key: 'correction_requested',    label: 'Awaiting Correction' },
+  { key: 'correction_requested,correction_done', label: 'Awaiting Correction' },
   { key: 'scrutiny_accepted',       label: 'Scrutiny Accepted' },
   { key: 'doc_verification_pending',label: 'Doc Verification' },
   { key: 'confirmed',               label: 'Confirmed' },

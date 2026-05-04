@@ -72,7 +72,7 @@ const initialState = {
   },
 }
 
-const EDITABLE_STATUSES = ['draft', 'submitted', 'under_review', 'correction_requested']
+const EDITABLE_STATUSES = ['draft', 'submitted', 'under_review', 'correction_requested', 'correction_done']
 
 function reducer(state, action) {
   switch (action.type) {
@@ -85,11 +85,12 @@ function reducer(state, action) {
     case 'INIT_APP':
       return {
         ...state,
-        applicationId: action.applicationId,
-        currentStep:   action.currentStep,
-        maxStep:       action.currentStep,
-        appStatus:     action.appStatus,
-        loading:       false,
+        applicationId:       action.applicationId,
+        currentStep:         action.currentStep,
+        maxStep:             action.currentStep,
+        appStatus:           action.appStatus,
+        applicationFeePaid:  action.applicationFeePaid,
+        loading:             false,
       }
     case 'SET_DATA':
       return { ...state, data: { ...state.data, ...action.patch } }
@@ -189,7 +190,7 @@ export default function ApplyWizard() {
         })
 
         const resumeStep = app.current_step || 1
-        dispatch({ type: 'INIT_APP', applicationId: appId, currentStep: resumeStep, appStatus: app.status })
+        dispatch({ type: 'INIT_APP', applicationId: appId, currentStep: resumeStep, appStatus: app.status, applicationFeePaid: !!app.application_fee_paid })
       } catch (err) {
         dispatch({ type: 'SET_GLOBAL_ERR', message: err?.response?.data?.message || 'Failed to load application.' })
         dispatch({ type: 'SET_LOADING', value: false })
@@ -239,7 +240,7 @@ export default function ApplyWizard() {
     }
   }
 
-  const { data, currentStep, loading, saving, errors, globalError, applicationId, appStatus } = state
+  const { data, currentStep, loading, saving, errors, globalError, applicationId, appStatus, applicationFeePaid } = state
   const readOnly = !!appStatus && !EDITABLE_STATUSES.includes(appStatus)
 
   if (loading) {
@@ -362,6 +363,7 @@ export default function ApplyWizard() {
             <Step6Review
               {...stepProps}
               appId={applicationId}
+              applicationFeePaid={applicationFeePaid}
               onBack={() => goStep(5)}
               onEditStep={goStep}
               onDone={() => navigate(`/student/dashboard?section=applications`)}

@@ -359,7 +359,7 @@ router.post('/:collegeId/applications/:appId/request-correction', async (req, re
     if (appRes.recordset.length === 0) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
-    if (!['submitted', 'under_review', 'correction_requested'].includes(appRes.recordset[0].status)) {
+    if (!['submitted', 'under_review', 'correction_requested', 'correction_done'].includes(appRes.recordset[0].status)) {
       return res.status(400).json({ success: false, message: 'Correction can only be requested for submitted or under-review applications.' });
     }
 
@@ -391,7 +391,7 @@ router.post('/:collegeId/applications/:appId/approve', async (req, res) => {
     if (appRes.recordset.length === 0) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
-    if (!['submitted', 'under_review', 'correction_requested'].includes(appRes.recordset[0].status)) {
+    if (!['submitted', 'under_review', 'correction_requested', 'correction_done'].includes(appRes.recordset[0].status)) {
       return res.status(400).json({ success: false, message: 'Application must be submitted/under_review to accept.' });
     }
 
@@ -429,7 +429,7 @@ router.post('/:collegeId/applications/:appId/reject', async (req, res) => {
     if (appRes.recordset.length === 0) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
-    if (!['submitted', 'under_review', 'scrutiny_accepted'].includes(appRes.recordset[0].status)) {
+    if (!['submitted', 'under_review', 'correction_requested', 'correction_done', 'scrutiny_accepted'].includes(appRes.recordset[0].status)) {
       return res.status(400).json({ success: false, message: 'Application cannot be rejected in current status.' });
     }
 

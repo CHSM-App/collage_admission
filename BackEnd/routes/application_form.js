@@ -399,12 +399,12 @@ router.get('/student-profile/autofill', async (req, res) => {
 
 // ── Helper: assert draft and ownership ──────────────────────
 // Editable statuses: student can edit form until scrutiny_accepted
-const EDITABLE_STATUSES = ['draft', 'submitted', 'under_review', 'correction_requested'];
+const EDITABLE_STATUSES = ['draft', 'submitted', 'under_review', 'correction_requested', 'correction_done'];
 
 async function assertDraft(appId, res) {
   const r = await db.request()
     .input('id', mssql.Int, appId)
-    .query('SELECT id, status, student_id, year_of_study FROM applications WHERE id = @id');
+    .query('SELECT id, status, student_id, year_of_study, application_fee_paid FROM applications WHERE id = @id');
   if (!r.recordset.length) { res.status(404).json({ success: false, message: 'Application not found.' }); return null; }
   const app = r.recordset[0];
   if (!EDITABLE_STATUSES.includes(app.status)) {
@@ -856,6 +856,72 @@ router.post('/applications/:id/declaration', async (req, res) => {
       `);
 
     return res.json({ success: true, message: 'Declaration accepted. Application ready for payment.' });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── POST /api/applications/:id/resubmit (correction flow) ───
+// Called when student has already paid the application fee and is resubmitting
+// after a college correction request. Skips payment, sets status → under_review.
+router.post('/applications/:id/resubmit', async (req, res) => {
+  const appId = parseInt(req.params.id);
+  const app = await assertDraft(appId, res);
+  if (!app) return;
+
+  if (!app.application_fee_paid) {
+    return res.status(400).json({ success: false, message: 'Application fee not paid. Please use the standard submit flow.' });
+  }
+
+  try {
+    // Verify all mandatory docs are linked
+    const missingDocs = await db.request()
+      .input('appId', mssql.Int, appId)
+      .query(`
+        SELECT rd.document_type_id, dt.name AS doc_name
+        FROM required_documents rd
+        JOIN document_types dt ON dt.id = rd.document_type_id
+        JOIN applications a ON a.college_id = rd.college_id
+                           AND a.course_id  = rd.course_id
+                           AND a.year_of_study = rd.year_of_study
+        WHERE a.id = @appId AND rd.is_mandatory = 1
+          AND NOT EXISTS (
+            SELECT 1 FROM application_documents ad
+            WHERE ad.application_id = @appId AND ad.document_type_id = rd.document_type_id
+          )
+      `);
+
+    if (missingDocs.recordset.length > 0) {
+      const names = missingDocs.recordset.map(d => d.doc_name).join(', ');
+      return res.status(422).json({
+        success: false,
+        message: `Please upload the following mandatory documents before proceeding: ${names}`,
+        missing_documents: missingDocs.recordset,
+      });
+    }
+
+    // If coming from a correction request → correction_done (college sees it in Awaiting Correction tab)
+    // If student is just re-editing a submitted/under_review application → stay under_review
+    const newStatus = ['correction_requested', 'correction_done'].includes(app.status)
+      ? 'correction_done'
+      : 'under_review';
+
+    await db.request()
+      .input('id',     mssql.Int,      appId)
+      .input('status', mssql.NVarChar, newStatus)
+      .query(`
+        UPDATE applications SET
+          status = @status,
+          correction_note = NULL,
+          declaration_accepted_at = GETDATE(),
+          current_step = 6,
+          updated_at = GETDATE(),
+          status_updated_at = GETDATE()
+        WHERE id = @id
+      `);
+
+    return res.json({ success: true, message: 'Application resubmitted successfully.' });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });

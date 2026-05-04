@@ -14,6 +14,7 @@ const STATUS_META = {
   submitted:                { label: 'Submitted',                  color: 'bg-blue-100 text-blue-700' },
   under_review:             { label: 'Under Review',               color: 'bg-blue-100 text-blue-700' },
   correction_requested:     { label: 'Correction Required',        color: 'bg-orange-100 text-orange-700' },
+  correction_done:          { label: 'Correction Submitted',       color: 'bg-sky-100 text-sky-700' },
   scrutiny_accepted:        { label: 'Scrutiny Accepted',          color: 'bg-teal-100 text-teal-700' },
   doc_verification_pending: { label: 'Doc Verification Pending',   color: 'bg-orange-100 text-orange-700' },
   confirmed:                { label: 'Confirmed',                  color: 'bg-emerald-100 text-emerald-700' },
@@ -27,7 +28,7 @@ const STATUS_META = {
 const SECTIONS = [
   { key: 'all',        label: 'All' },
   { key: 'scrutiny',   label: 'Under Scrutiny',     statuses: ['draft','submitted','under_review'] },
-  { key: 'correction', label: 'Correction Required', statuses: ['correction_requested'] },
+  { key: 'correction', label: 'Correction Required', statuses: ['correction_requested', 'correction_done'] },
   { key: 'accepted',   label: 'Accepted',            statuses: ['scrutiny_accepted','doc_verification_pending'] },
   { key: 'merit',      label: 'In Merit',            statuses: ['confirmed'] },
   { key: 'confirmed',  label: 'Confirmed Admission', statuses: ['fees_paid','roll_assigned','enrolled'] },
@@ -197,18 +198,44 @@ export default function MyApplications() {
               )}
 
               {app.status === 'submitted' && (
-                <div className="mt-3 rounded-md bg-blue-50 border border-blue-100 px-3 py-2">
+                <div className="mt-3 rounded-md bg-blue-50 border border-blue-100 px-3 py-2 space-y-2">
                   <p className="text-sm text-blue-800">
-                    Your application has been submitted. The college will review and perform scrutiny. Please wait for the result.
+                    Your application has been submitted. The college will review and perform scrutiny. You can still edit it until the college accepts it.
                   </p>
+                  <button
+                    onClick={() => navigate(`/apply/${app.id}`)}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 transition"
+                  >
+                    Edit Application
+                  </button>
                 </div>
               )}
 
               {app.status === 'under_review' && (
-                <div className="mt-3 rounded-md bg-blue-50 border border-blue-100 px-3 py-2">
+                <div className="mt-3 rounded-md bg-blue-50 border border-blue-100 px-3 py-2 space-y-2">
                   <p className="text-sm text-blue-800">
-                    Your application is under review by the college.
+                    Your application is under review by the college. You can still edit it until the college accepts it.
                   </p>
+                  <button
+                    onClick={() => navigate(`/apply/${app.id}`)}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 transition"
+                  >
+                    Edit Application
+                  </button>
+                </div>
+              )}
+
+              {app.status === 'correction_done' && (
+                <div className="mt-3 rounded-md bg-sky-50 border border-sky-200 px-3 py-2 space-y-2">
+                  <p className="text-sm text-sky-800 font-medium">
+                    Your corrected application has been submitted. The college is reviewing it.
+                  </p>
+                  <button
+                    onClick={() => navigate(`/apply/${app.id}`)}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-sky-300 bg-white px-3 py-1.5 text-sm font-semibold text-sky-700 hover:bg-sky-50 transition"
+                  >
+                    Edit Application
+                  </button>
                 </div>
               )}
 
@@ -240,6 +267,20 @@ export default function MyApplications() {
                     className="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700"
                   >
                     Pay College Fee
+                  </button>
+                </div>
+              )}
+
+              {app.status === 'fees_paid' && (
+                <div className="mt-3 rounded-md bg-emerald-50 border border-emerald-100 px-3 py-2 space-y-2">
+                  <p className="text-sm text-emerald-800 font-medium">
+                    Fee payment received. If you have remaining installments, you can pay them below.
+                  </p>
+                  <button
+                    onClick={() => setFeePayApp(app)}
+                    className="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700"
+                  >
+                    View / Pay Remaining Fee
                   </button>
                 </div>
               )}

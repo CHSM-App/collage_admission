@@ -24,8 +24,8 @@ const sidebarItems = {
   college: [
     { label: 'Overview',          to: DASHBOARD_PATHS.college,                                   perm: null },
     { label: 'Admission Periods', to: `${DASHBOARD_PATHS.college}?section=periods`,              perm: null },
-    { label: 'Application Inbox', to: `${DASHBOARD_PATHS.college}?section=inbox`,                perm: 'review_application' },
-    { label: 'Add Application',   to: `${DASHBOARD_PATHS.college}?section=add-application`,      perm: 'submit_application' },
+    { label: 'Admission Inbox', to: `${DASHBOARD_PATHS.college}?section=inbox`,                perm: 'review_application' },
+    { label: 'Admission',   to: `${DASHBOARD_PATHS.college}?section=add-application`,      perm: 'submit_application' },
     { label: 'Roll Numbers',      to: `${DASHBOARD_PATHS.college}?section=rollnumbers`,          perm: 'assign_subjects' },
     { label: '— Masters —',       to: null },
     { label: 'Faculty Master',    to: `${DASHBOARD_PATHS.college}?section=master-faculty`,       perm: 'masters' },

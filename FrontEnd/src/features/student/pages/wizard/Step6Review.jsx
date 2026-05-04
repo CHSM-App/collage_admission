@@ -6,14 +6,32 @@ import { useRazorpay } from '../../../../shared/hooks/useRazorpay.js'
 
 const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year' }
 
-export default function Step6Review({ data, errors, globalError, saving, appId, onBack, onEditStep, onDone }) {
+export default function Step6Review({ data, errors, globalError, saving, appId, applicationFeePaid, onBack, onEditStep, onDone }) {
   const [accepted, setAccepted]         = useState(!!data.declaration_accepted)
   const [processing, setProcessing]     = useState(false)
   const [submitError, setSubmitError]   = useState('')
   const [registrationNumber, setRegNum] = useState(null)
+  const [resubmitted, setResubmitted]   = useState(false)
 
   const { openCheckout, scriptError } = useRazorpay()
 
+  // ── Resubmit (correction flow — fee already paid) ────────
+  async function handleResubmit() {
+    if (!accepted) return
+    setProcessing(true)
+    setSubmitError('')
+    try {
+      await api.post(`api/applications/${appId}/declaration`, { accepted: true })
+      await api.post(`api/applications/${appId}/resubmit`)
+      setResubmitted(true)
+    } catch (err) {
+      setSubmitError(err?.response?.data?.message || 'Resubmit failed. Please try again.')
+    } finally {
+      setProcessing(false)
+    }
+  }
+
+  // ── New application submit (pay first) ───────────────────
   async function handleSubmit() {
     if (!accepted) return
     setProcessing(true)
@@ -66,7 +84,25 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
     }
   }
 
-  // ── Success screen ────────────────────────────────────────
+  // ── Resubmit success screen ───────────────────────────────
+  if (resubmitted) {
+    return (
+      <div className="px-5 py-10 text-center space-y-4">
+        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100">
+          <svg className="h-8 w-8 text-emerald-600" fill="none" viewBox="0 0 24 24">
+            <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+        </div>
+        <h2 className="text-xl font-bold text-slate-950">Application Updated!</h2>
+        <p className="text-slate-500 max-w-sm mx-auto text-sm">
+          Your application has been updated and submitted. The college will review it.
+        </p>
+        <Button onClick={onDone} className="mx-auto">Go to My Applications →</Button>
+      </div>
+    )
+  }
+
+  // ── Original submit success screen ────────────────────────
   if (registrationNumber !== null) {
     return (
       <div className="px-5 py-10 text-center space-y-4">
@@ -181,17 +217,26 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
           </label>
         </div>
 
-        {/* Fee summary */}
-        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm">
-          <p className="font-semibold text-blue-900">
-            Application fee: ₹{Number(data.application_fee || 0).toLocaleString('en-IN')}
-          </p>
-          <p className="text-blue-700 text-xs mt-0.5">
-            Clicking "Pay & Submit" will open the Razorpay payment window. Non-refundable.
-          </p>
-        </div>
+        {/* Fee summary / resubmit notice */}
+        {applicationFeePaid ? (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
+            <p className="font-semibold text-emerald-800">Application fee already paid</p>
+            <p className="text-emerald-700 text-xs mt-0.5">
+              No additional payment required. Click "Resubmit Application" to send your corrected form.
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm">
+            <p className="font-semibold text-blue-900">
+              Application fee: ₹{Number(data.application_fee || 0).toLocaleString('en-IN')}
+            </p>
+            <p className="text-blue-700 text-xs mt-0.5">
+              Clicking "Pay & Submit" will open the Razorpay payment window. Non-refundable.
+            </p>
+          </div>
+        )}
 
-        {scriptError && (
+        {!applicationFeePaid && scriptError && (
           <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
             Payment gateway could not be loaded. Please check your internet connection and try again.
           </p>
@@ -208,17 +253,30 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
           <Button variant="secondary" onClick={onBack} disabled={processing} className="w-full sm:w-auto">
             ← Back
           </Button>
-          <Button
-            onClick={handleSubmit}
-            loading={processing}
-            disabled={!accepted || scriptError}
-            className={`w-full sm:w-auto sm:ml-auto ${(!accepted || scriptError) ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            Pay ₹{Number(data.application_fee || 0).toLocaleString('en-IN')} &amp; Submit →
-          </Button>
+          {applicationFeePaid ? (
+            <Button
+              onClick={handleResubmit}
+              loading={processing}
+              disabled={!accepted || processing}
+              className={`w-full sm:w-auto sm:ml-auto ${!accepted ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              Resubmit Application →
+            </Button>
+          ) : (
+            <Button
+              onClick={handleSubmit}
+              loading={processing}
+              disabled={!accepted || scriptError}
+              className={`w-full sm:w-auto sm:ml-auto ${(!accepted || scriptError) ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              Pay ₹{Number(data.application_fee || 0).toLocaleString('en-IN')} &amp; Submit →
+            </Button>
+          )}
         </div>
         {!accepted && (
-          <p className="text-xs text-center text-slate-400">Accept the declaration above to enable payment.</p>
+          <p className="text-xs text-center text-slate-400">
+            Accept the declaration above to {applicationFeePaid ? 'resubmit' : 'enable payment'}.
+          </p>
         )}
       </div>
     </div>

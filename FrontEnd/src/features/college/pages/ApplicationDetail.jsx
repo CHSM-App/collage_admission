@@ -11,7 +11,8 @@ const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY —
 const STATUS_FLOW = {
   submitted:                { label: 'Submitted — awaiting scrutiny' },
   under_review:             { label: 'Under Review' },
-  correction_requested:     { label: 'Correction Requested — waiting for student to resubmit' },
+  correction_requested:     { label: 'Correction Pending — waiting for student to resubmit' },
+  correction_done:          { label: 'Correction Done — student has resubmitted' },
   scrutiny_accepted:        { label: 'Scrutiny Accepted — awaiting doc verification call' },
   doc_verification_pending: { label: 'Called for Physical Document Verification' },
   confirmed:                { label: 'Confirmed — waiting for fee payment' },
@@ -239,6 +240,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
       {['confirmed','fees_paid'].includes(d.status) && (
         <FeeInstallmentPanel
           collegeId={collegeId}
+          appId={appId}
           admissionPeriodId={d.admission_period_id}
           readonly={d.status === 'fees_paid' || !canFees}
         />
@@ -255,7 +257,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
       )}
 
       {/* Step 1: Scrutiny — accept, request correction, or reject */}
-      {canReview && ['submitted', 'under_review', 'correction_requested'].includes(d.status) && (
+      {canReview && ['submitted', 'under_review', 'correction_requested', 'correction_done'].includes(d.status) && (
         <div className="space-y-3">
           <p className="text-sm text-slate-600">Review the application form and accept, request corrections, or reject.</p>
           <div className="flex flex-wrap gap-3">
@@ -388,6 +390,7 @@ function StatusBadge({ status }) {
     submitted:                'bg-blue-100 text-blue-700',
     under_review:             'bg-blue-100 text-blue-700',
     correction_requested:     'bg-orange-100 text-orange-700',
+    correction_done:          'bg-sky-100 text-sky-700',
     scrutiny_accepted:        'bg-teal-100 text-teal-700',
     doc_verification_pending: 'bg-orange-100 text-orange-700',
     confirmed:                'bg-emerald-100 text-emerald-700',
@@ -399,7 +402,8 @@ function StatusBadge({ status }) {
   }
   const labels = {
     submitted: 'Submitted', under_review: 'Under Review',
-    correction_requested: 'Correction Requested',
+    correction_requested: 'Correction Pending',
+    correction_done:      'Correction Done',
     scrutiny_accepted: 'Scrutiny Accepted',
     doc_verification_pending: 'Doc Verification Pending',
     confirmed: 'Confirmed', fees_paid: 'Fees Paid',
@@ -413,8 +417,9 @@ function StatusBadge({ status }) {
   )
 }
 
-function FeeInstallmentPanel({ collegeId, admissionPeriodId, readonly }) {
+function FeeInstallmentPanel({ collegeId, appId, admissionPeriodId, readonly }) {
   const [rows, setRows]       = useState([])
+  const [totalFee, setTotalFee] = useState(0)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving]   = useState(false)
   const [error, setError]     = useState('')
@@ -422,14 +427,19 @@ function FeeInstallmentPanel({ collegeId, admissionPeriodId, readonly }) {
 
   useEffect(() => {
     if (!admissionPeriodId) { setLoading(false); return }
-    api.get(`college-admin/${collegeId}/admission-periods/${admissionPeriodId}/installments`)
-      .then(r => {
-        const data = r.data.data || []
+    Promise.all([
+      api.get(`college-admin/${collegeId}/admission-periods/${admissionPeriodId}/installments`),
+      api.get(`payments/college-fee-status/${appId}`),
+    ])
+      .then(([insRes, feeRes]) => {
+        const data = insRes.data.data || []
         setRows(data.length > 0 ? data : [{ label: 'First Installment', amount: '', due_date: '' }])
+        const fee = feeRes.data.data
+        setTotalFee(fee?.student_payable ?? fee?.total_fee ?? 0)
       })
       .catch(() => setRows([{ label: 'First Installment', amount: '', due_date: '' }]))
       .finally(() => setLoading(false))
-  }, [admissionPeriodId, collegeId])
+  }, [admissionPeriodId, collegeId, appId])
 
   function addRow() {
     const labels = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth']
@@ -442,7 +452,9 @@ function FeeInstallmentPanel({ collegeId, admissionPeriodId, readonly }) {
     setRows(r => r.map((row, idx) => idx === i ? { ...row, [field]: value } : row))
   }
 
-  const total = rows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
+  const enteredTotal = rows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
+  const remainder    = totalFee > 0 ? Math.round((totalFee - enteredTotal) * 100) / 100 : 0
+  const hasGap       = remainder > 0.01
 
   async function handleSave() {
     setError(''); setSuccess('')
@@ -452,12 +464,29 @@ function FeeInstallmentPanel({ collegeId, admissionPeriodId, readonly }) {
         return
       }
     }
+    if (enteredTotal > totalFee + 0.01 && totalFee > 0) {
+      setError(`Total installments (₹${enteredTotal.toLocaleString('en-IN')}) exceed the total fee (₹${totalFee.toLocaleString('en-IN')}).`)
+      return
+    }
+
+    // Auto-append remainder as final installment if there's a gap
+    const finalRows = [...rows.map(r => ({ label: r.label.trim(), amount: parseFloat(r.amount), due_date: r.due_date || null }))]
+    if (hasGap) {
+      const labels = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth']
+      finalRows.push({ label: `${labels[finalRows.length] || 'Final'} Installment`, amount: remainder, due_date: null })
+    }
+
     setSaving(true)
     try {
       await api.post(`college-admin/${collegeId}/admission-periods/${admissionPeriodId}/installments`, {
-        installments: rows.map(r => ({ label: r.label.trim(), amount: parseFloat(r.amount), due_date: r.due_date || null })),
+        installments: finalRows,
       })
-      setSuccess('Installment plan saved.')
+      // Refresh rows from server so auto-added installment shows up
+      const r = await api.get(`college-admin/${collegeId}/admission-periods/${admissionPeriodId}/installments`)
+      setRows(r.data.data || finalRows)
+      setSuccess(hasGap
+        ? `Plan saved. Remaining ₹${remainder.toLocaleString('en-IN')} auto-added as final installment.`
+        : 'Installment plan saved.')
     } catch (err) {
       setError(err?.response?.data?.message || 'Failed to save.')
     } finally { setSaving(false) }
@@ -490,6 +519,12 @@ function FeeInstallmentPanel({ collegeId, admissionPeriodId, readonly }) {
           <p className="text-sm text-slate-400">Loading…</p>
         ) : (
           <>
+            {totalFee > 0 && (
+              <p className="text-xs text-slate-500">
+                Total fee: <span className="font-semibold text-slate-700">₹{totalFee.toLocaleString('en-IN')}</span>
+              </p>
+            )}
+
             <div className="space-y-2">
               {rows.map((row, i) => (
                 <div key={i} className="flex flex-wrap items-center gap-2">
@@ -537,8 +572,16 @@ function FeeInstallmentPanel({ collegeId, admissionPeriodId, readonly }) {
                     + Add installment
                   </button>
                 )}
-                {total > 0 && (
-                  <span className="text-xs text-slate-500">Total: ₹{total.toLocaleString('en-IN')}</span>
+                {enteredTotal > 0 && (
+                  <span className="text-xs text-slate-500">Entered: ₹{enteredTotal.toLocaleString('en-IN')}</span>
+                )}
+                {hasGap && (
+                  <span className="text-xs font-semibold text-amber-600">
+                    Remaining ₹{remainder.toLocaleString('en-IN')} will be auto-added as final installment
+                  </span>
+                )}
+                {!hasGap && totalFee > 0 && enteredTotal > 0 && (
+                  <span className="text-xs font-semibold text-emerald-600">✓ Covers full fee</span>
                 )}
               </div>
             )}

@@ -46,6 +46,20 @@ function buildNotifications(apps) {
         });
         break;
 
+      case 'correction_done':
+        notes.push({
+          app_id:    app.id,
+          status:    app.status,
+          college:   app.college_name,
+          course:    app.course_name,
+          title:     'Correction Submitted — Awaiting Review',
+          body:      `Your corrected application for ${app.course_name} at ${app.college_name} has been submitted. The college will review it.`,
+          link,
+          updated_at: app.status_updated_at || app.submitted_at,
+          type:      'info',
+        });
+        break;
+
       case 'scrutiny_accepted':
         notes.push({
           app_id:    app.id,

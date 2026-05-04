@@ -236,6 +236,7 @@ export default function Step5Documents({
           onBack={onBack}
           onNext={handleNext}
           saving={saving}
+          disabled={missingMandatory.length > 0}
           nextLabel={missingMandatory.length > 0 ? `${missingMandatory.length} required doc(s) missing` : 'Save & Continue'}
           extraFooter={extraFooter}
           readOnly={readOnly}

@@ -322,8 +322,8 @@ router.post('/create-order', async (req, res) => {
       description = 'Application Fee';
 
     } else if (payment_type === 'college_fee') {
-      if (!['approved', 'document_verification', 'confirmed'].includes(app.status)) {
-        return res.status(400).json({ success: false, message: 'Application must be approved or confirmed to pay college fee.' });
+      if (!['confirmed', 'fees_paid'].includes(app.status)) {
+        return res.status(400).json({ success: false, message: 'Application must be confirmed to pay college fee.' });
       }
       // Validate custom amount against remaining balance
       const feeInfo = await getCollegeFeTotal(app);
@@ -360,8 +360,8 @@ router.post('/create-order', async (req, res) => {
 
     } else {
       // college_fee_installment — college-defined installment plan
-      if (!['approved', 'document_verification', 'confirmed'].includes(app.status)) {
-        return res.status(400).json({ success: false, message: 'Application must be approved or confirmed to pay college fee.' });
+      if (!['confirmed', 'fees_paid'].includes(app.status)) {
+        return res.status(400).json({ success: false, message: 'Application must be confirmed to pay college fee.' });
       }
       if (!installment_plan_id) {
         return res.status(400).json({ success: false, message: 'installment_plan_id is required for installment payments.' });
