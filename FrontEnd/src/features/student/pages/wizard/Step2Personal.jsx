@@ -190,8 +190,9 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <FormField label="Gender" name="sex" type="select" value={data.sex} onChange={onChange}
             error={e.sex} required options={SEX_OPTIONS} placeholder="Select gender…" />
-          <FormField label="Mobile Number" name="mobile" type="tel" value={data.mobile} onChange={onChange}
-            error={e.mobile} required placeholder="9876543210" hint="10 digits, starting with 6-9" maxLength={10} />
+          <FormField label="Mobile Number" name="mobile" type="tel" value={data.mobile}
+            onChange={e => onChange({ target: { name: 'mobile', value: e.target.value.replace(/\D/g, '').slice(0, 10) } })}
+            error={e.mobile} required placeholder="9876543210" hint="10 digits, starting with 6-9" maxLength={10} inputMode="numeric" />
         </div>
 
         <FormField label="Email Address" name="email" type="email" value={data.email}

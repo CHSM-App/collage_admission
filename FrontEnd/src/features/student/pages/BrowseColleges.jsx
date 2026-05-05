@@ -140,7 +140,6 @@ export default function BrowseColleges() {
                       </p>
                       <p className="text-xs text-slate-500 mt-0.5">
                         Seats available: {period.total_seats - period.filled_seats} of {period.total_seats}
-                        {' · '}Application fee: ₹{Number(period.application_fee).toLocaleString('en-IN')}
                         {' · '}Last date: {new Date(period.end_date).toLocaleDateString('en-IN')}
                       </p>
                     </div>

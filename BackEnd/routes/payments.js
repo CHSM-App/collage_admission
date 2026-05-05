@@ -312,31 +312,22 @@ router.post('/create-order', async (req, res) => {
       if (!['confirmed', 'fees_paid'].includes(app.status)) {
         return res.status(400).json({ success: false, message: 'Application must be confirmed to pay college fee.' });
       }
-      // Validate custom amount against remaining balance
-      const feeInfo = await getCollegeFeTotal(app);
-      const totalFee = feeInfo?.source === 'manual'
-        ? (feeInfo?.total_fee ?? 0)
-        : (feeInfo?.student_payable ?? feeInfo?.total_fee ?? 0);
-      const paidRes = await db.request()
+      if (!app.fee_pay_now_amount || parseFloat(app.fee_pay_now_amount) <= 0) {
+        return res.status(400).json({ success: false, message: 'The college has not set a fee amount yet. Please contact the college.' });
+      }
+      // Check how much has already been paid
+      const paidRes2 = await db.request()
         .input('appId', mssql.Int, parseInt(application_id))
-        .query(`
-          SELECT ISNULL(SUM(amount), 0) AS total_paid FROM payments
-          WHERE application_id = @appId
-            AND payment_type = 'college_fee'
-            AND status = 'success'
-        `);
-      const totalPaid = parseFloat(paidRes.recordset[0].total_paid) || 0;
-      const remaining = Math.max(0, totalFee - totalPaid);
-
-      const parsedAmount = parseFloat(customAmount);
-      if (!parsedAmount || parsedAmount <= 0) {
-        return res.status(400).json({ success: false, message: 'Enter a valid payment amount.' });
+        .query(`SELECT ISNULL(SUM(amount),0) AS total_paid FROM payments WHERE application_id=@appId AND payment_type='college_fee' AND status='success'`);
+      const totalPaid2 = parseFloat(paidRes2.recordset[0].total_paid) || 0;
+      const totalFee   = parseFloat(app.fee_total_amount) || 0;
+      const remaining2 = Math.max(0, totalFee - totalPaid2);
+      // First payment: use college-set instalment; subsequent: use remaining balance
+      amount = totalPaid2 > 0 ? remaining2 : parseFloat(app.fee_pay_now_amount);
+      if (!amount || amount <= 0) {
+        return res.status(400).json({ success: false, message: 'No outstanding balance to pay.' });
       }
-      if (parsedAmount > remaining + 0.01) {
-        return res.status(400).json({ success: false, message: `Amount cannot exceed the remaining balance of ₹${remaining}.` });
-      }
-      amount = parsedAmount;
-      description = totalFee > 0 && parsedAmount >= remaining - 0.01 ? 'College Fee (Full)' : 'College Fee (Partial)';
+      description = amount >= totalFee - 0.01 ? 'College Fee (Full)' : 'College Fee';
     }
 
     if (!amount || amount <= 0) {

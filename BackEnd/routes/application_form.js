@@ -330,6 +330,7 @@ router.get('/applications/:id/form', async (req, res) => {
       .query(`
         SELECT a.*,
                c.name  AS college_name,  c.city AS college_city, c.address AS college_address,
+               COALESCE(c.application_fee, 0) AS application_fee,
                COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
                ap.academic_year AS period_ay,
                s.email AS student_email, s.full_name AS student_name, s.phone AS student_phone,
@@ -566,7 +567,6 @@ router.patch('/applications/:id/other-details', async (req, res) => {
       errors.birth_date = `Student must be at least ${MIN_AGE_FOR_FY} years old for FY.`;
     }
   }
-  if (!birth_state)     errors.birth_state     = 'Birth state is required.';
   if (!nationality)     errors.nationality     = 'Nationality is required.';
   if (!marital_status)  errors.marital_status  = 'Marital status is required.';
   if (!father_full_name)errors.father_full_name= 'Father\'s full name is required.';
@@ -631,6 +631,14 @@ router.patch('/applications/:id/other-details', async (req, res) => {
           updated_at=GETDATE()
         WHERE id=@id
       `);
+
+    // Write prn back to students table so future applications autofill it
+    if (prn) {
+      await db.request()
+        .input('sid', mssql.Int,      app.student_id)
+        .input('prn', mssql.NVarChar, prn)
+        .query('UPDATE students SET prn=@prn WHERE id=@sid');
+    }
 
     return res.json({ success: true, message: 'Other details saved.', current_step: 3 });
   } catch (err) {

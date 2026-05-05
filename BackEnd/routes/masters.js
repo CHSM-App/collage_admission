@@ -195,7 +195,17 @@ router.post('/:collegeId/bank', async (req, res) => {
   const { bank_account_number, bank_name, branch, ifsc_code, account_type, is_active = true } = req.body
   if (!bank_account_number?.trim()) return res.status(422).json({ success: false, message: 'bank_account_number is required.' })
   if (!bank_name?.trim())           return res.status(422).json({ success: false, message: 'bank_name is required.' })
+  if (!ifsc_code?.trim())           return res.status(422).json({ success: false, message: 'IFSC code is required.' })
   try {
+    // Check for duplicate account number within the same college
+    const dup = await db.request()
+      .input('cid', mssql.Int,      cid(req))
+      .input('an',  mssql.NVarChar, bank_account_number.trim())
+      .query(`SELECT ledger_code FROM bank_master WHERE college_id=@cid AND bank_account_number=@an`)
+    if (dup.recordset.length) {
+      return res.status(409).json({ success: false, message: 'A bank account with this account number already exists.' })
+    }
+
     const r = await db.request()
       .input('cid', mssql.Int,      cid(req))
       .input('an',  mssql.NVarChar, bank_account_number.trim())

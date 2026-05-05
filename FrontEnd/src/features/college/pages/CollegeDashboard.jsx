@@ -14,6 +14,7 @@ import DivisionMaster      from './masters/DivisionMaster.jsx'
 import FeesMaster          from './masters/FeesMaster.jsx'
 import DocumentsMaster     from './masters/DocumentsMaster.jsx'
 import ClassMaster         from './masters/ClassMaster.jsx'
+import FeeReceipts         from './FeeReceipts.jsx'
 
 function ReadOnlyBanner({ label }) {
   return (
@@ -84,6 +85,7 @@ export default function CollegeDashboard() {
   if (section === 'master-division')  return navAllowed('master-division')  ? <>{masterReadOnly && <ReadOnlyBanner label="Division Master" />}<DivisionMaster  collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
   if (section === 'master-fees')      return navAllowed('master-fees')      ? <>{masterReadOnly && <ReadOnlyBanner label="Fees Master" />}<FeesMaster          collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
   if (section === 'master-documents') return navAllowed('master-documents') ? <>{masterReadOnly && <ReadOnlyBanner label="Required Documents" />}<DocumentsMaster collegeId={user?.id} readOnly={masterReadOnly} /></> : <NavBlocked />
+  if (section === 'fee-receipts')     return navAllowed('fee-receipts')     ? <FeeReceipts collegeId={user?.id} />                                                                                                             : <NavBlocked />
 
   return <Overview user={user} navAllowed={navAllowed} />
 }
@@ -94,6 +96,7 @@ function Overview({ user, navAllowed }) {
     { title: 'Application Inbox',    desc: 'Review, approve, or reject student applications.',   section: 'inbox',            accent: 'teal' },
     { title: 'Add Application',      desc: 'Fill in the admission form on behalf of a student.', section: 'add-application',  accent: 'indigo' },
     { title: 'Roll Numbers',         desc: 'Generate roll numbers for confirmed students.',       section: 'rollnumbers',      accent: 'violet' },
+    { title: 'Fee Receipts',         desc: 'View pending and paid college fee receipts.',          section: 'fee-receipts',     accent: 'orange' },
     { title: 'Faculty Master',       desc: 'Manage degree programs and university codes.',        section: 'master-faculty',   accent: 'slate' },
     { title: 'Fees Master',          desc: 'Configure fee heads, slabs, and classwise overrides.',section: 'master-fees',     accent: 'rose' },
   ]

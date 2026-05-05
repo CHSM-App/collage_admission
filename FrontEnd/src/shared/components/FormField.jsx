@@ -19,6 +19,7 @@ export default function FormField({
   min,
   max,
   maxLength,
+  inputMode,
   className = '',
   inputClassName = '',
   children,      // slot for custom content instead of standard input
@@ -80,6 +81,7 @@ export default function FormField({
           min={min}
           max={max}
           maxLength={maxLength}
+          inputMode={inputMode}
           className={`${base} ${readOnly ? 'cursor-default bg-slate-50' : ''} ${inputClassName}`}
         />
       )}

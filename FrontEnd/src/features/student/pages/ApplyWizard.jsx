@@ -420,7 +420,7 @@ function buildAutofill(app, lastApp, profile, user) {
     degree_course_code:  app.app_degree_course_code  || '',
 
     // Step 3 other
-    birth_date:         appPrefix('birth_date')      || formatDate(profile.birth_date)    || '',
+    birth_date:         formatDate(appPrefix('birth_date')) || formatDate(profile.birth_date) || '',
     birth_place:        appPrefix('birth_place')     || profile.birth_place    || '',
     birth_taluka:       appPrefix('birth_taluka')    || profile.birth_taluka   || '',
     birth_district:     appPrefix('birth_district')  || profile.birth_district || '',

@@ -21,7 +21,9 @@ export default function StudentRegister() {
 
   function handleChange(e) {
     setError('')
-    setForm(f => ({ ...f, [e.target.name]: e.target.value }))
+    let value = e.target.value
+    if (e.target.name === 'phone') value = value.replace(/\D/g, '').slice(0, 10)
+    setForm(f => ({ ...f, [e.target.name]: value }))
   }
 
   async function handleSubmit(e) {
@@ -85,7 +87,7 @@ export default function StudentRegister() {
         <div className="grid grid-cols-2 gap-3">
           <Input
             id="phone" label="Phone" name="phone" type="tel"
-            placeholder="9876543210" maxLength={10}
+            placeholder="9876543210" maxLength={10} inputMode="numeric" pattern="[0-9]{10}"
             value={form.phone} onChange={handleChange}
             disabled={loading}
           />

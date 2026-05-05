@@ -329,6 +329,7 @@ router.post('/:id/pay-college-fee', async (req, res) => {
       .input('id', appId)
       .query(`
         SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study, a.category,
+               a.fee_total_amount,
                s.category AS student_category
         FROM applications a
         JOIN students s ON s.id = a.student_id
@@ -345,20 +346,22 @@ router.post('/:id/pay-college-fee', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Application must be confirmed before paying college fee.' });
     }
 
-    // Determine course category for fee lookup
-    const feeRes = await db.request()
-      .input('col', app.college_id)
-      .input('crs', app.course_id)
-      .input('yr',  app.year_of_study)
-      .input('cat', app.student_category || 'general')
-      .query(`
-        SELECT TOP 1 (tuition_fee + exam_fee + other_fee) AS total_fee
-        FROM fee_structures
-        WHERE college_id = @col AND course_id = @crs AND year_of_study = @yr
-        ORDER BY category
-      `);
-
-    const amount = feeRes.recordset[0]?.total_fee || 0;
+    // Use fee_total_amount set by college admin if available, otherwise fall back to fee_structures
+    let amount = app.fee_total_amount ? parseFloat(app.fee_total_amount) : 0;
+    if (!amount) {
+      const feeRes = await db.request()
+        .input('col', app.college_id)
+        .input('crs', app.course_id)
+        .input('yr',  app.year_of_study)
+        .input('cat', app.student_category || 'general')
+        .query(`
+          SELECT TOP 1 (tuition_fee + exam_fee + other_fee) AS total_fee
+          FROM fee_structures
+          WHERE college_id = @col AND course_id = @crs AND year_of_study = @yr
+          ORDER BY category
+        `);
+      amount = feeRes.recordset[0]?.total_fee || 0;
+    }
 
     // Record payment
     await db.request()

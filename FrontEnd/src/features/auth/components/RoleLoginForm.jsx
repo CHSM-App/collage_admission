@@ -50,9 +50,11 @@ export default function RoleLoginForm({ role }) {
 
   const handleChange = (event) => {
     clearError()
+    let value = event.target.value
+    if (event.target.name === 'phone') value = value.replace(/\D/g, '').slice(0, 10)
     setFormData((currentFormData) => ({
       ...currentFormData,
-      [event.target.name]: event.target.value,
+      [event.target.name]: value,
     }))
   }
 
@@ -91,6 +93,9 @@ export default function RoleLoginForm({ role }) {
             onChange={handleChange}
             autoComplete="tel"
             disabled={loading}
+            maxLength={10}
+            inputMode="numeric"
+            pattern="[0-9]{10}"
             required
           />
         ) : (

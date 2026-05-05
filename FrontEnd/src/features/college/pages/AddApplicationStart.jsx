@@ -250,6 +250,7 @@ export default function AddApplicationStart() {
               onChange={v => setRegForm(f => ({ ...f, phone: v }))}
               placeholder="10-digit mobile"
               maxLength={10}
+              inputMode="numeric"
             />
             <RegField
               label="Password" required type="password"
@@ -319,7 +320,7 @@ export default function AddApplicationStart() {
   )
 }
 
-function RegField({ label, value, onChange, placeholder, type = 'text', required, maxLength }) {
+function RegField({ label, value, onChange, placeholder, type = 'text', required, maxLength, inputMode }) {
   return (
     <div>
       <label className="block text-xs font-semibold text-slate-600 mb-1">
@@ -328,10 +329,15 @@ function RegField({ label, value, onChange, placeholder, type = 'text', required
       <input
         type={type}
         value={value}
-        onChange={e => onChange(e.target.value)}
+        onChange={e => {
+          let v = e.target.value
+          if (inputMode === 'numeric') v = v.replace(/\D/g, '').slice(0, maxLength || 10)
+          onChange(v)
+        }}
         placeholder={placeholder}
         autoComplete="off"
         maxLength={maxLength}
+        inputMode={inputMode}
         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
       />
     </div>

@@ -31,6 +31,7 @@ export default function BankMaster({ collegeId }) {
   async function save() {
     if (!form.bank_account_number.trim()) return setError('Account number is required.')
     if (!form.bank_name.trim())           return setError('Bank name is required.')
+    if (!form.ifsc_code.trim())           return setError('IFSC code is required.')
     setSaving(true); setError('')
     try {
       if (modal === 'new') await api.post(`masters/${collegeId}/bank`, form)
@@ -133,7 +134,7 @@ export default function BankMaster({ collegeId }) {
               <F label="Account Number *"><input value={form.bank_account_number} onChange={e => set('bank_account_number', e.target.value)} className={inp} placeholder="012345678901" /></F>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <F label="Branch"><input value={form.branch} onChange={e => set('branch', e.target.value)} className={inp} placeholder="Vengurla" /></F>
-                <F label="IFSC Code"><input value={form.ifsc_code} onChange={e => set('ifsc_code', e.target.value.toUpperCase())} className={inp} placeholder="SBIN0001234" /></F>
+                <F label="IFSC Code *"><input value={form.ifsc_code} onChange={e => set('ifsc_code', e.target.value.toUpperCase())} className={inp} placeholder="SBIN0001234" /></F>
               </div>
               <F label="Account Type">
                 <select value={form.account_type} onChange={e => set('account_type', e.target.value)} className={inp}>

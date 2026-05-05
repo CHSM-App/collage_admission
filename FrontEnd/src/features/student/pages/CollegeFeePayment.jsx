@@ -17,38 +17,23 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
   const [paying, setPaying]         = useState(false)
   const [payError, setPayError]     = useState('')
   const [paidMsg, setPaidMsg]       = useState('')
-  const [inputAmount, setInputAmount] = useState('')
   const [showReceipts, setShowReceipts] = useState(false)
 
   function fetchStatus() {
     api.get(`payments/college-fee-status/${application.id}`)
-      .then(r => {
-        const data = r.data.data
-        setFeeStatus(data)
-        // Pre-fill input: if college set a "pay now" amount and nothing paid yet, use it;
-        // otherwise pre-fill with remaining balance.
-        if (data) {
-          const prefill = data.total_paid <= 0 && data.fee_pay_now_amount
-            ? data.fee_pay_now_amount
-            : data.remaining
-          if (prefill > 0) setInputAmount(String(prefill))
-        }
-      })
+      .then(r => setFeeStatus(r.data.data))
       .catch(() => setPayError('Failed to load fee details.'))
       .finally(() => setLoading(false))
   }
 
   useEffect(() => { fetchStatus() }, [application.id])
 
-  // ── Pay an amount (partial or full) ─────────────────────
+  // ── Pay the college-set amount ───────────────────────────
   async function payCustomAmount() {
-    const amt = parseFloat(inputAmount)
+    const fs  = feeStatus
+    const amt = parseFloat(fs?.total_paid > 0 ? fs?.remaining : (fs?.fee_pay_now_amount || fs?.remaining))
     if (!amt || amt <= 0) {
-      setPayError('Enter a valid amount.')
-      return
-    }
-    if (feeStatus && amt > feeStatus.remaining + 0.01) {
-      setPayError(`Amount cannot exceed remaining balance of ₹${Number(feeStatus.remaining).toLocaleString('en-IN')}.`)
+      setPayError('Invalid payment amount.')
       return
     }
 
@@ -132,15 +117,15 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
           </div>
         ) : (
           <>
-            <div className={`grid gap-2 sm:gap-3 text-sm ${fs.fee_pay_now_amount && fs.fee_pay_now_amount < fs.total_fee - 0.01 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
+            <div className={`grid gap-2 sm:gap-3 text-sm ${fs.remaining > 0 && fs.remaining < fs.total_fee - 0.01 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
               <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-center">
                 <p className="text-xs text-slate-400">Total Fee</p>
                 <p className="font-bold text-slate-950 mt-0.5">₹{Number(fs.total_fee).toLocaleString('en-IN')}</p>
               </div>
-              {fs.fee_pay_now_amount && fs.fee_pay_now_amount < fs.total_fee - 0.01 && (
+              {fs.remaining > 0 && fs.remaining < fs.total_fee - 0.01 && (
                 <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-center">
                   <p className="text-xs text-slate-400">Due Now</p>
-                  <p className="font-bold text-blue-700 mt-0.5">₹{Number(fs.fee_pay_now_amount).toLocaleString('en-IN')}</p>
+                  <p className="font-bold text-blue-700 mt-0.5">₹{Number(fs.remaining).toLocaleString('en-IN')}</p>
                 </div>
               )}
               <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-center">
@@ -176,61 +161,22 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
           </div>
         )}
 
-        {/* ── Payment input ── */}
+        {/* ── Payment ── */}
         {!allPaid && fs.total_fee > 0 && (
-          <div className="space-y-3">
-            {true && (
-              <>
-                <p className="text-sm text-slate-600">
-                  Enter the amount to pay now.
-                </p>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-                  <div className="flex-1">
-                    <div className="flex items-center rounded-lg border border-slate-300 bg-white overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 focus-within:border-emerald-500">
-                      <span className="px-3 text-slate-500 font-semibold text-sm border-r border-slate-200 bg-slate-50 py-2.5">₹</span>
-                      <input
-                        type="number"
-                        min="1"
-                        max={fs.remaining}
-                        step="1"
-                        value={inputAmount}
-                        onChange={e => { setInputAmount(e.target.value); setPayError('') }}
-                        placeholder={`Max ₹${Number(fs.remaining).toLocaleString('en-IN')}`}
-                        className="flex-1 px-3 py-2.5 text-sm outline-none bg-transparent"
-                      />
-                    </div>
-                    <div className="flex gap-2 mt-1.5">
-                      {[25, 50, 100].map(pct => {
-                        const amt = Math.round(fs.remaining * pct / 100)
-                        return amt > 0 ? (
-                          <button
-                            key={pct}
-                            onClick={() => setInputAmount(String(amt))}
-                            className="text-xs text-emerald-600 hover:underline font-semibold"
-                          >
-                            {pct}% (₹{amt.toLocaleString('en-IN')})
-                          </button>
-                        ) : null
-                      })}
-                      <button
-                        onClick={() => setInputAmount(String(fs.remaining))}
-                        className="text-xs text-emerald-600 hover:underline font-semibold"
-                      >
-                        Pay full
-                      </button>
-                    </div>
-                  </div>
-                  <Button
-                    onClick={payCustomAmount}
-                    loading={paying}
-                    disabled={!inputAmount || parseFloat(inputAmount) <= 0 || paying || scriptError}
-                    className="shrink-0"
-                  >
-                    Pay Now
-                  </Button>
-                </div>
-              </>
-            )}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+            <div>
+              <p className="text-xs text-slate-500">Amount due now</p>
+              <p className="text-xl font-bold text-slate-950">
+                ₹{Number(fs.total_paid > 0 ? fs.remaining : (fs.fee_pay_now_amount || fs.remaining)).toLocaleString('en-IN')}
+              </p>
+            </div>
+            <Button
+              onClick={payCustomAmount}
+              loading={paying}
+              disabled={paying || scriptError}
+            >
+              Pay Now
+            </Button>
           </div>
         )}
 

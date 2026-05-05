@@ -229,7 +229,7 @@ function ReceiptSheet({ app, pmt }) {
   <!-- ═══ FOOTER BAR ═══ -->
   <div style="height:3px;background:linear-gradient(90deg,#0f172a 0%,#1d4ed8 50%,#0ea5e9 100%);"></div>
   <div style="background:#f8fafc;padding:10px 28px;display:flex;justify-content:space-between;align-items:center;">
-    <span style="font-size:9.5px;color:#94a3b8;">College Admission Portal &nbsp;·&nbsp; Powered by VengurlaTech</span>
+    <span style="font-size:9.5px;color:#94a3b8;">College Admission Portal</span>
     <span style="font-size:9.5px;color:#94a3b8;font-family:monospace;">${receiptNo}</span>
   </div>
 
@@ -393,7 +393,7 @@ function ReceiptSheet({ app, pmt }) {
         {/* Footer */}
         <div className="h-0.5" style={{ background: 'linear-gradient(90deg,#0f172a 0%,#1d4ed8 50%,#0ea5e9 100%)' }} />
         <div className="flex items-center justify-between bg-slate-50 px-5 py-2">
-          <p className="text-xs text-slate-400">College Admission Portal · VengurlaTech</p>
+          <p className="text-xs text-slate-400">College Admission Portal</p>
           <p className="text-xs font-mono text-slate-400">{receiptNo}</p>
         </div>
 

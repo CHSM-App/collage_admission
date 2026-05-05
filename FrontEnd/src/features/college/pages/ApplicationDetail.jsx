@@ -38,7 +38,11 @@ export default function ApplicationDetail({ collegeId, appId }) {
   const [showReject, setShowReject]         = useState(false)
   const [showCancel, setShowCancel]         = useState(false)
   const [showCorrection, setShowCorrection] = useState(false)
+  const [showConfirm, setShowConfirm]       = useState(false)
   const [correctionNote, setCorrectionNote] = useState('')
+  const [feeTotal,  setFeeTotal]   = useState('')
+  const [feePayNow, setFeePayNow]  = useState('')
+  const [feeError,  setFeeError]   = useState('')
   const [error, setError]     = useState('')
 
   function fetchApp() {
@@ -59,6 +63,28 @@ export default function ApplicationDetail({ collegeId, appId }) {
     } catch (err) {
       setError(err?.response?.data?.message || 'Action failed.')
     } finally {
+      setActing(false)
+    }
+  }
+
+  async function doConfirm() {
+    setFeeError('')
+    const total  = parseFloat(feeTotal)
+    const payNow = parseFloat(feePayNow)
+    if (!total  || total  <= 0) { setFeeError('Enter the total payable amount.'); return }
+    if (!payNow || payNow <= 0) { setFeeError('Enter the amount to pay now.'); return }
+    if (payNow > total + 0.01)  { setFeeError('Amount to pay now cannot exceed the total.'); return }
+    setActing(true)
+    setError('')
+    try {
+      await api.post(`college-admin/${collegeId}/applications/${appId}/confirm`, { document_ids_verified: app?.documents?.map(d => d.id) || [] })
+      await api.post(`college-admin/${collegeId}/applications/${appId}/set-fee`, {
+        fee_total_amount:   total,
+        fee_pay_now_amount: payNow,
+      })
+      navigate('/college/dashboard?section=inbox')
+    } catch (err) {
+      setError(err?.response?.data?.message || 'Action failed.')
       setActing(false)
     }
   }
@@ -242,14 +268,14 @@ export default function ApplicationDetail({ collegeId, appId }) {
         <p className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</p>
       )}
 
-      {/* ── Fee Amounts (shown once confirmed) ── */}
-      {['confirmed','fees_paid'].includes(d.status) && (
+      {/* ── Fee Amounts (shown once confirmed — editable until paid) ── */}
+      {['confirmed','fees_paid'].includes(d.status) && canFees && (
         <FeeAmountPanel
           collegeId={collegeId}
           appId={appId}
           initialTotal={d.fee_total_amount}
           initialPayNow={d.fee_pay_now_amount}
-          readonly={d.status === 'fees_paid' || !canFees}
+          readonly={d.status === 'fees_paid'}
           onSaved={fetchApp}
         />
       )}
@@ -307,15 +333,68 @@ export default function ApplicationDetail({ collegeId, appId }) {
             Student has been called for physical document verification. Once all original documents are verified in person, confirm the admission.
             If the student did not arrive, you can call again.
           </p>
-          <div className="flex flex-wrap gap-3">
-            <Button loading={acting} onClick={() => doAction('confirm', { document_ids_verified: docIds })}>
-              Confirm Admission (Docs Verified)
-            </Button>
-            <Button variant="secondary" loading={acting} onClick={() => doAction('call-for-doc-verification')}>
-              Call Again
-            </Button>
-            <Button variant="secondary" onClick={() => setShowCancel(v => !v)}>Cancel</Button>
-          </div>
+          {!showConfirm ? (
+            <div className="flex flex-wrap gap-3">
+              <Button loading={acting} onClick={() => { setShowConfirm(true); setFeeError('') }}>
+                Confirm Admission (Docs Verified)
+              </Button>
+              <Button variant="secondary" loading={acting} onClick={() => doAction('call-for-doc-verification')}>
+                Call Again
+              </Button>
+              <Button variant="secondary" onClick={() => setShowCancel(v => !v)}>Cancel</Button>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-4">
+              <p className="text-sm font-semibold text-emerald-800">Set Fee Amounts to Confirm Admission</p>
+              <p className="text-xs text-emerald-700">Enter the fee details before confirming. The student will see these amounts when paying.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Total Payable Amount <span className="text-red-500">*</span>
+                  </label>
+                  <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500">
+                    <span className="px-3 py-2 bg-slate-50 border-r border-slate-200 text-slate-500 text-sm font-semibold">₹</span>
+                    <input
+                      type="number" min="1" step="1"
+                      value={feeTotal}
+                      onChange={e => { setFeeTotal(e.target.value); setFeeError('') }}
+                      placeholder="e.g. 14000"
+                      className="flex-1 px-3 py-2 text-sm outline-none"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Amount to Pay Now <span className="text-red-500">*</span>
+                  </label>
+                  <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500">
+                    <span className="px-3 py-2 bg-slate-50 border-r border-slate-200 text-slate-500 text-sm font-semibold">₹</span>
+                    <input
+                      type="number" min="1" step="1"
+                      value={feePayNow}
+                      onChange={e => { setFeePayNow(e.target.value); setFeeError('') }}
+                      placeholder="e.g. 14000"
+                      className="flex-1 px-3 py-2 text-sm outline-none"
+                    />
+                  </div>
+                  {parseFloat(feeTotal) > 0 && (
+                    <button type="button" onClick={() => { setFeePayNow(feeTotal); setFeeError('') }}
+                      className="mt-1 text-xs text-emerald-600 hover:underline font-semibold">
+                      Same as total
+                    </button>
+                  )}
+                </div>
+              </div>
+              {feeError && <p className="text-sm text-red-600">{feeError}</p>}
+              <div className="flex gap-3">
+                <Button loading={acting} onClick={doConfirm}>Confirm Admission</Button>
+                <button type="button" onClick={() => { setShowConfirm(false); setFeeError('') }}
+                  className="text-sm text-slate-500 hover:text-slate-700 font-medium">
+                  Back
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

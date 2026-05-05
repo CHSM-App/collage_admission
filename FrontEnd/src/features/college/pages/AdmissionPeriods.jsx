@@ -30,16 +30,21 @@ export default function AdmissionPeriods({ collegeId }) {
     Promise.all([
       api.get(`college-admin/${collegeId}/admission-periods`),
       api.get(`masters/${collegeId}/faculty`),
-      api.get(`admin/colleges`),
     ])
-      .then(([pRes, cRes, colRes]) => {
+      .then(([pRes, cRes]) => {
         setPeriods(pRes.data.data || [])
         setCourses((cRes.data.data || []).filter(f => f.is_active))
-        const col = (colRes.data.data || []).find(c => String(c.id) === String(collegeId))
-        setCollegeFee(col?.application_fee ?? null)
       })
       .catch(() => setError('Failed to load data.'))
       .finally(() => setLoading(false))
+
+    // College fee fetch is optional — failure should not block the page
+    api.get(`admin/colleges`)
+      .then(res => {
+        const col = (res.data.data || []).find(c => String(c.id) === String(collegeId))
+        setCollegeFee(col?.application_fee ?? null)
+      })
+      .catch(() => {})
   }
 
   useEffect(() => { fetchData() }, [collegeId])
@@ -54,6 +59,15 @@ export default function AdmissionPeriods({ collegeId }) {
   async function handleCreate(e) {
     e.preventDefault()
     setError('')
+    const today = new Date().toISOString().slice(0, 10)
+    if (form.start_date && form.start_date < today) {
+      setError('Start date cannot be in the past.')
+      return
+    }
+    if (form.end_date && form.end_date < today) {
+      setError('End date cannot be in the past.')
+      return
+    }
     if (form.start_date && form.end_date && form.end_date < form.start_date) {
       setError('End date must be on or after the start date.')
       return
@@ -132,7 +146,12 @@ export default function AdmissionPeriods({ collegeId }) {
 
   async function saveEdit(period) {
     setEditError('')
+    const today = new Date().toISOString().slice(0, 10)
     if (!editEndDate) { setEditError('End date is required.'); return }
+    if (editEndDate < today) {
+      setEditError('End date cannot be in the past.')
+      return
+    }
     if (editEndDate < period.start_date.slice(0, 10)) {
       setEditError('End date cannot be before start date.')
       return
@@ -204,12 +223,16 @@ export default function AdmissionPeriods({ collegeId }) {
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Start Date</label>
-              <input required type="date" value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))}
+              <input required type="date" value={form.start_date}
+                min={new Date().toISOString().slice(0, 10)}
+                onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))}
                 className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" />
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">End Date</label>
-              <input required type="date" value={form.end_date} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))}
+              <input required type="date" value={form.end_date}
+                min={new Date().toISOString().slice(0, 10)}
+                onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))}
                 className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" />
             </div>
           </div>
@@ -315,6 +338,7 @@ export default function AdmissionPeriods({ collegeId }) {
                       <input
                         type="date"
                         value={editEndDate}
+                        min={new Date().toISOString().slice(0, 10)}
                         onChange={e => { setEditEndDate(e.target.value); setEditError('') }}
                         className="rounded-md border border-blue-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />

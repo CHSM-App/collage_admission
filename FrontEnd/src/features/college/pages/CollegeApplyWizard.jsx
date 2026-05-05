@@ -620,7 +620,7 @@ function buildAutofill(app, lastApp, profile) {
     category:     ap('category')    || profile.category   || '',
     fees_category:ap('fees_category')|| '',
 
-    birth_date:         ap('birth_date')       || formatDate(profile.birth_date) || '',
+    birth_date:         formatDate(ap('birth_date')) || formatDate(profile.birth_date) || '',
     birth_place:        ap('birth_place')      || profile.birth_place    || '',
     birth_taluka:       ap('birth_taluka')     || '',
     birth_district:     ap('birth_district')   || '',
@@ -638,7 +638,7 @@ function buildAutofill(app, lastApp, profile) {
     father_occupation:  ap('father_occupation')|| profile.father_occupation || '',
     annual_income:      ap('annual_income')    || '',
     aadhaar:            ap('aadhaar')          || profile.aadhaar        || '',
-    prn:                ap('prn')              || '',
+    prn:                ap('prn')              || profile.prn || '',
     abc_id:             ap('abc_id')           || '',
     university_app_no:  ap('university_app_no') || '',
     bank_account:       ap('bank_account')     || '',

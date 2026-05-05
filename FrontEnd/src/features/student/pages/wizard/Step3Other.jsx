@@ -48,7 +48,7 @@ export default function Step3Other({ data, errors, globalError, saving, onChange
             <FormField label="Birth District" name="birth_district" value={data.birth_district}
               onChange={onChange} placeholder="Sindhudurg" />
             <FormField label="Birth State" name="birth_state" value={data.birth_state}
-              onChange={onChange} error={e.birth_state} required placeholder="Maharashtra" />
+              onChange={onChange} placeholder="Maharashtra" />
             <FormField label="Nationality" name="nationality" value={data.nationality}
               onChange={onChange} error={e.nationality} required placeholder="Indian" />
             <FormField label="Marital Status" name="marital_status" type="select"

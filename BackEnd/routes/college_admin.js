@@ -27,9 +27,21 @@ const db      = require('./db');
 
 router.get('/:collegeId/admission-periods', async (req, res) => {
   const activeOnly = req.query.active === '1';
+  const today = new Date().toISOString().slice(0, 10);
   try {
+    // Auto-close any active periods whose end_date has passed
+    await db.request()
+      .input('col',   parseInt(req.params.collegeId))
+      .input('today', today)
+      .query(`
+        UPDATE admission_periods
+        SET is_active = 0
+        WHERE college_id = @col AND is_active = 1 AND is_disabled = 0 AND end_date < @today
+      `);
+
     const result = await db.request()
-      .input('col', parseInt(req.params.collegeId))
+      .input('col',   parseInt(req.params.collegeId))
+      .input('today', today)
       .query(`
         SELECT ap.id, ap.year_of_study, ap.academic_year,
                ap.start_date, ap.end_date, ap.total_seats, ap.filled_seats,
@@ -39,7 +51,7 @@ router.get('/:collegeId/admission-periods', async (req, res) => {
         FROM admission_periods ap
         JOIN faculty_master fm ON fm.code_no = ap.course_id AND fm.college_id = ap.college_id
         WHERE ap.college_id = @col
-          ${activeOnly ? 'AND ap.is_active = 1 AND ap.is_disabled = 0' : ''}
+          ${activeOnly ? 'AND ap.is_active = 1 AND ap.is_disabled = 0 AND ap.start_date <= @today AND ap.end_date >= @today' : ''}
         ORDER BY ap.academic_year DESC, fm.degree_course_name, ap.year_of_study
       `);
     return res.json({ success: true, data: result.recordset });
@@ -619,6 +631,71 @@ router.post('/:collegeId/roll-numbers/generate', async (req, res) => {
       assigned: pending.recordset.length,
       starting_from: nextRoll - pending.recordset.length,
     });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── College Fee Receipts ─────────────────────────────────────
+// GET /:collegeId/fee-receipts?status=paid|pending&course_id=&year_of_study=&q=
+router.get('/:collegeId/fee-receipts', async (req, res) => {
+  const { status, course_id, year_of_study, q } = req.query;
+  try {
+    let query = `
+      SELECT
+        a.id AS application_id,
+        a.registration_number,
+        a.year_of_study,
+        a.academic_year,
+        a.college_fee_paid,
+        a.status AS application_status,
+        a.roll_number,
+        a.fee_total_amount,
+        s.full_name  AS student_name,
+        s.phone      AS student_phone,
+        COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name,
+        ISNULL(psum.total_paid, 0) AS amount_paid,
+        psum.last_paid_at AS completed_at
+      FROM applications a
+      JOIN students s ON s.id = a.student_id
+      LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+      LEFT JOIN (
+        SELECT application_id,
+               SUM(amount) AS total_paid,
+               MAX(completed_at) AS last_paid_at
+        FROM payments
+        WHERE payment_type = 'college_fee' AND status = 'success'
+        GROUP BY application_id
+      ) psum ON psum.application_id = a.id
+      WHERE a.college_id = @col
+        AND a.status NOT IN ('draft','submitted','under_review','correction_requested','correction_done',
+                             'scrutiny_accepted','doc_verification_pending','rejected','cancelled')
+    `;
+    const req2 = db.request().input('col', parseInt(req.params.collegeId));
+
+    if (status === 'paid') {
+      query += ' AND a.college_fee_paid = 1';
+    } else if (status === 'pending') {
+      query += ' AND a.college_fee_paid = 0';
+    }
+    if (course_id) {
+      query += ' AND a.course_id = @crs';
+      req2.input('crs', parseInt(course_id));
+    }
+    if (year_of_study) {
+      query += ' AND a.year_of_study = @yr';
+      req2.input('yr', parseInt(year_of_study));
+    }
+    if (q) {
+      query += ` AND (s.full_name LIKE @q OR s.phone LIKE @q OR a.registration_number LIKE @q OR a.roll_number LIKE @q)`;
+      req2.input('q', `%${q.trim()}%`);
+    }
+
+    query += ' ORDER BY a.college_fee_paid ASC, a.confirmed_at DESC';
+
+    const result = await req2.query(query);
+    return res.json({ success: true, data: result.recordset });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });
