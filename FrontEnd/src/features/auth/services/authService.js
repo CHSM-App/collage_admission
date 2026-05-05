@@ -23,6 +23,7 @@ export async function loginByRole(role, credentials) {
 
   const { data } = await api.post(endpoint, {
     email:    credentials.email,
+    phone:    credentials.phone,
     password: credentials.password,
   })
 
