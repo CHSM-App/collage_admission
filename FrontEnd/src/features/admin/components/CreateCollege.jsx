@@ -4,7 +4,7 @@ import Button from '../../../shared/components/Button.jsx'
 
 const EMPTY = {
   name: '', address: '', city: '', phone: '',
-  email: '', admin_email: '', admin_password: '',
+  email: '', admin_email: '', admin_password: '', college_code: '',
 }
 
 const inputCls = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500'
@@ -51,7 +51,7 @@ export default function CreateCollege({ onCreated }) {
 
   return (
     <div className="max-w-2xl space-y-4">
-      <p className="text-slate-500 text-sm">Onboard a new college. A unique college code is generated automatically.</p>
+      <p className="text-slate-500 text-sm">Onboard a new college. Leave the college code blank to auto-generate one.</p>
 
       {success && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 space-y-1">
@@ -88,6 +88,14 @@ export default function CreateCollege({ onCreated }) {
           <Field label="College Email" required>
             <input name="email" type="email" value={form.email} onChange={handleChange} required
               placeholder="info@college.edu.in" className={inputCls} />
+          </Field>
+          <Field label="College Code">
+            <input name="college_code" value={form.college_code}
+              onChange={e => { setForm(f => ({ ...f, college_code: e.target.value.toUpperCase() })); setError(''); setSuccess(null) }}
+              placeholder="e.g. CL007 (leave blank to auto-generate)"
+              maxLength={20}
+              className={`${inputCls} font-mono tracking-widest uppercase`} />
+            <p className="mt-1 text-xs text-slate-400">This code is shared with students so they can find the college.</p>
           </Field>
         </fieldset>
 

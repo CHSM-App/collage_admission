@@ -198,44 +198,26 @@ export default function MyApplications() {
               )}
 
               {app.status === 'submitted' && (
-                <div className="mt-3 rounded-md bg-blue-50 border border-blue-100 px-3 py-2 space-y-2">
+                <div className="mt-3 rounded-md bg-blue-50 border border-blue-100 px-3 py-2">
                   <p className="text-sm text-blue-800">
-                    Your application has been submitted. The college will review and perform scrutiny. You can still edit it until the college accepts it.
+                    Your application has been submitted and is awaiting review by the college.
                   </p>
-                  <button
-                    onClick={() => navigate(`/apply/${app.id}`)}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 transition"
-                  >
-                    Edit Application
-                  </button>
                 </div>
               )}
 
               {app.status === 'under_review' && (
-                <div className="mt-3 rounded-md bg-blue-50 border border-blue-100 px-3 py-2 space-y-2">
+                <div className="mt-3 rounded-md bg-blue-50 border border-blue-100 px-3 py-2">
                   <p className="text-sm text-blue-800">
-                    Your application is under review by the college. You can still edit it until the college accepts it.
+                    Your application is under review by the college.
                   </p>
-                  <button
-                    onClick={() => navigate(`/apply/${app.id}`)}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-white px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-50 transition"
-                  >
-                    Edit Application
-                  </button>
                 </div>
               )}
 
               {app.status === 'correction_done' && (
-                <div className="mt-3 rounded-md bg-sky-50 border border-sky-200 px-3 py-2 space-y-2">
+                <div className="mt-3 rounded-md bg-sky-50 border border-sky-200 px-3 py-2">
                   <p className="text-sm text-sky-800 font-medium">
                     Your corrected application has been submitted. The college is reviewing it.
                   </p>
-                  <button
-                    onClick={() => navigate(`/apply/${app.id}`)}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-sky-300 bg-white px-3 py-1.5 text-sm font-semibold text-sky-700 hover:bg-sky-50 transition"
-                  >
-                    Edit Application
-                  </button>
                 </div>
               )}
 
@@ -274,7 +256,7 @@ export default function MyApplications() {
               {app.status === 'fees_paid' && (
                 <div className="mt-3 rounded-md bg-emerald-50 border border-emerald-100 px-3 py-2 space-y-2">
                   <p className="text-sm text-emerald-800 font-medium">
-                    Fee payment received. If you have remaining installments, you can pay them below.
+                    Fee payment received. If you have a remaining balance, you can pay it below.
                   </p>
                   <button
                     onClick={() => setFeePayApp(app)}

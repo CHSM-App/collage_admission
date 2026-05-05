@@ -117,7 +117,6 @@ router.delete('/:collegeId/admission-periods/:periodId', async (req, res) => {
   const periodId  = parseInt(req.params.periodId);
   const collegeId = parseInt(req.params.collegeId);
   try {
-    // Block delete if any applications exist for this period
     const check = await db.request()
       .input('pid', periodId)
       .query(`SELECT COUNT(*) AS cnt FROM applications WHERE period_id = @pid`);
@@ -125,10 +124,6 @@ router.delete('/:collegeId/admission-periods/:periodId', async (req, res) => {
     if (cnt > 0) {
       return res.status(400).json({ success: false, message: `Cannot delete — ${cnt} application(s) exist for this period.` });
     }
-    // Remove installment plans first
-    await db.request()
-      .input('pid', periodId)
-      .query(`DELETE FROM fee_installment_plans WHERE admission_period_id = @pid`);
     const del = await db.request()
       .input('pid', periodId)
       .input('cid', collegeId)
@@ -137,71 +132,6 @@ router.delete('/:collegeId/admission-periods/:periodId', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Period not found.' });
     }
     return res.json({ success: true, message: 'Admission period deleted.' });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, message: 'Server error.' });
-  }
-});
-
-// ── Installment Plans ───────────────────────────────────────
-// GET  /:collegeId/admission-periods/:periodId/installments
-// POST /:collegeId/admission-periods/:periodId/installments   (replace all)
-
-router.get('/:collegeId/admission-periods/:periodId/installments', async (req, res) => {
-  try {
-    const result = await db.request()
-      .input('pid', parseInt(req.params.periodId))
-      .query(`
-        SELECT id, installment_no, label, amount, due_date
-        FROM fee_installment_plans
-        WHERE admission_period_id = @pid
-        ORDER BY installment_no
-      `);
-    return res.json({ success: true, data: result.recordset });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, message: 'Server error.' });
-  }
-});
-
-router.post('/:collegeId/admission-periods/:periodId/installments', async (req, res) => {
-  const periodId = parseInt(req.params.periodId);
-  const { installments } = req.body;
-  // installments: [{ installment_no, label, amount, due_date }]
-
-  if (!Array.isArray(installments)) {
-    return res.status(400).json({ success: false, message: 'installments must be an array.' });
-  }
-  if (installments.length > 6) {
-    return res.status(400).json({ success: false, message: 'Maximum 6 installments allowed.' });
-  }
-  for (const ins of installments) {
-    if (!ins.label || !ins.amount || parseFloat(ins.amount) <= 0) {
-      return res.status(400).json({ success: false, message: 'Each installment needs a label and positive amount.' });
-    }
-  }
-
-  try {
-    // Replace: delete existing, then insert new (empty array = clear plan)
-    await db.request()
-      .input('pid', parseInt(periodId))
-      .query('DELETE FROM fee_installment_plans WHERE admission_period_id = @pid');
-
-    for (let i = 0; i < installments.length; i++) {
-      const ins = installments[i];
-      await db.request()
-        .input('pid',    parseInt(periodId))
-        .input('no',     i + 1)
-        .input('label',  ins.label)
-        .input('amount', parseFloat(ins.amount))
-        .input('due',    ins.due_date || null)
-        .query(`
-          INSERT INTO fee_installment_plans (admission_period_id, installment_no, label, amount, due_date)
-          VALUES (@pid, @no, @label, @amount, @due)
-        `);
-    }
-
-    return res.json({ success: true, message: 'Installment plan saved.' });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });
@@ -245,7 +175,7 @@ router.get('/:collegeId/applications', async (req, res) => {
       FROM applications a
       JOIN students       s  ON s.id  = a.student_id
       LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
-      WHERE a.college_id = @col
+      WHERE a.college_id = @col AND a.status <> 'draft'
     `;
 
     const req2 = db.request().input('col', parseInt(req.params.collegeId));
@@ -540,6 +470,53 @@ router.post('/:collegeId/applications/:appId/confirm', async (req, res) => {
       `);
 
     return res.json({ success: true, message: 'Admission confirmed. Student can now pay college fee.' });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── Set fee amounts (college enters total fee and amount due now) ─────────────
+router.post('/:collegeId/applications/:appId/set-fee', async (req, res) => {
+  const { fee_total_amount, fee_pay_now_amount } = req.body;
+
+  const total  = parseFloat(fee_total_amount);
+  const payNow = parseFloat(fee_pay_now_amount);
+
+  if (!total || total <= 0) {
+    return res.status(400).json({ success: false, message: 'Total payable amount is required and must be positive.' });
+  }
+  if (isNaN(payNow) || payNow <= 0) {
+    return res.status(400).json({ success: false, message: 'Amount to pay now must be a positive number.' });
+  }
+  if (payNow > total + 0.01) {
+    return res.status(400).json({ success: false, message: 'Amount to pay now cannot exceed the total payable amount.' });
+  }
+
+  try {
+    const appRes = await db.request()
+      .input('id',  parseInt(req.params.appId))
+      .input('col', parseInt(req.params.collegeId))
+      .query('SELECT id, status FROM applications WHERE id=@id AND college_id=@col');
+
+    if (!appRes.recordset.length) {
+      return res.status(404).json({ success: false, message: 'Application not found.' });
+    }
+    if (!['confirmed', 'fees_paid'].includes(appRes.recordset[0].status)) {
+      return res.status(400).json({ success: false, message: 'Fee can only be set for confirmed applications.' });
+    }
+
+    await db.request()
+      .input('id',    parseInt(req.params.appId))
+      .input('total', require('mssql').Decimal, total)
+      .input('now',   require('mssql').Decimal, payNow)
+      .query(`
+        UPDATE applications
+        SET fee_total_amount = @total, fee_pay_now_amount = @now, updated_at = GETDATE()
+        WHERE id = @id
+      `);
+
+    return res.json({ success: true, message: 'Fee amounts saved.' });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });

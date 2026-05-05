@@ -29,7 +29,7 @@ async function generateCollegeCode() {
 
 // Create a new college (admin onboarding)
 router.post('/', async (req, res) => {
-  const { name, address, city, phone, email, admin_email, admin_password } = req.body
+  const { name, address, city, phone, email, admin_email, admin_password, college_code } = req.body
 
   if (!name || !email || !admin_email || !admin_password) {
     return res.status(400).json({ success: false, message: 'name, email, admin_email and admin_password are required.' })
@@ -45,7 +45,21 @@ router.post('/', async (req, res) => {
     }
 
     const hash = await bcrypt.hash(admin_password, 10)
-    const code = await generateCollegeCode()
+
+    // Use provided code (uppercased) or auto-generate
+    let code
+    if (college_code && college_code.trim()) {
+      code = college_code.trim().toUpperCase()
+      // Check for duplicate code
+      const dupCode = await db.request()
+        .input('c', mssql.NVarChar, code)
+        .query('SELECT id FROM colleges WHERE UPPER(college_code) = @c')
+      if (dupCode.recordset.length) {
+        return res.status(409).json({ success: false, message: `College code "${code}" is already in use.` })
+      }
+    } else {
+      code = await generateCollegeCode()
+    }
 
     const result = await db.request()
       .input('name',  mssql.NVarChar, name)
@@ -86,6 +100,50 @@ router.get('/', async (req, res) => {
       'SELECT id, name, address, city, phone, email FROM colleges ORDER BY name'
     );
     return res.json({ success: true, data: result.recordset });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// Lookup college by code + return its open admission periods (student entry point)
+router.get('/by-code/:code', async (req, res) => {
+  const code = req.params.code.trim().toUpperCase();
+  try {
+    const collegeRes = await db.request()
+      .input('code', code)
+      .query('SELECT id, name, city, phone, email FROM colleges WHERE UPPER(college_code) = @code');
+
+    if (!collegeRes.recordset.length) {
+      return res.status(404).json({ success: false, message: 'No college found with that code. Please check and try again.' });
+    }
+    const college = collegeRes.recordset[0];
+
+    const today = new Date().toISOString().slice(0, 10);
+    const periodsRes = await db.request()
+      .input('id',    college.id)
+      .input('today', today)
+      .query(`
+        SELECT
+          ap.id, ap.year_of_study, ap.academic_year,
+          ap.start_date, ap.end_date,
+          ap.total_seats, ap.filled_seats, ap.application_fee, ap.is_active,
+          fm.code_no AS course_id,
+          CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name,
+          fm.duration_years,
+          fm.degree_course_code AS course_category
+        FROM admission_periods ap
+        JOIN faculty_master fm ON fm.code_no = ap.course_id AND fm.college_id = ap.college_id
+        WHERE ap.college_id = @id
+          AND ap.is_active  = 1
+          AND ap.is_disabled = 0
+          AND ap.start_date <= @today
+          AND ap.end_date   >= @today
+          AND ap.filled_seats < ap.total_seats
+        ORDER BY fm.degree_course_name, ap.year_of_study
+      `);
+
+    return res.json({ success: true, data: { college, periods: periodsRes.recordset } });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });

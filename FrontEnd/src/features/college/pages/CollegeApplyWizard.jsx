@@ -78,6 +78,7 @@ function reducer(state, action) {
     case 'SET_STEP':       return { ...state, currentStep: action.step, errors: {}, globalError: '' }
     case 'INIT_APP':
       return { ...state, applicationId: action.applicationId, studentId: action.studentId,
+               appStatus: action.appStatus,
                currentStep: action.currentStep, maxStep: action.currentStep, loading: false }
     case 'SET_DATA':       return { ...state, data: { ...state.data, ...action.patch } }
     case 'SET_MAX_STEP':   return { ...state, maxStep: Math.max(state.maxStep, action.step) }
@@ -170,7 +171,7 @@ export default function CollegeApplyWizard() {
         // Map DB current_step (1=Context,2=Personal,...) to college wizard step (1=Personal,...)
         const dbStep    = app.current_step || 2
         const wizStep   = Math.max(1, dbStep - 1)  // offset: college wizard has no Context step
-        dispatch({ type: 'INIT_APP', applicationId: appId, studentId, currentStep: wizStep })
+        dispatch({ type: 'INIT_APP', applicationId: appId, studentId, currentStep: wizStep, appStatus: app.status })
       } catch (err) {
         dispatch({ type: 'SET_GLOBAL_ERR', message: err?.response?.data?.message || 'Failed to load application.' })
         dispatch({ type: 'SET_LOADING', value: false })
@@ -234,7 +235,9 @@ export default function CollegeApplyWizard() {
     }
   }
 
-  const { data, currentStep, loading, saving, errors, globalError, applicationId, studentId } = state
+  const { data, currentStep, loading, saving, errors, globalError, applicationId, studentId, appStatus } = state
+  // Edit mode: app already submitted — save changes and return, no re-submit
+  const isEditMode = !!appStatus && appStatus !== 'draft'
 
   if (loading) {
     return (
@@ -301,7 +304,7 @@ export default function CollegeApplyWizard() {
           </button>
           <div className="flex-1 min-w-0">
             <p className="truncate text-sm font-semibold text-slate-950">
-              {data.college_name} — Add Application
+              {data.college_name} — {isEditMode ? 'Edit Application' : 'Add Application'}
             </p>
             <p className="text-xs text-slate-400">
               {data.course_name} · {YEAR_LABEL[data.year_of_study]} · {data.academic_year}
@@ -366,15 +369,17 @@ export default function CollegeApplyWizard() {
             />
           )}
 
-          {/* Step 5 — Review & submit */}
+          {/* Step 5 — Review & submit / save */}
           {currentStep === 5 && (
             <CollegeReviewStep
               data={data}
               saving={saving}
               submitError={submitError}
+              isEditMode={isEditMode}
               onBack={() => goStep(4)}
               onEditStep={goStep}
               onSubmit={handleFinalSubmit}
+              onSaveAndReturn={() => navigate(`/college/dashboard?section=app&app_id=${applicationId}`)}
             />
           )}
         </div>
@@ -398,7 +403,7 @@ function SkipButton({ onClick, saving }) {
 }
 
 // ── Review step (college-specific — shows fee info, checks required docs) ──
-function CollegeReviewStep({ data, saving, submitError, onBack, onEditStep, onSubmit }) {
+function CollegeReviewStep({ data, saving, submitError, isEditMode, onBack, onEditStep, onSubmit, onSaveAndReturn }) {
   const d = data
 
   const linkedMap = Object.fromEntries((d.linked_documents || []).map(doc => [doc.document_type_id, doc]))
@@ -411,9 +416,9 @@ function CollegeReviewStep({ data, saving, submitError, onBack, onEditStep, onSu
   return (
     <div>
       <div className="border-b border-slate-100 px-5 py-5">
-        <h2 className="text-base font-bold text-slate-950">Review & Submit</h2>
+        <h2 className="text-base font-bold text-slate-950">{isEditMode ? 'Review Changes' : 'Review & Submit'}</h2>
         <p className="mt-1 text-sm text-slate-500">
-          Check all details before submitting.
+          {isEditMode ? 'Review the changes made to the application.' : 'Check all details before submitting.'}
         </p>
       </div>
 
@@ -514,8 +519,8 @@ function CollegeReviewStep({ data, saving, submitError, onBack, onEditStep, onSu
           </div>
         )}
 
-        {/* Application fee info */}
-        {d.application_fee > 0 && (
+        {/* Application fee info — only for new submissions */}
+        {!isEditMode && d.application_fee > 0 && (
           <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
             <p className="text-sm font-semibold text-blue-900">
               Application Fee: ₹{Number(d.application_fee).toLocaleString('en-IN')}
@@ -534,16 +539,22 @@ function CollegeReviewStep({ data, saving, submitError, onBack, onEditStep, onSu
 
         <div className="flex flex-col-reverse sm:flex-row gap-3 pt-2">
           <Button variant="secondary" onClick={onBack} disabled={saving}>← Back</Button>
-          <Button
-            onClick={onSubmit}
-            loading={saving}
-            disabled={!canSubmit || saving}
-            className={`sm:ml-auto ${!canSubmit ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            Submit Application →
-          </Button>
+          {isEditMode ? (
+            <Button onClick={onSaveAndReturn} className="sm:ml-auto">
+              Save &amp; Return to Application →
+            </Button>
+          ) : (
+            <Button
+              onClick={onSubmit}
+              loading={saving}
+              disabled={!canSubmit || saving}
+              className={`sm:ml-auto ${!canSubmit ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              Submit Application →
+            </Button>
+          )}
         </div>
-        {!canSubmit && (
+        {!isEditMode && !canSubmit && (
           <p className="text-xs text-center text-red-500">
             Upload all required documents before submitting.
           </p>

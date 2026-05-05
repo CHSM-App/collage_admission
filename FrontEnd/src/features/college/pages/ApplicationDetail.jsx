@@ -30,6 +30,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
   const canUpload   = canWrite('upload_documents')
   const canReviewD  = canWrite('review_documents')
   const canFees     = canWrite('collect_fees')
+  const canEditApp  = canWrite('edit_application')
   const [app, setApp]         = useState(null)
   const [loading, setLoading] = useState(true)
   const [acting, setActing]   = useState(false)
@@ -54,12 +55,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
     setError('')
     try {
       await api.post(`college-admin/${collegeId}/applications/${appId}/${endpoint}`, body)
-      fetchApp()
-      setShowReject(false)
-      setShowCancel(false)
-      setShowCorrection(false)
-      setReason('')
-      setCorrectionNote('')
+      navigate('/college/dashboard?section=inbox')
     } catch (err) {
       setError(err?.response?.data?.message || 'Action failed.')
     } finally {
@@ -100,7 +96,17 @@ export default function ApplicationDetail({ collegeId, appId }) {
       {/* Status bar */}
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-5 py-3 flex items-center justify-between gap-4">
         <p className="text-sm font-semibold text-slate-700">{flowInfo.label}</p>
-        <StatusBadge status={d.status} />
+        <div className="flex items-center gap-3">
+          {canEditApp && ['submitted','under_review','correction_requested','correction_done'].includes(d.status) && (
+            <button
+              onClick={() => navigate(`/college/apply/${appId}`)}
+              className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition"
+            >
+              Edit Application
+            </button>
+          )}
+          <StatusBadge status={d.status} />
+        </div>
       </div>
 
       {/* ── Application Context ── */}
@@ -236,13 +242,15 @@ export default function ApplicationDetail({ collegeId, appId }) {
         <p className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</p>
       )}
 
-      {/* ── Fee Installment Plan (shown once confirmed) ── */}
+      {/* ── Fee Amounts (shown once confirmed) ── */}
       {['confirmed','fees_paid'].includes(d.status) && (
-        <FeeInstallmentPanel
+        <FeeAmountPanel
           collegeId={collegeId}
           appId={appId}
-          admissionPeriodId={d.admission_period_id}
+          initialTotal={d.fee_total_amount}
+          initialPayNow={d.fee_pay_now_amount}
           readonly={d.status === 'fees_paid' || !canFees}
+          onSaved={fetchApp}
         />
       )}
 
@@ -417,185 +425,114 @@ function StatusBadge({ status }) {
   )
 }
 
-function FeeInstallmentPanel({ collegeId, appId, admissionPeriodId, readonly }) {
-  const [rows, setRows]       = useState([])
-  const [totalFee, setTotalFee] = useState(0)
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving]   = useState(false)
-  const [error, setError]     = useState('')
+function FeeAmountPanel({ collegeId, appId, initialTotal, initialPayNow, readonly, onSaved }) {
+  const [total,  setTotal]   = useState(initialTotal  ? String(initialTotal)  : '')
+  const [payNow, setPayNow]  = useState(initialPayNow ? String(initialPayNow) : '')
+  const [saving, setSaving]  = useState(false)
+  const [error,  setError]   = useState('')
   const [success, setSuccess] = useState('')
 
-  useEffect(() => {
-    if (!admissionPeriodId) { setLoading(false); return }
-    Promise.all([
-      api.get(`college-admin/${collegeId}/admission-periods/${admissionPeriodId}/installments`),
-      api.get(`payments/college-fee-status/${appId}`),
-    ])
-      .then(([insRes, feeRes]) => {
-        const data = insRes.data.data || []
-        setRows(data.length > 0 ? data : [{ label: 'First Installment', amount: '', due_date: '' }])
-        const fee = feeRes.data.data
-        setTotalFee(fee?.student_payable ?? fee?.total_fee ?? 0)
-      })
-      .catch(() => setRows([{ label: 'First Installment', amount: '', due_date: '' }]))
-      .finally(() => setLoading(false))
-  }, [admissionPeriodId, collegeId, appId])
-
-  function addRow() {
-    const labels = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth']
-    setRows(r => [...r, { label: `${labels[r.length] || (r.length + 1) + 'th'} Installment`, amount: '', due_date: '' }])
-  }
-
-  function removeRow(i) { setRows(r => r.filter((_, idx) => idx !== i)) }
-
-  function updateRow(i, field, value) {
-    setRows(r => r.map((row, idx) => idx === i ? { ...row, [field]: value } : row))
-  }
-
-  const enteredTotal = rows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0)
-  const remainder    = totalFee > 0 ? Math.round((totalFee - enteredTotal) * 100) / 100 : 0
-  const hasGap       = remainder > 0.01
+  const totalNum  = parseFloat(total)  || 0
+  const payNowNum = parseFloat(payNow) || 0
+  const isPartial = totalNum > 0 && payNowNum > 0 && payNowNum < totalNum - 0.01
 
   async function handleSave() {
     setError(''); setSuccess('')
-    for (const row of rows) {
-      if (!row.label.trim() || !row.amount || parseFloat(row.amount) <= 0) {
-        setError('Each installment needs a label and a positive amount.')
-        return
-      }
-    }
-    if (enteredTotal > totalFee + 0.01 && totalFee > 0) {
-      setError(`Total installments (₹${enteredTotal.toLocaleString('en-IN')}) exceed the total fee (₹${totalFee.toLocaleString('en-IN')}).`)
-      return
-    }
-
-    // Auto-append remainder as final installment if there's a gap
-    const finalRows = [...rows.map(r => ({ label: r.label.trim(), amount: parseFloat(r.amount), due_date: r.due_date || null }))]
-    if (hasGap) {
-      const labels = ['First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth']
-      finalRows.push({ label: `${labels[finalRows.length] || 'Final'} Installment`, amount: remainder, due_date: null })
-    }
-
+    if (!totalNum || totalNum <= 0) { setError('Enter the total payable amount.'); return }
+    if (!payNowNum || payNowNum <= 0) { setError('Enter the amount to pay now.'); return }
+    if (payNowNum > totalNum + 0.01) { setError('Amount to pay now cannot exceed the total.'); return }
     setSaving(true)
     try {
-      await api.post(`college-admin/${collegeId}/admission-periods/${admissionPeriodId}/installments`, {
-        installments: finalRows,
+      await api.post(`college-admin/${collegeId}/applications/${appId}/set-fee`, {
+        fee_total_amount: totalNum,
+        fee_pay_now_amount: payNowNum,
       })
-      // Refresh rows from server so auto-added installment shows up
-      const r = await api.get(`college-admin/${collegeId}/admission-periods/${admissionPeriodId}/installments`)
-      setRows(r.data.data || finalRows)
-      setSuccess(hasGap
-        ? `Plan saved. Remaining ₹${remainder.toLocaleString('en-IN')} auto-added as final installment.`
-        : 'Installment plan saved.')
+      setSuccess('Fee amounts saved. Student will see these amounts when paying.')
+      onSaved?.()
     } catch (err) {
       setError(err?.response?.data?.message || 'Failed to save.')
     } finally { setSaving(false) }
   }
 
-  async function handleClear() {
-    if (!confirm('Remove installment plan? Students will pay the full fee in one payment.')) return
-    setSaving(true)
-    try {
-      await api.post(`college-admin/${collegeId}/admission-periods/${admissionPeriodId}/installments`, { installments: [] })
-      setRows([{ label: 'First Installment', amount: '', due_date: '' }])
-      setSuccess('Installment plan cleared.')
-    } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to clear.')
-    } finally { setSaving(false) }
-  }
-
-  if (!admissionPeriodId) return null
+  const inputCls = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-50 disabled:text-slate-400'
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-        <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Fee Installment Plan</p>
-        <p className="text-xs text-slate-400">
-          {readonly ? 'Fees fully paid — plan locked.' : 'If no plan is set, student pays the full fee at once.'}
+      <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+        <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Fee Details</p>
+        <p className="text-xs text-slate-400 mt-0.5">
+          {readonly
+            ? 'Fee paid — locked.'
+            : 'Enter the total fee and how much the student must pay now. Student will see both amounts.'}
         </p>
       </div>
-      <div className="px-4 py-4 space-y-3">
-        {loading ? (
-          <p className="text-sm text-slate-400">Loading…</p>
-        ) : (
-          <>
-            {totalFee > 0 && (
-              <p className="text-xs text-slate-500">
-                Total fee: <span className="font-semibold text-slate-700">₹{totalFee.toLocaleString('en-IN')}</span>
-              </p>
-            )}
-
-            <div className="space-y-2">
-              {rows.map((row, i) => (
-                <div key={i} className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-semibold text-slate-400 w-4">{i + 1}.</span>
-                  <input
-                    value={row.label}
-                    onChange={e => updateRow(i, 'label', e.target.value)}
-                    disabled={readonly || row.is_paid}
-                    placeholder="Label"
-                    className="flex-1 min-w-32 rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"
-                  />
-                  <div className="flex items-center gap-1">
-                    <span className="text-slate-400 text-sm">₹</span>
-                    <input
-                      type="number" min="1"
-                      value={row.amount}
-                      onChange={e => updateRow(i, 'amount', e.target.value)}
-                      disabled={readonly || row.is_paid}
-                      placeholder="Amount"
-                      className="w-28 rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"
-                    />
-                  </div>
-                  <input
-                    type="date"
-                    value={row.due_date ? row.due_date.slice(0, 10) : ''}
-                    onChange={e => updateRow(i, 'due_date', e.target.value)}
-                    disabled={readonly || row.is_paid}
-                    className="rounded-md border border-slate-300 px-2 py-1.5 text-sm disabled:bg-slate-50"
-                    title="Due date (optional)"
-                  />
-                  {row.is_paid && (
-                    <span className="text-xs font-semibold text-emerald-600">✓ Paid</span>
-                  )}
-                  {!readonly && !row.is_paid && rows.length > 1 && (
-                    <button onClick={() => removeRow(i)} className="text-red-400 hover:text-red-600 text-sm font-bold px-1">✕</button>
-                  )}
-                </div>
-              ))}
+      <div className="px-4 py-4 space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">
+              Total Payable Amount <span className="text-red-500">*</span>
+            </label>
+            <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500">
+              <span className="px-3 py-2 bg-slate-50 border-r border-slate-200 text-slate-500 text-sm font-semibold">₹</span>
+              <input
+                type="number" min="1" step="1"
+                value={total}
+                onChange={e => { setTotal(e.target.value); setError(''); setSuccess('') }}
+                disabled={readonly}
+                placeholder="e.g. 14000"
+                className="flex-1 px-3 py-2 text-sm outline-none bg-transparent disabled:bg-slate-50 disabled:text-slate-400"
+              />
             </div>
+            <p className="mt-1 text-xs text-slate-400">Full fee the student owes</p>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">
+              Amount to Pay Now <span className="text-red-500">*</span>
+            </label>
+            <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500">
+              <span className="px-3 py-2 bg-slate-50 border-r border-slate-200 text-slate-500 text-sm font-semibold">₹</span>
+              <input
+                type="number" min="1" step="1"
+                value={payNow}
+                onChange={e => { setPayNow(e.target.value); setError(''); setSuccess('') }}
+                disabled={readonly}
+                placeholder="e.g. 14000"
+                className="flex-1 px-3 py-2 text-sm outline-none bg-transparent disabled:bg-slate-50 disabled:text-slate-400"
+              />
+            </div>
+            <p className="mt-1 text-xs text-slate-400">
+              {!readonly && totalNum > 0 && (
+                <button
+                  type="button"
+                  onClick={() => { setPayNow(total); setError(''); setSuccess('') }}
+                  className="text-emerald-600 hover:underline font-semibold"
+                >
+                  Same as total
+                </button>
+              )}
+              {!readonly && totalNum > 0 && ' · '}
+              Can be less if college allows partial payment
+            </p>
+          </div>
+        </div>
 
-            {!readonly && (
-              <div className="flex items-center gap-3 flex-wrap">
-                {rows.length < 6 && (
-                  <button onClick={addRow} className="text-sm text-indigo-600 hover:underline font-semibold">
-                    + Add installment
-                  </button>
-                )}
-                {enteredTotal > 0 && (
-                  <span className="text-xs text-slate-500">Entered: ₹{enteredTotal.toLocaleString('en-IN')}</span>
-                )}
-                {hasGap && (
-                  <span className="text-xs font-semibold text-amber-600">
-                    Remaining ₹{remainder.toLocaleString('en-IN')} will be auto-added as final installment
-                  </span>
-                )}
-                {!hasGap && totalFee > 0 && enteredTotal > 0 && (
-                  <span className="text-xs font-semibold text-emerald-600">✓ Covers full fee</span>
-                )}
-              </div>
-            )}
+        {isPartial && (
+          <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+            Student pays <strong>₹{payNowNum.toLocaleString('en-IN')}</strong> now.
+            Remaining <strong>₹{(totalNum - payNowNum).toLocaleString('en-IN')}</strong> can be paid later.
+          </div>
+        )}
+        {totalNum > 0 && payNowNum > 0 && !isPartial && payNowNum <= totalNum + 0.01 && (
+          <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-800">
+            Student pays the full fee of <strong>₹{totalNum.toLocaleString('en-IN')}</strong> at once.
+          </div>
+        )}
 
-            {error   && <p className="text-sm text-red-600">{error}</p>}
-            {success && <p className="text-sm text-emerald-600">{success}</p>}
+        {error   && <p className="text-sm text-red-600">{error}</p>}
+        {success && <p className="text-sm text-emerald-600">{success}</p>}
 
-            {!readonly && (
-              <div className="flex gap-3">
-                <Button onClick={handleSave} loading={saving}>Save Plan</Button>
-                <Button variant="secondary" onClick={handleClear} disabled={saving}>Clear Plan</Button>
-              </div>
-            )}
-          </>
+        {!readonly && (
+          <Button onClick={handleSave} loading={saving}>Save Fee Amounts</Button>
         )}
       </div>
     </div>

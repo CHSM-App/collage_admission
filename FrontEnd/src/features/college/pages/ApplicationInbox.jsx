@@ -1,81 +1,73 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import api from '../../../services/api.js'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
 
 const STATUS_META = {
-  submitted:                { label: 'Submitted',               color: 'bg-blue-100 text-blue-700' },
-  under_review:             { label: 'Under Review',            color: 'bg-blue-100 text-blue-700' },
-  correction_requested:     { label: 'Correction Pending',      color: 'bg-orange-100 text-orange-700' },
-  correction_done:          { label: 'Correction Done',         color: 'bg-sky-100 text-sky-700' },
-  scrutiny_accepted:        { label: 'Scrutiny Accepted',       color: 'bg-teal-100 text-teal-700' },
-  doc_verification_pending: { label: 'Doc Verification Pending',color: 'bg-orange-100 text-orange-700' },
-  confirmed:                { label: 'Confirmed',               color: 'bg-emerald-100 text-emerald-700' },
-  fees_paid:                { label: 'Fees Paid',               color: 'bg-emerald-100 text-emerald-700' },
-  roll_assigned:            { label: 'Roll Assigned',           color: 'bg-violet-100 text-violet-700' },
-  enrolled:                 { label: 'Enrolled',                color: 'bg-green-100 text-green-800' },
-  rejected:                 { label: 'Rejected',                color: 'bg-red-100 text-red-700' },
-  cancelled:                { label: 'Cancelled',               color: 'bg-slate-100 text-slate-500' },
+  submitted:                { label: 'Submitted',                color: 'bg-blue-100 text-blue-700' },
+  under_review:             { label: 'Under Review',             color: 'bg-blue-100 text-blue-700' },
+  correction_requested:     { label: 'Correction Pending',       color: 'bg-orange-100 text-orange-700' },
+  correction_done:          { label: 'Correction Done',          color: 'bg-sky-100 text-sky-700' },
+  scrutiny_accepted:        { label: 'Scrutiny Accepted',        color: 'bg-teal-100 text-teal-700' },
+  doc_verification_pending: { label: 'Doc Verification Pending', color: 'bg-orange-100 text-orange-700' },
+  confirmed:                { label: 'Confirmed',                color: 'bg-emerald-100 text-emerald-700' },
+  fees_paid:                { label: 'Fees Paid',                color: 'bg-emerald-100 text-emerald-700' },
+  roll_assigned:            { label: 'Roll Assigned',            color: 'bg-violet-100 text-violet-700' },
+  enrolled:                 { label: 'Enrolled',                 color: 'bg-green-100 text-green-800' },
+  rejected:                 { label: 'Rejected',                 color: 'bg-red-100 text-red-700' },
+  cancelled:                { label: 'Cancelled',                color: 'bg-slate-100 text-slate-500' },
 }
 
-const TABS = [
-  { key: 'submitted,under_review',  label: 'Pending Scrutiny' },
-  { key: 'correction_requested,correction_done', label: 'Awaiting Correction' },
-  { key: 'scrutiny_accepted',       label: 'Scrutiny Accepted' },
-  { key: 'doc_verification_pending',label: 'Doc Verification' },
-  { key: 'confirmed',               label: 'Confirmed' },
-  { key: 'fees_paid',               label: 'Fees Paid' },
-  { key: 'rejected,cancelled',      label: 'Rejected / Cancelled' },
-]
+const ALL_STATUSES = Object.entries(STATUS_META).map(([key, { label }]) => ({ key, label }))
+
+function useStatusCounts(apps) {
+  return useMemo(() => {
+    const counts = {}
+    apps.forEach(a => { counts[a.status] = (counts[a.status] || 0) + 1 })
+    return counts
+  }, [apps])
+}
 
 export default function ApplicationInbox({ collegeId }) {
   const navigate = useNavigate()
-  const [searchParams] = useSearchParams()
-  const initialStatus = searchParams.get('status') || 'submitted,under_review'
 
-  const [activeTab, setActiveTab]   = useState(initialStatus)
-  const [apps, setApps]             = useState([])
-  const [loading, setLoading]       = useState(true)
+  const [apps, setApps]     = useState([])
+  const [loading, setLoading] = useState(true)
 
-  // Filter state
-  const [search, setSearch]         = useState('')
+  // Filters
+  const [search, setSearch]           = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
   const [filterCourse, setFilterCourse] = useState('')
   const [filterYear, setFilterYear]     = useState('')
 
-  function fetchApps(status) {
+  function fetchApps() {
     setLoading(true)
-    api.get(`college-admin/${collegeId}/applications?status=${encodeURIComponent(status)}`)
+    api.get(`college-admin/${collegeId}/applications`)
       .then(r => setApps(r.data.data || []))
       .catch(() => setApps([]))
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => {
-    fetchApps(activeTab)
-    // Reset filters on tab change
-    setSearch('')
-    setFilterCourse('')
-    setFilterYear('')
-  }, [activeTab, collegeId])
+  useEffect(() => { fetchApps() }, [collegeId])
 
-  // Derive unique course options from fetched apps
+  const statusCounts = useStatusCounts(apps)
+
   const courseOptions = useMemo(() => {
     const map = new Map()
     apps.forEach(a => { if (a.course_id) map.set(a.course_id, a.course_name) })
     return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
   }, [apps])
 
-  // Derive unique year options from fetched apps
   const yearOptions = useMemo(() => {
     const set = new Set(apps.map(a => a.year_of_study).filter(Boolean))
     return [...set].sort()
   }, [apps])
 
-  // Client-side filtering
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return apps.filter(a => {
+      if (filterStatus && a.status !== filterStatus) return false
       if (filterCourse && String(a.course_id) !== String(filterCourse)) return false
       if (filterYear   && String(a.year_of_study) !== String(filterYear)) return false
       if (q) {
@@ -87,9 +79,13 @@ export default function ApplicationInbox({ collegeId }) {
       }
       return true
     })
-  }, [apps, search, filterCourse, filterYear])
+  }, [apps, search, filterStatus, filterCourse, filterYear])
 
-  const hasFilters = search || filterCourse || filterYear
+  const hasFilters = search || filterStatus || filterCourse || filterYear
+
+  function clearFilters() {
+    setSearch(''); setFilterStatus(''); setFilterCourse(''); setFilterYear('')
+  }
 
   function openApp(appId) {
     navigate(`/college/dashboard?section=app&app_id=${appId}`)
@@ -111,27 +107,10 @@ export default function ApplicationInbox({ collegeId }) {
         </a>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
-        {TABS.map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`whitespace-nowrap px-4 py-2 text-sm font-semibold border-b-2 transition ${
-              activeTab === tab.key
-                ? 'border-blue-600 text-blue-700'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Search + Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
+      {/* Filters */}
+      <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
         {/* Search */}
-        <div className="relative flex-1">
+        <div className="relative flex-1 min-w-48">
           <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/>
           </svg>
@@ -147,11 +126,23 @@ export default function ApplicationInbox({ collegeId }) {
           )}
         </div>
 
+        {/* Status filter */}
+        <select
+          value={filterStatus}
+          onChange={e => setFilterStatus(e.target.value)}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-56"
+        >
+          <option value="">All Statuses ({apps.length})</option>
+          {ALL_STATUSES.map(s => (
+            <option key={s.key} value={s.key}>{s.label} ({statusCounts[s.key] || 0})</option>
+          ))}
+        </select>
+
         {/* Course filter */}
         <select
           value={filterCourse}
           onChange={e => setFilterCourse(e.target.value)}
-          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-w-0 sm:w-56"
+          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-52"
         >
           <option value="">All Courses</option>
           {courseOptions.map(([id, name]) => (
@@ -171,13 +162,12 @@ export default function ApplicationInbox({ collegeId }) {
           ))}
         </select>
 
-        {/* Clear filters */}
         {hasFilters && (
           <button
-            onClick={() => { setSearch(''); setFilterCourse(''); setFilterYear('') }}
+            onClick={clearFilters}
             className="text-sm text-slate-400 hover:text-slate-700 font-medium whitespace-nowrap self-center"
           >
-            Clear
+            Clear filters
           </button>
         )}
       </div>
@@ -196,60 +186,52 @@ export default function ApplicationInbox({ collegeId }) {
 
       {!loading && filtered.length === 0 && (
         <p className="text-slate-500">
-          {hasFilters ? 'No applications match your filters.' : 'No applications in this category.'}
+          {hasFilters ? 'No applications match your filters.' : 'No applications found.'}
         </p>
       )}
 
-      <div className="rounded-lg border border-slate-200 overflow-hidden">
-        {/* Table header */}
-        <div className="hidden sm:grid grid-cols-[1fr_1fr_9rem_auto_6rem] bg-slate-50 border-b border-slate-200 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          <span>Student</span>
-          <span>Course / Year</span>
-          <span>Reg No.</span>
-          <span>Status</span>
-          <span className="text-right">Date</span>
+      {!loading && filtered.length > 0 && (
+        <div className="rounded-lg border border-slate-200 overflow-hidden">
+          <div className="hidden sm:grid grid-cols-[1fr_1fr_9rem_auto_6rem] bg-slate-50 border-b border-slate-200 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <span>Student</span>
+            <span>Course / Year</span>
+            <span>Reg No.</span>
+            <span>Status</span>
+            <span className="text-right">Date</span>
+          </div>
+
+          {filtered.map((app, i) => {
+            const meta = STATUS_META[app.status] || { label: app.status, color: 'bg-slate-100 text-slate-600' }
+            return (
+              <button
+                key={app.id}
+                onClick={() => openApp(app.id)}
+                className={`w-full text-left grid sm:grid-cols-[1fr_1fr_9rem_auto_6rem] px-4 py-2.5 hover:bg-blue-50 transition items-center ${
+                  i !== 0 ? 'border-t border-slate-100' : ''
+                }`}
+              >
+                <div className="min-w-0 pr-3">
+                  <p className="font-medium text-sm text-slate-900 truncate">{app.student_name}</p>
+                  <p className="text-xs text-slate-400 truncate">{app.student_email} · {app.phone}</p>
+                </div>
+                <div className="min-w-0 pr-3">
+                  <p className="text-sm text-slate-700 truncate">{app.course_name}</p>
+                  <p className="text-xs text-slate-400">{YEAR_LABEL[app.year_of_study]} · {app.academic_year}</p>
+                </div>
+                <span className="font-mono text-xs text-slate-400 truncate pr-3">
+                  {app.registration_number || '—'}
+                </span>
+                <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap ${meta.color}`}>
+                  {meta.label}
+                </span>
+                <span className="text-xs text-slate-400 whitespace-nowrap text-right">
+                  {app.submitted_at ? new Date(app.submitted_at).toLocaleDateString('en-IN') : '—'}
+                </span>
+              </button>
+            )
+          })}
         </div>
-
-        {filtered.map((app, i) => {
-          const meta = STATUS_META[app.status] || { label: app.status, color: 'bg-slate-100 text-slate-600' }
-          return (
-            <button
-              key={app.id}
-              onClick={() => openApp(app.id)}
-              className={`w-full text-left grid sm:grid-cols-[1fr_1fr_9rem_auto_6rem] px-4 py-2.5 hover:bg-blue-50 transition items-center ${
-                i !== 0 ? 'border-t border-slate-100' : ''
-              }`}
-            >
-              {/* Student name + contact */}
-              <div className="min-w-0 pr-3">
-                <p className="font-medium text-sm text-slate-900 truncate">{app.student_name}</p>
-                <p className="text-xs text-slate-400 truncate">{app.student_email} · {app.phone}</p>
-              </div>
-
-              {/* Course */}
-              <div className="min-w-0 pr-3">
-                <p className="text-sm text-slate-700 truncate">{app.course_name}</p>
-                <p className="text-xs text-slate-400">{YEAR_LABEL[app.year_of_study]} · {app.academic_year}</p>
-              </div>
-
-              {/* Reg no */}
-              <span className="font-mono text-xs text-slate-400 truncate pr-3">
-                {app.registration_number || '—'}
-              </span>
-
-              {/* Status badge */}
-              <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap ${meta.color}`}>
-                {meta.label}
-              </span>
-
-              {/* Date */}
-              <span className="text-xs text-slate-400 whitespace-nowrap text-right">
-                {app.submitted_at ? new Date(app.submitted_at).toLocaleDateString('en-IN') : '—'}
-              </span>
-            </button>
-          )
-        })}
-      </div>
+      )}
     </section>
   )
 }

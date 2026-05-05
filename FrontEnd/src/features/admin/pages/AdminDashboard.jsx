@@ -11,14 +11,14 @@ export default function AdminDashboard() {
       <div>
         <p className="text-sm font-semibold uppercase tracking-wide text-amber-600">Admin console</p>
         <h1 className="mt-1 text-2xl font-bold text-slate-950">
-          {section === 'create-college' ? 'Create College' : 'Colleges & Staff'}
+          {section === 'create-college' ? 'Create College' : 'Manage Colleges'}
         </h1>
       </div>
 
       {/* Tab strip */}
       <div className="flex gap-2 border-b border-slate-200">
         {[
-          { key: 'colleges',       label: 'Colleges & Roles' },
+          { key: 'colleges',       label: 'Colleges' },
           { key: 'create-college', label: '+ New College' },
         ].map(t => (
           <button

@@ -5,6 +5,7 @@ import Button from '../../../shared/components/Button.jsx'
 const ALL_PERMISSIONS = [
   { key: 'submit_application', label: 'Submit New Application' },
   { key: 'review_application', label: 'Review Applications' },
+  { key: 'edit_application',   label: 'Edit Student Application Form' },
   { key: 'upload_documents',   label: 'Upload Documents' },
   { key: 'review_documents',   label: 'Review / Verify Documents' },
   { key: 'assign_subjects',    label: 'Assign Subjects & Roll Numbers' },

@@ -7,9 +7,8 @@ import api from '../../../services/api.js'
 
 const YEAR_LABEL = { 1: 'First Year (FY)', 2: 'Second Year (SY)', 3: 'Third Year (TY)' }
 const TYPE_LABEL = {
-  application_fee:         'Application Fee',
-  college_fee:             'College Fee',
-  college_fee_installment: 'College Fee (Installment)',
+  application_fee: 'Application Fee',
+  college_fee:     'College Fee',
 }
 
 // DB returns datetime strings without timezone (IST stored as-is).
@@ -76,7 +75,6 @@ export default function PaymentReceipts({ applicationId, onClose }) {
               <div>
                 <p className="text-sm font-semibold text-slate-900 leading-tight">
                   {TYPE_LABEL[pmt.payment_type] || pmt.payment_type}
-                  {pmt.installment_label ? ` — ${pmt.installment_label}` : ''}
                 </p>
                 <p className="text-xs text-slate-400">
                   {fmtDate(pmt.completed_at)} {fmtTime(pmt.completed_at)}
@@ -99,7 +97,7 @@ export default function PaymentReceipts({ applicationId, onClose }) {
 function ReceiptSheet({ app, pmt }) {
   const receiptNo   = `RCP-${String(pmt.id).padStart(6, '0')}`
   const typeLabel   = TYPE_LABEL[pmt.payment_type] || pmt.payment_type
-  const fullLabel   = pmt.installment_label ? `${typeLabel} — ${pmt.installment_label}` : typeLabel
+  const fullLabel   = typeLabel
   const studentName = (app.app_full_name || app.student_name || '').trim()
 
   function buildHTML() {

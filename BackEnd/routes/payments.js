@@ -2,15 +2,15 @@
  * payments.js — Razorpay payment integration.
  *
  * POST /payments/create-order
- *   body: { application_id, payment_type, installment_plan_id? }
- *   payment_type: 'application_fee' | 'college_fee' | 'college_fee_installment'
+ *   body: { application_id, payment_type, amount? }
+ *   payment_type: 'application_fee' | 'college_fee'
  *
  * POST /payments/verify
- *   body: { application_id, payment_type, installment_plan_id?,
+ *   body: { application_id, payment_type,
  *           razorpay_order_id, razorpay_payment_id, razorpay_signature }
  *
  * GET  /payments/college-fee-status/:applicationId
- *   Returns total fee, installment plan (if any), and what has been paid
+ *   Returns total fee, amount due now, and what has been paid
  */
 
 const express  = require('express');
@@ -40,9 +40,21 @@ async function generateRegNumber(collegeId, courseId, year, academicYear) {
 }
 
 // ── Helper: compute college fee total for an application ─────
-// Uses FeeDeterminationService when fees_master records exist for the college;
-// falls back to legacy fee_structures table if no fees_master data found.
+// Priority 1: college-entered fee_total_amount / fee_pay_now_amount on the application row.
+// Priority 2: FeeDeterminationService (fees_master).
+// Priority 3: legacy fee_structures table.
 async function getCollegeFeTotal(app) {
+  // Priority 1 — college manually entered amounts at confirmation
+  if (app.fee_total_amount && parseFloat(app.fee_total_amount) > 0) {
+    const total   = parseFloat(app.fee_total_amount);
+    const payNow  = app.fee_pay_now_amount ? parseFloat(app.fee_pay_now_amount) : total;
+    return {
+      total_fee:       total,
+      student_payable: payNow,
+      source:          'manual',
+    };
+  }
+
   const YEAR_MAP = { 1: 'FY', 2: 'SY', 3: 'TY' };
   const yearLevel = YEAR_MAP[app.year_of_study];
 
@@ -104,7 +116,7 @@ async function getCollegeFeTotal(app) {
 }
 
 // ── GET /payments/college-fee-status/:applicationId ──────────
-// Returns installment plan + what has already been paid for college fee.
+// Returns total fee, fee_pay_now_amount, and what has already been paid.
 router.get('/college-fee-status/:applicationId', async (req, res) => {
   const appId = parseInt(req.params.applicationId);
   try {
@@ -112,7 +124,8 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
       .input('id', mssql.Int, appId)
       .query(`
         SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study,
-               a.admission_period_id, a.college_fee_paid
+               a.admission_period_id, a.college_fee_paid,
+               a.fee_total_amount, a.fee_pay_now_amount
         FROM applications a WHERE a.id = @id
       `);
     if (!appRes.recordset.length) {
@@ -122,63 +135,39 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
 
     // Total fee (uses FeeDeterminationService or legacy fallback)
     const feeInfo = await getCollegeFeTotal(app);
-    // For BCC students, student_payable may be less than total_fee
-    const totalFee = feeInfo?.student_payable ?? feeInfo?.total_fee ?? 0;
-
-    // Installment plan for this admission period
-    const planRes = await db.request()
-      .input('pid', mssql.Int, app.admission_period_id)
-      .query(`
-        SELECT id, installment_no, label, amount, due_date
-        FROM fee_installment_plans
-        WHERE admission_period_id = @pid
-        ORDER BY installment_no
-      `);
-    const installments = planRes.recordset;
+    // For manual source: remaining tracks against total_fee (full obligation).
+    // For BCC/fees_master: student_payable may be less (scholarship), track against that.
+    const totalFee = feeInfo?.source === 'manual'
+      ? (feeInfo?.total_fee ?? 0)
+      : (feeInfo?.student_payable ?? feeInfo?.total_fee ?? 0);
 
     // Payments already made for college fee (successful)
     const paidRes = await db.request()
       .input('appId', mssql.Int, appId)
       .query(`
-        SELECT id, payment_type, amount, installment_plan_id, installment_no,
-               razorpay_payment_id, completed_at
+        SELECT id, payment_type, amount, razorpay_payment_id, completed_at
         FROM payments
         WHERE application_id = @appId
-          AND payment_type IN ('college_fee','college_fee_installment')
+          AND payment_type = 'college_fee'
           AND status = 'success'
-        ORDER BY installment_no, completed_at
+        ORDER BY completed_at
       `);
-    const paidInstallments = paidRes.recordset;
+    const paidRecords = paidRes.recordset;
 
-    const totalPaid = paidInstallments.reduce((s, p) => s + parseFloat(p.amount), 0);
+    const totalPaid = paidRecords.reduce((s, p) => s + parseFloat(p.amount), 0);
     const remaining = Math.max(0, totalFee - totalPaid);
 
     return res.json({
       success: true,
       data: {
-        application_id: appId,
-        status:         app.status,
-        college_fee_paid: app.college_fee_paid,
-        total_fee:          feeInfo?.total_fee || 0,
-        student_payable:    totalFee,
-        reimbursable_amount: feeInfo?.reimbursable_amount || 0,
-        payment_mode:       feeInfo?.payment_mode || null,
-        fees_category_slab: feeInfo?.fees_category_slab || null,
-        total_paid:         totalPaid,
-        remaining:          remaining,
-        fee_breakdown:      feeInfo?.breakdown || feeInfo,
-        fee_source:         feeInfo?.source || 'unknown',
-        has_installment_plan: installments.length > 0,
-        installments:   installments.map(ins => {
-          const paid = paidInstallments.find(p => p.installment_plan_id === ins.id);
-          return {
-            ...ins,
-            is_paid:       !!paid,
-            paid_at:       paid?.completed_at || null,
-            payment_id:    paid?.razorpay_payment_id || null,
-          };
-        }),
-        paid_records:   paidInstallments,
+        application_id:    appId,
+        status:            app.status,
+        college_fee_paid:  app.college_fee_paid,
+        total_fee:         feeInfo?.total_fee || 0,
+        fee_pay_now_amount: app.fee_pay_now_amount ? parseFloat(app.fee_pay_now_amount) : null,
+        total_paid:        totalPaid,
+        remaining:         remaining,
+        paid_records:      paidRecords,
       },
     });
   } catch (err) {
@@ -258,11 +247,8 @@ router.get('/receipts/:applicationId', async (req, res) => {
           p.status,
           p.razorpay_order_id,
           p.razorpay_payment_id,
-          p.installment_no,
-          p.completed_at,
-          fip.label AS installment_label
+          p.completed_at
         FROM payments p
-        LEFT JOIN fee_installment_plans fip ON fip.id = p.installment_plan_id
         WHERE p.application_id = @appId AND p.status = 'success'
         ORDER BY p.completed_at ASC
       `);
@@ -282,12 +268,12 @@ router.get('/receipts/:applicationId', async (req, res) => {
 
 // ── POST /payments/create-order ──────────────────────────────
 router.post('/create-order', async (req, res) => {
-  const { application_id, payment_type, installment_plan_id, amount: customAmount } = req.body;
+  const { application_id, payment_type, amount: customAmount } = req.body;
 
   if (!application_id || !payment_type) {
     return res.status(400).json({ success: false, message: 'application_id and payment_type are required.' });
   }
-  if (!['application_fee', 'college_fee', 'college_fee_installment'].includes(payment_type)) {
+  if (!['application_fee', 'college_fee'].includes(payment_type)) {
     return res.status(400).json({ success: false, message: 'Invalid payment_type.' });
   }
 
@@ -297,6 +283,7 @@ router.post('/create-order', async (req, res) => {
       .query(`
         SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study, a.academic_year,
                a.admission_period_id, a.student_id,
+               a.fee_total_amount, a.fee_pay_now_amount,
                ap.application_fee,
                s.full_name AS student_name, s.email AS student_email, s.phone AS student_phone
         FROM applications a
@@ -312,7 +299,6 @@ router.post('/create-order', async (req, res) => {
 
     let amount = 0;
     let description = '';
-    let installmentLabel = '';
 
     if (payment_type === 'application_fee') {
       if (app.status !== 'draft') {
@@ -327,67 +313,29 @@ router.post('/create-order', async (req, res) => {
       }
       // Validate custom amount against remaining balance
       const feeInfo = await getCollegeFeTotal(app);
-      const totalFee = feeInfo?.student_payable ?? feeInfo?.total_fee ?? 0;
+      const totalFee = feeInfo?.source === 'manual'
+        ? (feeInfo?.total_fee ?? 0)
+        : (feeInfo?.student_payable ?? feeInfo?.total_fee ?? 0);
       const paidRes = await db.request()
         .input('appId', mssql.Int, parseInt(application_id))
         .query(`
           SELECT ISNULL(SUM(amount), 0) AS total_paid FROM payments
           WHERE application_id = @appId
-            AND payment_type IN ('college_fee','college_fee_installment')
+            AND payment_type = 'college_fee'
             AND status = 'success'
         `);
       const totalPaid = parseFloat(paidRes.recordset[0].total_paid) || 0;
       const remaining = Math.max(0, totalFee - totalPaid);
 
-      // College-defined installment plan enforcement is disabled — students enter any amount freely.
-      // const planRes = await db.request()
-      //   .input('pid', mssql.Int, app.admission_period_id)
-      //   .query('SELECT COUNT(*) AS cnt FROM fee_installment_plans WHERE admission_period_id = @pid');
-      // const hasInstallmentPlan = (planRes.recordset[0].cnt || 0) > 0;
-
       const parsedAmount = parseFloat(customAmount);
       if (!parsedAmount || parsedAmount <= 0) {
         return res.status(400).json({ success: false, message: 'Enter a valid payment amount.' });
       }
-      // if (hasInstallmentPlan && Math.abs(parsedAmount - remaining) > 0.01) {
-      //   return res.status(400).json({ success: false, message: 'An installment plan is set. You must pay either the full remaining balance or use the installment options.' });
-      // }
       if (parsedAmount > remaining + 0.01) {
         return res.status(400).json({ success: false, message: `Amount cannot exceed the remaining balance of ₹${remaining}.` });
       }
       amount = parsedAmount;
       description = totalFee > 0 && parsedAmount >= remaining - 0.01 ? 'College Fee (Full)' : 'College Fee (Partial)';
-
-    } else {
-      // college_fee_installment — college-defined installment plan
-      if (!['confirmed', 'fees_paid'].includes(app.status)) {
-        return res.status(400).json({ success: false, message: 'Application must be confirmed to pay college fee.' });
-      }
-      if (!installment_plan_id) {
-        return res.status(400).json({ success: false, message: 'installment_plan_id is required for installment payments.' });
-      }
-      const insRes = await db.request()
-        .input('insId', mssql.Int, parseInt(installment_plan_id))
-        .input('pid',   mssql.Int, app.admission_period_id)
-        .query(`
-          SELECT id, installment_no, label, amount, due_date
-          FROM fee_installment_plans
-          WHERE id = @insId AND admission_period_id = @pid
-        `);
-      if (!insRes.recordset.length) {
-        return res.status(404).json({ success: false, message: 'Installment not found for this application.' });
-      }
-      const ins = insRes.recordset[0];
-      const alreadyPaid = await db.request()
-        .input('appId', mssql.Int, parseInt(application_id))
-        .input('insId', mssql.Int, parseInt(installment_plan_id))
-        .query(`SELECT id FROM payments WHERE application_id = @appId AND installment_plan_id = @insId AND status = 'success'`);
-      if (alreadyPaid.recordset.length > 0) {
-        return res.status(400).json({ success: false, message: `${ins.label} has already been paid.` });
-      }
-      amount = ins.amount;
-      description = ins.label;
-      installmentLabel = ins.label;
     }
 
     if (!amount || amount <= 0) {
@@ -399,10 +347,9 @@ router.post('/create-order', async (req, res) => {
       currency: 'INR',
       receipt:  `r_${application_id}_${Date.now().toString().slice(-8)}`,
       notes: {
-        application_id:      String(application_id),
+        application_id: String(application_id),
         payment_type,
-        installment_plan_id: installment_plan_id ? String(installment_plan_id) : '',
-        student_name:        app.student_name,
+        student_name:   app.student_name,
       },
     });
 
@@ -418,9 +365,7 @@ router.post('/create-order', async (req, res) => {
         student_email:      app.student_email,
         student_phone:      app.student_phone || '',
         payment_type,
-        installment_plan_id: installment_plan_id || null,
         description,
-        installment_label:  installmentLabel,
         application_id,
       },
     });
@@ -433,7 +378,7 @@ router.post('/create-order', async (req, res) => {
 // ── POST /payments/verify ────────────────────────────────────
 router.post('/verify', async (req, res) => {
   const {
-    application_id, payment_type, installment_plan_id,
+    application_id, payment_type,
     razorpay_order_id, razorpay_payment_id, razorpay_signature,
   } = req.body;
 
@@ -458,7 +403,8 @@ router.post('/verify', async (req, res) => {
       .input('id', mssql.Int, appId)
       .query(`
         SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study, a.academic_year,
-               a.admission_period_id, ap.application_fee
+               a.admission_period_id, a.fee_total_amount, a.fee_pay_now_amount,
+               ap.application_fee
         FROM applications a
         JOIN admission_periods ap ON ap.id = a.admission_period_id
         WHERE a.id = @id
@@ -518,15 +464,17 @@ router.post('/verify', async (req, res) => {
           VALUES (@appId, @ptype, @amount, 'success', @orderId, @payId, GETDATE())
         `);
 
-      // Check if fully paid now (use student_payable for BCC support)
+      // Check if fully paid now
       const feeInfo = await getCollegeFeTotal(app);
-      const totalFee = feeInfo?.student_payable ?? feeInfo?.total_fee ?? 0;
+      const totalFee = feeInfo?.source === 'manual'
+        ? (feeInfo?.total_fee ?? 0)
+        : (feeInfo?.student_payable ?? feeInfo?.total_fee ?? 0);
       const paidRes = await db.request()
         .input('appId', mssql.Int, appId)
         .query(`
           SELECT ISNULL(SUM(amount), 0) AS total_paid FROM payments
           WHERE application_id = @appId
-            AND payment_type IN ('college_fee','college_fee_installment')
+            AND payment_type = 'college_fee'
             AND status = 'success'
         `);
       const totalPaid = parseFloat(paidRes.recordset[0].total_paid) || 0;
@@ -548,56 +496,6 @@ router.post('/verify', async (req, res) => {
         data: { all_paid: allPaid, total_paid: totalPaid, remaining: Math.max(0, totalFee - totalPaid) },
       });
 
-    // ── college_fee_installment — college-defined installment plan ──
-    } else {
-      if (!installment_plan_id) {
-        return res.status(400).json({ success: false, message: 'installment_plan_id required.' });
-      }
-      const insRes = await db.request()
-        .input('insId', mssql.Int, parseInt(installment_plan_id))
-        .query('SELECT id, installment_no, label, amount FROM fee_installment_plans WHERE id = @insId');
-      if (!insRes.recordset.length) {
-        return res.status(404).json({ success: false, message: 'Installment plan not found.' });
-      }
-      const ins = insRes.recordset[0];
-      await db.request()
-        .input('appId',   mssql.Int,      appId)
-        .input('ptype',   mssql.NVarChar, 'college_fee_installment')
-        .input('amount',  mssql.Decimal,  ins.amount)
-        .input('insId',   mssql.Int,      parseInt(installment_plan_id))
-        .input('insNo',   mssql.Int,      ins.installment_no)
-        .input('orderId', mssql.NVarChar, razorpay_order_id)
-        .input('payId',   mssql.NVarChar, razorpay_payment_id)
-        .query(`
-          INSERT INTO payments
-            (application_id, payment_type, amount, status, installment_plan_id, installment_no,
-             razorpay_order_id, razorpay_payment_id, completed_at)
-          VALUES (@appId, @ptype, @amount, 'success', @insId, @insNo, @orderId, @payId, GETDATE())
-        `);
-      const allInstallments = await db.request()
-        .input('pid', mssql.Int, app.admission_period_id)
-        .query('SELECT id FROM fee_installment_plans WHERE admission_period_id = @pid');
-      const paidInstallments = await db.request()
-        .input('appId', mssql.Int, appId)
-        .query(`
-          SELECT DISTINCT installment_plan_id FROM payments
-          WHERE application_id = @appId
-            AND payment_type = 'college_fee_installment'
-            AND status = 'success'
-        `);
-      const allPlanIds  = allInstallments.recordset.map(r => r.id).sort().join(',');
-      const paidPlanIds = paidInstallments.recordset.map(r => r.installment_plan_id).sort().join(',');
-      const allPaid = allPlanIds === paidPlanIds;
-      if (allPaid) {
-        await db.request()
-          .input('id', mssql.Int, appId)
-          .query(`UPDATE applications SET status = 'fees_paid', college_fee_paid = 1, updated_at = GETDATE(), status_updated_at = GETDATE() WHERE id = @id`);
-      }
-      return res.json({
-        success: true,
-        message: allPaid ? `${ins.label} paid. All installments complete — fees fully paid!` : `${ins.label} paid successfully.`,
-        data: { all_paid: allPaid, installment_no: ins.installment_no },
-      });
     }
   } catch (err) {
     console.error('verify error:', err);

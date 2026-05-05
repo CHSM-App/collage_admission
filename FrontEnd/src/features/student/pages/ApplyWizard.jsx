@@ -72,7 +72,8 @@ const initialState = {
   },
 }
 
-const EDITABLE_STATUSES = ['draft', 'submitted', 'under_review', 'correction_requested', 'correction_done']
+// Students can only edit when draft (pre-submission) or when college explicitly requested correction
+const EDITABLE_STATUSES = ['draft', 'correction_requested']
 
 function reducer(state, action) {
   switch (action.type) {
