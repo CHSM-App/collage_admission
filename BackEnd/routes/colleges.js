@@ -128,7 +128,7 @@ router.get('/by-code/:code', async (req, res) => {
         SELECT
           ap.id, ap.year_of_study, ap.academic_year,
           ap.start_date, ap.end_date,
-          ap.total_seats, ap.filled_seats, ap.application_fee, ap.is_active,
+          ap.total_seats, ap.filled_seats, ap.is_active,
           fm.code_no AS course_id,
           CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name,
           fm.duration_years,
@@ -201,7 +201,7 @@ router.get('/:id/admission-periods', async (req, res) => {
         SELECT
           ap.id, ap.year_of_study, ap.academic_year,
           ap.start_date, ap.end_date,
-          ap.total_seats, ap.filled_seats, ap.application_fee, ap.is_active,
+          ap.total_seats, ap.filled_seats, ap.is_active,
           fm.code_no AS course_id,
           CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name,
           fm.duration_years,

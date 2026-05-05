@@ -332,7 +332,6 @@ router.get('/applications/:id/form', async (req, res) => {
                c.name  AS college_name,  c.city AS college_city, c.address AS college_address,
                COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
                ap.academic_year AS period_ay,
-               ap.application_fee,
                s.email AS student_email, s.full_name AS student_name, s.phone AS student_phone,
                s.surname, s.first_name, s.middle_name, s.mother_name,
                s.sex, s.birth_date, s.birth_place, s.birth_state, s.nationality,

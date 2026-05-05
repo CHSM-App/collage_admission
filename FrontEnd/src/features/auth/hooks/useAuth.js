@@ -16,7 +16,7 @@ function getErrorMessage(error) {
     responseData?.error ||
     responseData?.detail ||
     error?.message ||
-    'Login failed. Please check your email and password.'
+    'Login failed. Please check your credentials.'
   )
 }
 

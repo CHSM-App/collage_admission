@@ -33,7 +33,7 @@ router.get('/:collegeId/admission-periods', async (req, res) => {
       .query(`
         SELECT ap.id, ap.year_of_study, ap.academic_year,
                ap.start_date, ap.end_date, ap.total_seats, ap.filled_seats,
-               ap.application_fee, ap.is_active, ap.is_disabled,
+               ap.is_active, ap.is_disabled,
                fm.code_no AS course_id,
                CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name
         FROM admission_periods ap
@@ -57,12 +57,6 @@ router.post('/:collegeId/admission-periods', async (req, res) => {
   }
 
   try {
-    // Read application_fee from the college record (set by admin)
-    const collegeRes = await db.request()
-      .input('col', parseInt(req.params.collegeId))
-      .query(`SELECT application_fee FROM colleges WHERE id = @col`);
-    const appFee = collegeRes.recordset[0]?.application_fee ?? 0;
-
     const result = await db.request()
       .input('col',  parseInt(req.params.collegeId))
       .input('crs',  parseInt(course_id))
@@ -71,12 +65,11 @@ router.post('/:collegeId/admission-periods', async (req, res) => {
       .input('sd',   start_date)
       .input('ed',   end_date)
       .input('seats',parseInt(total_seats))
-      .input('fee',  parseFloat(appFee) || 0)
       .query(`
         INSERT INTO admission_periods
-          (college_id, course_id, year_of_study, academic_year, start_date, end_date, total_seats, application_fee, is_active)
+          (college_id, course_id, year_of_study, academic_year, start_date, end_date, total_seats, is_active)
         OUTPUT INSERTED.id
-        VALUES (@col, @crs, @yr, @ay, @sd, @ed, @seats, @fee, 1)
+        VALUES (@col, @crs, @yr, @ay, @sd, @ed, @seats, 1)
       `);
 
     return res.status(201).json({ success: true, data: { id: result.recordset[0].id } });
@@ -87,7 +80,7 @@ router.post('/:collegeId/admission-periods', async (req, res) => {
 });
 
 router.put('/:collegeId/admission-periods/:periodId', async (req, res) => {
-  const { start_date, end_date, total_seats, application_fee, is_active, is_disabled } = req.body;
+  const { start_date, end_date, total_seats, is_active, is_disabled } = req.body;
 
   try {
     const mssql = require('mssql');
@@ -97,18 +90,16 @@ router.put('/:collegeId/admission-periods/:periodId', async (req, res) => {
       .input('sd',    mssql.NVarChar, start_date    || null)
       .input('ed',    mssql.NVarChar, end_date      || null)
       .input('seats', mssql.Int,  total_seats   ? parseInt(total_seats)         : null)
-      .input('fee',   mssql.Decimal, application_fee ? parseFloat(application_fee) : null)
       .input('act',   mssql.Bit,  is_active    !== undefined ? (is_active    ? 1 : 0) : null)
       .input('dis',   mssql.Bit,  is_disabled  !== undefined ? (is_disabled  ? 1 : 0) : null)
       .query(`
         UPDATE admission_periods
         SET
-          start_date      = COALESCE(@sd,    start_date),
-          end_date        = COALESCE(@ed,    end_date),
-          total_seats     = COALESCE(@seats, total_seats),
-          application_fee = COALESCE(@fee,   application_fee),
-          is_active       = COALESCE(@act,   is_active),
-          is_disabled     = COALESCE(@dis,   is_disabled)
+          start_date  = COALESCE(@sd,    start_date),
+          end_date    = COALESCE(@ed,    end_date),
+          total_seats = COALESCE(@seats, total_seats),
+          is_active   = COALESCE(@act,   is_active),
+          is_disabled = COALESCE(@dis,   is_disabled)
         WHERE id = @id AND college_id = @col
       `);
 

@@ -37,7 +37,8 @@ export default function RoleLoginForm({ role }) {
   const navigate = useNavigate()
   const location = useLocation()
   const { isAuthenticated, role: activeRole, login, loading, error, clearError } = useAuth()
-  const [formData, setFormData] = useState({ email: '', password: '' })
+  const isStudent = role === 'student'
+  const [formData, setFormData] = useState({ email: '', phone: '', password: '' })
   const [showPassword, setShowPassword] = useState(false)
   const content = roleContent[role]
 
@@ -79,18 +80,33 @@ export default function RoleLoginForm({ role }) {
       </div>
 
       <form className="space-y-5" onSubmit={handleSubmit}>
-        <Input
-          id={`${role}-email`}
-          label="Email address"
-          name="email"
-          type="email"
-          placeholder={content.emailPlaceholder}
-          value={formData.email}
-          onChange={handleChange}
-          autoComplete="email"
-          disabled={loading}
-          required
-        />
+        {isStudent ? (
+          <Input
+            id="student-phone"
+            label="Phone number"
+            name="phone"
+            type="tel"
+            placeholder="e.g. 9876543210"
+            value={formData.phone}
+            onChange={handleChange}
+            autoComplete="tel"
+            disabled={loading}
+            required
+          />
+        ) : (
+          <Input
+            id={`${role}-email`}
+            label="Email address"
+            name="email"
+            type="email"
+            placeholder={content.emailPlaceholder}
+            value={formData.email}
+            onChange={handleChange}
+            autoComplete="email"
+            disabled={loading}
+            required
+          />
+        )}
 
         <div>
           <label htmlFor={`${role}-password`} className="block text-sm font-semibold text-slate-800">

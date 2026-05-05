@@ -11,26 +11,26 @@ const db      = require('./db');
 
 // ── Student login ───────────────────────────────────────────
 router.post('/login/student', async (req, res) => {
-  const { email, password } = req.body;
+  const { phone, password } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ message: 'Email and password are required.' });
+  if (!phone || !password) {
+    return res.status(400).json({ message: 'Phone number and password are required.' });
   }
 
   try {
     const result = await db.request()
-      .input('email', email)
-      .query('SELECT id, full_name, email, password_hash, phone, city, category FROM students WHERE email = @email');
+      .input('phone', phone.trim())
+      .query('SELECT id, full_name, email, password_hash, phone, city, category FROM students WHERE phone = @phone');
 
     if (result.recordset.length === 0) {
-      return res.status(401).json({ message: 'Invalid email or password.' });
+      return res.status(401).json({ message: 'Invalid phone number or password.' });
     }
 
     const student = result.recordset[0];
     const match   = await bcrypt.compare(password, student.password_hash);
 
     if (!match) {
-      return res.status(401).json({ message: 'Invalid email or password.' });
+      return res.status(401).json({ message: 'Invalid phone number or password.' });
     }
 
     return res.json({

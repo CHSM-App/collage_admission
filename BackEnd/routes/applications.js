@@ -155,7 +155,7 @@ router.post('/', async (req, res) => {
     const period = await db.request()
       .input('pid', parseInt(admission_period_id))
       .query(`
-        SELECT id, total_seats, filled_seats, is_active, end_date, application_fee
+        SELECT id, total_seats, filled_seats, is_active, end_date
         FROM admission_periods WHERE id = @pid
       `);
 
