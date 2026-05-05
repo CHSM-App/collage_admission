@@ -143,8 +143,9 @@ export default function CollegeApplyWizard() {
         )
         const requiredDocs = rdRes.data.data || []
 
+        const defaultCollegeName = app.year_of_study > 1 ? (app.college_name || '') : ''
         const examData = previous_exam ? {
-          board_or_college_name:     previous_exam.board_or_college_name || '',
+          board_or_college_name:     previous_exam.board_or_college_name || defaultCollegeName,
           school_or_college_address: previous_exam.school_or_college_address || '',
           seat_number:               previous_exam.seat_number || '',
           prn_or_seat:               previous_exam.prn_or_seat || '',
@@ -155,7 +156,7 @@ export default function CollegeApplyWizard() {
           subjects: previous_exam.subjects?.length
             ? previous_exam.subjects.map(s => ({ subject_name: s.subject_name, marks_obtained: s.marks_obtained, marks_max: s.marks_max }))
             : [{ subject_name: '', marks_obtained: '', marks_max: '' }],
-        } : {}
+        } : { board_or_college_name: defaultCollegeName }
 
         dispatch({
           type: 'SET_DATA',

@@ -147,8 +147,9 @@ CREATE TABLE applications (
     status                  NVARCHAR(30) NOT NULL DEFAULT 'draft'
                             CHECK (status IN (
                                 'draft','payment_pending','submitted','under_review',
-                                'approved','document_verification','confirmed',
-                                'fees_paid','roll_assigned','enrolled',
+                                'correction_requested','correction_done',
+                                'doc_verified',
+                                'confirmed','fees_paid','roll_assigned','enrolled',
                                 'rejected','cancelled'
                             )),
     rejection_reason        NVARCHAR(500) NULL,
@@ -181,6 +182,18 @@ CREATE TABLE application_documents (
     is_verified         BIT NOT NULL DEFAULT 0,
     verified_at         DATETIME2 NULL,
     created_at          DATETIME2 DEFAULT GETDATE()
+);
+
+-- ============================================================
+-- APPLICATION ACTIVITY LOG (immutable audit trail)
+-- ============================================================
+CREATE TABLE application_activity_log (
+    id              INT IDENTITY(1,1) PRIMARY KEY,
+    application_id  INT NOT NULL REFERENCES applications(id),
+    action          NVARCHAR(60)  NOT NULL,  -- e.g. 'submitted','correction_requested','accepted'
+    actor_role      NVARCHAR(20)  NOT NULL,  -- 'student' | 'college' | 'system'
+    note            NVARCHAR(1000) NULL,     -- correction note, rejection reason, etc.
+    created_at      DATETIME2 DEFAULT GETDATE()
 );
 
 -- ============================================================

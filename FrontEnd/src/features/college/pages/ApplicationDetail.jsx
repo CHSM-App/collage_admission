@@ -9,14 +9,13 @@ const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000/').repl
 const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year' }
 
 const STATUS_FLOW = {
-  submitted:                { label: 'Submitted — awaiting scrutiny' },
-  under_review:             { label: 'Under Review' },
+  submitted:                { label: 'Review Pending — awaiting college review' },
+  under_review:             { label: 'Review Pending — awaiting college review' },
   correction_requested:     { label: 'Correction Pending — waiting for student to resubmit' },
-  correction_done:          { label: 'Correction Done — student has resubmitted' },
-  scrutiny_accepted:        { label: 'Scrutiny Accepted — awaiting doc verification call' },
-  doc_verification_pending: { label: 'Called for Physical Document Verification' },
-  confirmed:                { label: 'Confirmed — waiting for fee payment' },
-  fees_paid:                { label: 'Fees paid — ready for roll number' },
+  correction_done:          { label: 'Correction Review — student has resubmitted' },
+  doc_verified:             { label: 'Student Awaited — student must visit college for doc check' },
+  confirmed:                { label: 'Fees Pending — student must pay college fee' },
+  fees_paid:                { label: 'Confirmed — admission complete' },
   roll_assigned:            { label: 'Roll assigned — subject selection pending' },
   enrolled:                 { label: 'Enrolled' },
   rejected:                 { label: 'Rejected' },
@@ -77,10 +76,10 @@ export default function ApplicationDetail({ collegeId, appId }) {
     setActing(true)
     setError('')
     try {
-      await api.post(`college-admin/${collegeId}/applications/${appId}/confirm`, { document_ids_verified: app?.documents?.map(d => d.id) || [] })
-      await api.post(`college-admin/${collegeId}/applications/${appId}/set-fee`, {
+      await api.post(`college-admin/${collegeId}/applications/${appId}/confirm`, {
         fee_total_amount:   total,
         fee_pay_now_amount: payNow,
+        document_ids_verified: app?.documents?.map(d => d.id) || [],
       })
       navigate('/college/dashboard?section=inbox')
     } catch (err) {
@@ -123,7 +122,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-5 py-3 flex items-center justify-between gap-4">
         <p className="text-sm font-semibold text-slate-700">{flowInfo.label}</p>
         <div className="flex items-center gap-3">
-          {canEditApp && ['submitted','under_review','correction_requested','correction_done'].includes(d.status) && (
+          {canEditApp && ['submitted', 'under_review', 'correction_requested', 'correction_done'].includes(d.status) && (
             <button
               onClick={() => navigate(`/college/apply/${appId}`)}
               className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition"
@@ -134,6 +133,9 @@ export default function ApplicationDetail({ collegeId, appId }) {
           <StatusBadge status={d.status} />
         </div>
       </div>
+
+      {/* ── Activity Timeline ── */}
+      <ActivityTimeline app={d} />
 
       {/* ── Application Context ── */}
       <Section title="Application Context">
@@ -268,8 +270,8 @@ export default function ApplicationDetail({ collegeId, appId }) {
         <p className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</p>
       )}
 
-      {/* ── Fee Amounts (shown once confirmed — editable until paid) ── */}
-      {['confirmed','fees_paid'].includes(d.status) && canFees && (
+      {/* ── Fee Amounts (shown after confirmation — editable until student pays) ── */}
+      {['confirmed', 'fees_paid'].includes(d.status) && canFees && (
         <FeeAmountPanel
           collegeId={collegeId}
           appId={appId}
@@ -282,21 +284,23 @@ export default function ApplicationDetail({ collegeId, appId }) {
 
       {/* ── Actions ── */}
 
-      {/* Correction note — shown when correction was requested */}
-      {d.correction_note && (
+      {/* Correction note — only shown while correction is still pending */}
+      {d.status === 'correction_requested' && d.correction_note && (
         <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 space-y-1">
           <p className="text-xs font-bold uppercase tracking-wide text-orange-700">Correction Note sent to student</p>
           <p className="text-sm text-orange-900">{d.correction_note}</p>
         </div>
       )}
 
-      {/* Step 1: Scrutiny — accept, request correction, or reject */}
+      {/* Step 1: Review — Accept, Request Correction, or Reject */}
       {canReview && ['submitted', 'under_review', 'correction_requested', 'correction_done'].includes(d.status) && (
         <div className="space-y-3">
-          <p className="text-sm text-slate-600">Review the application form and accept, request corrections, or reject.</p>
+          <p className="text-sm text-slate-600">
+            Review the application and either accept it (student will be notified to visit the college), request corrections, or reject.
+          </p>
           <div className="flex flex-wrap gap-3">
             <Button loading={acting} onClick={() => doAction('approve')}>
-              Accept (Scrutiny Passed)
+              Accept Application
             </Button>
             <Button variant="secondary" onClick={() => { setShowCorrection(v => !v); setShowReject(false) }}>
               Request Correction
@@ -308,45 +312,23 @@ export default function ApplicationDetail({ collegeId, appId }) {
         </div>
       )}
 
-      {/* Step 2: Call student for physical doc verification */}
-      {canReviewD && d.status === 'scrutiny_accepted' && (
+      {/* Step 2: Student visited — verify docs, set fees, confirm */}
+      {canReview && d.status === 'doc_verified' && (
         <div className="space-y-3">
           <p className="text-sm text-slate-600">
-            Select this student for physical document verification. The student will be notified to visit the college with original documents.
-            You can call the student multiple times if needed.
-          </p>
-          <div className="flex gap-3">
-            <Button loading={acting} onClick={() => doAction('call-for-doc-verification')}>
-              Call for Doc Verification
-            </Button>
-            {canReview && (
-              <Button variant="secondary" onClick={() => setShowCancel(v => !v)}>Cancel</Button>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Step 3: Student visited — confirm after physical doc check */}
-      {canReview && d.status === 'doc_verification_pending' && (
-        <div className="space-y-3">
-          <p className="text-sm text-slate-600">
-            Student has been called for physical document verification. Once all original documents are verified in person, confirm the admission.
-            If the student did not arrive, you can call again.
+            Student has been notified to visit the college. Once the student visits and documents are verified in person, set the fee and confirm admission.
           </p>
           {!showConfirm ? (
             <div className="flex flex-wrap gap-3">
               <Button loading={acting} onClick={() => { setShowConfirm(true); setFeeError('') }}>
-                Confirm Admission (Docs Verified)
-              </Button>
-              <Button variant="secondary" loading={acting} onClick={() => doAction('call-for-doc-verification')}>
-                Call Again
+                Student Visited — Set Fee &amp; Confirm
               </Button>
               <Button variant="secondary" onClick={() => setShowCancel(v => !v)}>Cancel</Button>
             </div>
           ) : (
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-4">
-              <p className="text-sm font-semibold text-emerald-800">Set Fee Amounts to Confirm Admission</p>
-              <p className="text-xs text-emerald-700">Enter the fee details before confirming. The student will see these amounts when paying.</p>
+              <p className="text-sm font-semibold text-emerald-800">Verify Documents &amp; Set Fee Amounts</p>
+              <p className="text-xs text-emerald-700">Enter the fee details to confirm admission. The student will be notified to pay.</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -355,9 +337,9 @@ export default function ApplicationDetail({ collegeId, appId }) {
                   <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500">
                     <span className="px-3 py-2 bg-slate-50 border-r border-slate-200 text-slate-500 text-sm font-semibold">₹</span>
                     <input
-                      type="number" min="1" step="1"
+                      type="text" inputMode="numeric"
                       value={feeTotal}
-                      onChange={e => { setFeeTotal(e.target.value); setFeeError('') }}
+                      onChange={e => { setFeeTotal(e.target.value.replace(/[^0-9.]/g, '')); setFeeError('') }}
                       placeholder="e.g. 14000"
                       className="flex-1 px-3 py-2 text-sm outline-none"
                     />
@@ -370,9 +352,9 @@ export default function ApplicationDetail({ collegeId, appId }) {
                   <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500">
                     <span className="px-3 py-2 bg-slate-50 border-r border-slate-200 text-slate-500 text-sm font-semibold">₹</span>
                     <input
-                      type="number" min="1" step="1"
+                      type="text" inputMode="numeric"
                       value={feePayNow}
-                      onChange={e => { setFeePayNow(e.target.value); setFeeError('') }}
+                      onChange={e => { setFeePayNow(e.target.value.replace(/[^0-9.]/g, '')); setFeeError('') }}
                       placeholder="e.g. 14000"
                       className="flex-1 px-3 py-2 text-sm outline-none"
                     />
@@ -387,7 +369,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
               </div>
               {feeError && <p className="text-sm text-red-600">{feeError}</p>}
               <div className="flex gap-3">
-                <Button loading={acting} onClick={doConfirm}>Confirm Admission</Button>
+                <Button loading={acting} onClick={doConfirm}>Proceed</Button>
                 <button type="button" onClick={() => { setShowConfirm(false); setFeeError('') }}
                   className="text-sm text-slate-500 hover:text-slate-700 font-medium">
                   Back
@@ -450,6 +432,78 @@ export default function ApplicationDetail({ collegeId, appId }) {
   )
 }
 
+const ACTION_META = {
+  submitted:              { label: 'Application Submitted',           color: 'bg-blue-500',    actor: 'Student' },
+  correction_requested:   { label: 'Correction Requested',            color: 'bg-orange-500',  actor: 'College' },
+  correction_resubmitted: { label: 'Correction Resubmitted',          color: 'bg-sky-500',     actor: 'Student' },
+  accepted:               { label: 'Application Accepted',            color: 'bg-teal-500',    actor: 'College' },
+  rejected:               { label: 'Application Rejected',            color: 'bg-red-500',     actor: 'College' },
+  confirmed:              { label: 'Documents Verified — Fees Set',   color: 'bg-amber-500',   actor: 'College' },
+  fee_instalment_paid:    { label: 'Fee Instalment Paid',             color: 'bg-emerald-400', actor: 'Student' },
+  fees_paid:              { label: 'College Fee Fully Paid',          color: 'bg-emerald-600', actor: 'Student' },
+  roll_assigned:          { label: 'Roll Number Assigned',            color: 'bg-violet-500',  actor: 'College' },
+  enrolled:               { label: 'Enrolled',                        color: 'bg-green-600',   actor: 'Student' },
+  cancelled:              { label: 'Application Cancelled',           color: 'bg-slate-500',   actor: 'College' },
+}
+
+function ActivityTimeline({ app }) {
+  const [open, setOpen] = useState(false)
+  const activity = app.activity || []
+
+  const entries = activity.map(a => {
+    const meta = ACTION_META[a.action] || { label: a.action, color: 'bg-slate-400', actor: a.actor_role }
+    return { label: meta.label, color: meta.color, actor: meta.actor, date: a.created_at, note: a.note }
+  })
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 transition"
+      >
+        <div className="flex items-center gap-2">
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Activity Timeline</p>
+          <span className="text-xs text-slate-400">({activity.length} event{activity.length !== 1 ? 's' : ''})</span>
+        </div>
+        <svg
+          className={`w-4 h-4 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="px-5 py-4">
+          {entries.length === 0 ? (
+            <p className="text-xs text-slate-400">No activity recorded yet.</p>
+          ) : (
+            <ol className="relative border-l-2 border-slate-100 space-y-5 ml-1.5">
+              {entries.map((e, i) => (
+                <li key={i} className="ml-5">
+                  <span className={`absolute -left-[9px] flex h-4 w-4 rounded-full ring-2 ring-white ${e.color}`} />
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <p className="text-sm font-semibold text-slate-800">{e.label}</p>
+                    <span className="text-xs text-slate-400">by {e.actor}</span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {e.date
+                      ? new Date(e.date.endsWith('Z') ? e.date : e.date + 'Z').toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                      : '—'}
+                  </p>
+                  {e.note && (
+                    <p className="mt-1.5 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-md px-3 py-2 whitespace-pre-wrap">{e.note}</p>
+                  )}
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Section({ title, children }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
@@ -474,28 +528,30 @@ function Row({ label, value, wide }) {
 
 function StatusBadge({ status }) {
   const colors = {
-    submitted:                'bg-blue-100 text-blue-700',
-    under_review:             'bg-blue-100 text-blue-700',
-    correction_requested:     'bg-orange-100 text-orange-700',
-    correction_done:          'bg-sky-100 text-sky-700',
-    scrutiny_accepted:        'bg-teal-100 text-teal-700',
-    doc_verification_pending: 'bg-orange-100 text-orange-700',
-    confirmed:                'bg-emerald-100 text-emerald-700',
-    fees_paid:                'bg-emerald-100 text-emerald-700',
-    roll_assigned:            'bg-violet-100 text-violet-700',
-    enrolled:                 'bg-green-100 text-green-800',
-    rejected:                 'bg-red-100 text-red-700',
-    cancelled:                'bg-slate-100 text-slate-500',
+    submitted:            'bg-blue-100 text-blue-700',
+    under_review:         'bg-blue-100 text-blue-700',
+    correction_requested: 'bg-orange-100 text-orange-700',
+    correction_done:      'bg-sky-100 text-sky-700',
+    doc_verified:         'bg-teal-100 text-teal-700',
+    confirmed:            'bg-amber-100 text-amber-700',
+    fees_paid:            'bg-emerald-100 text-emerald-700',
+    roll_assigned:        'bg-violet-100 text-violet-700',
+    enrolled:             'bg-green-100 text-green-800',
+    rejected:             'bg-red-100 text-red-700',
+    cancelled:            'bg-slate-100 text-slate-500',
   }
   const labels = {
-    submitted: 'Submitted', under_review: 'Under Review',
+    submitted:            'Review Pending',
+    under_review:         'Review Pending',
     correction_requested: 'Correction Pending',
-    correction_done:      'Correction Done',
-    scrutiny_accepted: 'Scrutiny Accepted',
-    doc_verification_pending: 'Doc Verification Pending',
-    confirmed: 'Confirmed', fees_paid: 'Fees Paid',
-    roll_assigned: 'Roll Assigned', enrolled: 'Enrolled',
-    rejected: 'Rejected', cancelled: 'Cancelled',
+    correction_done:      'Correction Review',
+    doc_verified:         'Student Awaited',
+    confirmed:            'Fees Pending',
+    fees_paid:            'Confirmed',
+    roll_assigned:        'Roll Assigned',
+    enrolled:             'Enrolled',
+    rejected:             'Rejected',
+    cancelled:            'Cancelled',
   }
   return (
     <span className={`rounded-full px-3 py-1 text-xs font-semibold ${colors[status] || 'bg-slate-100 text-slate-600'}`}>
@@ -505,6 +561,8 @@ function StatusBadge({ status }) {
 }
 
 function FeeAmountPanel({ collegeId, appId, initialTotal, initialPayNow, readonly, onSaved }) {
+  // Lock editing once fees have already been set (initialTotal present) or status is fees_paid
+  const locked = readonly || (initialTotal && parseFloat(initialTotal) > 0)
   const [total,  setTotal]   = useState(initialTotal  ? String(initialTotal)  : '')
   const [payNow, setPayNow]  = useState(initialPayNow ? String(initialPayNow) : '')
   const [saving, setSaving]  = useState(false)
@@ -533,15 +591,13 @@ function FeeAmountPanel({ collegeId, appId, initialTotal, initialPayNow, readonl
     } finally { setSaving(false) }
   }
 
-  const inputCls = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-50 disabled:text-slate-400'
-
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
       <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
         <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Fee Details</p>
         <p className="text-xs text-slate-400 mt-0.5">
-          {readonly
-            ? 'Fee paid — locked.'
+          {locked
+            ? 'Fee amounts are locked after being set.'
             : 'Enter the total fee and how much the student must pay now. Student will see both amounts.'}
         </p>
       </div>
@@ -549,38 +605,38 @@ function FeeAmountPanel({ collegeId, appId, initialTotal, initialPayNow, readonl
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">
-              Total Payable Amount <span className="text-red-500">*</span>
+              Total Payable Amount {!locked && <span className="text-red-500">*</span>}
             </label>
             <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500">
               <span className="px-3 py-2 bg-slate-50 border-r border-slate-200 text-slate-500 text-sm font-semibold">₹</span>
               <input
-                type="number" min="1" step="1"
+                type="text" inputMode="numeric"
                 value={total}
-                onChange={e => { setTotal(e.target.value); setError(''); setSuccess('') }}
-                disabled={readonly}
+                onChange={e => { setTotal(e.target.value.replace(/[^0-9.]/g, '')); setError(''); setSuccess('') }}
+                disabled={locked}
                 placeholder="e.g. 14000"
-                className="flex-1 px-3 py-2 text-sm outline-none bg-transparent disabled:bg-slate-50 disabled:text-slate-400"
+                className="flex-1 px-3 py-2 text-sm outline-none bg-transparent disabled:bg-slate-50 disabled:text-slate-500"
               />
             </div>
             <p className="mt-1 text-xs text-slate-400">Full fee the student owes</p>
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">
-              Amount to Pay Now <span className="text-red-500">*</span>
+              Amount to Pay Now {!locked && <span className="text-red-500">*</span>}
             </label>
             <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500">
               <span className="px-3 py-2 bg-slate-50 border-r border-slate-200 text-slate-500 text-sm font-semibold">₹</span>
               <input
-                type="number" min="1" step="1"
+                type="text" inputMode="numeric"
                 value={payNow}
-                onChange={e => { setPayNow(e.target.value); setError(''); setSuccess('') }}
-                disabled={readonly}
+                onChange={e => { setPayNow(e.target.value.replace(/[^0-9.]/g, '')); setError(''); setSuccess('') }}
+                disabled={locked}
                 placeholder="e.g. 14000"
-                className="flex-1 px-3 py-2 text-sm outline-none bg-transparent disabled:bg-slate-50 disabled:text-slate-400"
+                className="flex-1 px-3 py-2 text-sm outline-none bg-transparent disabled:bg-slate-50 disabled:text-slate-500"
               />
             </div>
             <p className="mt-1 text-xs text-slate-400">
-              {!readonly && totalNum > 0 && (
+              {!locked && totalNum > 0 && (
                 <button
                   type="button"
                   onClick={() => { setPayNow(total); setError(''); setSuccess('') }}
@@ -589,7 +645,7 @@ function FeeAmountPanel({ collegeId, appId, initialTotal, initialPayNow, readonl
                   Same as total
                 </button>
               )}
-              {!readonly && totalNum > 0 && ' · '}
+              {!locked && totalNum > 0 && ' · '}
               Can be less if college allows partial payment
             </p>
           </div>
@@ -610,7 +666,7 @@ function FeeAmountPanel({ collegeId, appId, initialTotal, initialPayNow, readonl
         {error   && <p className="text-sm text-red-600">{error}</p>}
         {success && <p className="text-sm text-emerald-600">{success}</p>}
 
-        {!readonly && (
+        {!locked && (
           <Button onClick={handleSave} loading={saving}>Save Fee Amounts</Button>
         )}
       </div>

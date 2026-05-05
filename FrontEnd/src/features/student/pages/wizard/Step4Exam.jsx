@@ -38,8 +38,10 @@ export default function Step4Exam({ data, errors, globalError, saving, onChange,
       setLocalError('Year of passing cannot be in the future.'); return
     }
     setLocalError('')
+    const collegeName = data.board_or_college_name?.trim() || (!isFY ? data.college_name : '')
+    if (!collegeName) { setLocalError('College / Board name is required.'); return }
     onNext({
-      board_or_college_name:     data.board_or_college_name,
+      board_or_college_name:     collegeName,
       school_or_college_address: data.school_or_college_address,
       seat_number:               isFY ? data.seat_number : undefined,
       prn_or_seat:               !isFY ? data.prn_or_seat : undefined,
@@ -70,7 +72,7 @@ export default function Step4Exam({ data, errors, globalError, saving, onChange,
           <FormField
             label={isFY ? 'Board Name' : 'College Name'}
             name="board_or_college_name"
-            value={isFY ? data.board_or_college_name : (data.board_or_college_name || data.college_name)}
+            value={data.board_or_college_name || (!isFY ? data.college_name : '')}
             onChange={onChange}
             error={e.board_or_college_name}
             required

@@ -5,14 +5,13 @@ import api from '../../../services/api.js'
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
 
 const STATUS_META = {
-  submitted:                { label: 'Submitted',                color: 'bg-blue-100 text-blue-700' },
-  under_review:             { label: 'Under Review',             color: 'bg-blue-100 text-blue-700' },
+  submitted:                { label: 'Review Pending',           color: 'bg-blue-100 text-blue-700' },
+  under_review:             { label: 'Review Pending',           color: 'bg-blue-100 text-blue-700' },
   correction_requested:     { label: 'Correction Pending',       color: 'bg-orange-100 text-orange-700' },
-  correction_done:          { label: 'Correction Done',          color: 'bg-sky-100 text-sky-700' },
-  scrutiny_accepted:        { label: 'Scrutiny Accepted',        color: 'bg-teal-100 text-teal-700' },
-  doc_verification_pending: { label: 'Doc Verification Pending', color: 'bg-orange-100 text-orange-700' },
-  confirmed:                { label: 'Confirmed',                color: 'bg-emerald-100 text-emerald-700' },
-  fees_paid:                { label: 'Fees Paid',                color: 'bg-emerald-100 text-emerald-700' },
+  correction_done:          { label: 'Correction Review',        color: 'bg-sky-100 text-sky-700' },
+  doc_verified:             { label: 'Student Awaited',          color: 'bg-teal-100 text-teal-700' },
+  confirmed:                { label: 'Fees Pending',             color: 'bg-amber-100 text-amber-700' },
+  fees_paid:                { label: 'Confirmed',                color: 'bg-emerald-100 text-emerald-700' },
   roll_assigned:            { label: 'Roll Assigned',            color: 'bg-violet-100 text-violet-700' },
   enrolled:                 { label: 'Enrolled',                 color: 'bg-green-100 text-green-800' },
   rejected:                 { label: 'Rejected',                 color: 'bg-red-100 text-red-700' },
@@ -192,7 +191,7 @@ export default function ApplicationInbox({ collegeId }) {
 
       {!loading && filtered.length > 0 && (
         <div className="rounded-lg border border-slate-200 overflow-hidden">
-          <div className="hidden sm:grid grid-cols-[1fr_1fr_9rem_auto_6rem] bg-slate-50 border-b border-slate-200 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+          <div className="hidden sm:grid grid-cols-[1fr_1fr_10rem_12rem_6rem] bg-slate-50 border-b border-slate-200 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
             <span>Student</span>
             <span>Course / Year</span>
             <span>Reg No.</span>
@@ -206,7 +205,7 @@ export default function ApplicationInbox({ collegeId }) {
               <button
                 key={app.id}
                 onClick={() => openApp(app.id)}
-                className={`w-full text-left grid sm:grid-cols-[1fr_1fr_9rem_auto_6rem] px-4 py-2.5 hover:bg-blue-50 transition items-center ${
+                className={`w-full text-left grid sm:grid-cols-[1fr_1fr_10rem_12rem_6rem] px-4 py-2.5 hover:bg-blue-50 transition items-center ${
                   i !== 0 ? 'border-t border-slate-100' : ''
                 }`}
               >

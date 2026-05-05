@@ -9,29 +9,28 @@ import ApplicationPrintView from './ApplicationPrintView.jsx'
 
 const YEAR_LABEL  = { 1: 'FY', 2: 'SY', 3: 'TY' }
 const STATUS_META = {
-  draft:                    { label: 'Draft',                      color: 'bg-slate-100 text-slate-600' },
-  payment_pending:          { label: 'Payment Pending',            color: 'bg-yellow-100 text-yellow-700' },
-  submitted:                { label: 'Submitted',                  color: 'bg-blue-100 text-blue-700' },
-  under_review:             { label: 'Under Review',               color: 'bg-blue-100 text-blue-700' },
-  correction_requested:     { label: 'Correction Required',        color: 'bg-orange-100 text-orange-700' },
-  correction_done:          { label: 'Correction Submitted',       color: 'bg-sky-100 text-sky-700' },
-  scrutiny_accepted:        { label: 'Scrutiny Accepted',          color: 'bg-teal-100 text-teal-700' },
-  doc_verification_pending: { label: 'Doc Verification Pending',   color: 'bg-orange-100 text-orange-700' },
-  confirmed:                { label: 'Confirmed',                  color: 'bg-emerald-100 text-emerald-700' },
-  fees_paid:                { label: 'Fees Paid',                  color: 'bg-emerald-100 text-emerald-700' },
-  roll_assigned:            { label: 'Roll Assigned',              color: 'bg-violet-100 text-violet-700' },
-  enrolled:                 { label: 'Enrolled',                   color: 'bg-green-100 text-green-800' },
-  rejected:                 { label: 'Rejected',                   color: 'bg-red-100 text-red-700' },
-  cancelled:                { label: 'Cancelled',                  color: 'bg-slate-100 text-slate-500' },
+  draft:                { label: 'Draft',               color: 'bg-slate-100 text-slate-600' },
+  payment_pending:      { label: 'Payment Pending',     color: 'bg-yellow-100 text-yellow-700' },
+  submitted:            { label: 'Under Review',        color: 'bg-blue-100 text-blue-700' },
+  under_review:         { label: 'Under Review',        color: 'bg-blue-100 text-blue-700' },
+  correction_requested: { label: 'Correction Required', color: 'bg-orange-100 text-orange-700' },
+  correction_done:      { label: 'Under Review',        color: 'bg-blue-100 text-blue-700' },
+  doc_verified:         { label: 'Application Approved',color: 'bg-teal-100 text-teal-700' },
+  confirmed:            { label: 'Fees Pending',        color: 'bg-amber-100 text-amber-700' },
+  fees_paid:            { label: 'Confirmed',           color: 'bg-emerald-100 text-emerald-700' },
+  roll_assigned:        { label: 'Roll Assigned',       color: 'bg-violet-100 text-violet-700' },
+  enrolled:             { label: 'Enrolled',            color: 'bg-green-100 text-green-800' },
+  rejected:             { label: 'Rejected',            color: 'bg-red-100 text-red-700' },
+  cancelled:            { label: 'Cancelled',           color: 'bg-slate-100 text-slate-500' },
 }
 
 const SECTIONS = [
   { key: 'all',        label: 'All' },
-  { key: 'scrutiny',   label: 'Under Scrutiny',     statuses: ['draft','submitted','under_review'] },
-  { key: 'correction', label: 'Correction Required', statuses: ['correction_requested', 'correction_done'] },
-  { key: 'accepted',   label: 'Accepted',            statuses: ['scrutiny_accepted','doc_verification_pending'] },
-  { key: 'merit',      label: 'In Merit',            statuses: ['confirmed'] },
-  { key: 'confirmed',  label: 'Confirmed Admission', statuses: ['fees_paid','roll_assigned','enrolled'] },
+  { key: 'review',     label: 'Under Review',       statuses: ['draft', 'submitted', 'under_review', 'correction_done'] },
+  { key: 'correction', label: 'Correction Required', statuses: ['correction_requested'] },
+  { key: 'approved',   label: 'Approved',            statuses: ['doc_verified'] },
+  { key: 'fees',       label: 'Fees Pending',        statuses: ['confirmed'] },
+  { key: 'confirmed',  label: 'Confirmed',           statuses: ['fees_paid', 'roll_assigned', 'enrolled'] },
 ]
 
 export default function MyApplications() {
@@ -197,15 +196,7 @@ export default function MyApplications() {
                 </div>
               )}
 
-              {app.status === 'submitted' && (
-                <div className="mt-3 rounded-md bg-blue-50 border border-blue-100 px-3 py-2">
-                  <p className="text-sm text-blue-800">
-                    Your application has been submitted and is awaiting review by the college.
-                  </p>
-                </div>
-              )}
-
-              {app.status === 'under_review' && (
+              {(app.status === 'submitted' || app.status === 'under_review' || app.status === 'correction_done') && (
                 <div className="mt-3 rounded-md bg-blue-50 border border-blue-100 px-3 py-2">
                   <p className="text-sm text-blue-800">
                     Your application is under review by the college.
@@ -213,40 +204,26 @@ export default function MyApplications() {
                 </div>
               )}
 
-              {app.status === 'correction_done' && (
-                <div className="mt-3 rounded-md bg-sky-50 border border-sky-200 px-3 py-2">
-                  <p className="text-sm text-sky-800 font-medium">
-                    Your corrected application has been submitted. The college is reviewing it.
+              {app.status === 'doc_verified' && (
+                <div className="mt-3 rounded-md bg-teal-50 border border-teal-200 px-3 py-3 space-y-1">
+                  <p className="text-sm font-semibold text-teal-800">
+                    Your application has been approved!
                   </p>
-                </div>
-              )}
-
-              {app.status === 'scrutiny_accepted' && (
-                <div className="mt-3 rounded-md bg-teal-50 border border-teal-100 px-3 py-2">
-                  <p className="text-sm text-teal-800 font-medium">
-                    Your application has passed scrutiny and has been accepted by the college.
-                    Please wait — the college will call you for physical document verification.
-                  </p>
-                </div>
-              )}
-
-              {app.status === 'doc_verification_pending' && (
-                <div className="mt-3 rounded-md bg-orange-50 border border-orange-100 px-3 py-2">
-                  <p className="text-sm text-orange-800 font-medium">
-                    The college has called you for physical document verification.
-                    Please visit the college with all original documents. Once your documents are verified in person, your admission will be confirmed.
+                  <p className="text-sm text-teal-700">
+                    Please visit the college as soon as possible with all your original documents for verification.
+                    Carry originals of mark sheets, certificates, ID proof, and any other required documents.
                   </p>
                 </div>
               )}
 
               {app.status === 'confirmed' && (
-                <div className="mt-3 rounded-md bg-emerald-50 border border-emerald-100 px-3 py-2 space-y-2">
-                  <p className="text-sm text-emerald-800 font-medium">
-                    Admission confirmed! Your documents have been verified. Pay the college fee to secure your seat.
+                <div className="mt-3 rounded-md bg-amber-50 border border-amber-200 px-3 py-3 space-y-2">
+                  <p className="text-sm font-semibold text-amber-800">
+                    Documents verified! Please pay the college fee to confirm your admission.
                   </p>
                   <button
                     onClick={() => setFeePayApp(app)}
-                    className="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700"
+                    className="rounded-md bg-amber-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-amber-700"
                   >
                     Pay College Fee
                   </button>
@@ -256,7 +233,10 @@ export default function MyApplications() {
               {app.status === 'fees_paid' && (
                 <div className="mt-3 rounded-md bg-emerald-50 border border-emerald-100 px-3 py-2 space-y-2">
                   <p className="text-sm text-emerald-800 font-medium">
-                    Fee payment received. If you have a remaining balance, you can pay it below.
+                    Admission confirmed! Fee payment received.
+                    {app.fee_total_amount && parseFloat(app.fee_total_amount) > parseFloat(app.fee_pay_now_amount || 0) && (
+                      <span> If you have a remaining balance, you can pay it below.</span>
+                    )}
                   </p>
                   <button
                     onClick={() => setFeePayApp(app)}

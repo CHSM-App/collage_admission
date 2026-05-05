@@ -1,22 +1,36 @@
 import { useEffect, useState, useCallback } from 'react'
 import api from '../../../services/api.js'
+import PaymentReceipts from '../../student/pages/PaymentReceipts.jsx'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
+
+function parseLocalDate(str) {
+  if (!str) return null
+  try { return new Date(str.toString().replace(' ', 'T').split('.')[0]) } catch { return null }
+}
+function fmtDate(str) {
+  const d = parseLocalDate(str)
+  return d ? d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'
+}
+function fmtTime(str) {
+  const d = parseLocalDate(str)
+  return d ? d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : ''
+}
 
 export default function FeeReceipts({ collegeId }) {
   const [rows, setRows]         = useState([])
   const [courses, setCourses]   = useState([])
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
+  const [selected, setSelected] = useState(null)   // row opened in modal
 
   // Filters
-  const [status, setStatus]       = useState('')       // '' | 'paid' | 'pending'
-  const [courseId, setCourseId]   = useState('')
-  const [yearFilter, setYear]     = useState('')
-  const [search, setSearch]       = useState('')
+  const [status, setStatus]           = useState('')
+  const [courseId, setCourseId]       = useState('')
+  const [yearFilter, setYear]         = useState('')
+  const [search, setSearch]           = useState('')
   const [searchInput, setSearchInput] = useState('')
 
-  // Load courses for filter dropdown
   useEffect(() => {
     api.get(`masters/${collegeId}/faculty`)
       .then(r => setCourses((r.data.data || []).filter(f => f.is_active)))
@@ -27,10 +41,10 @@ export default function FeeReceipts({ collegeId }) {
     setLoading(true)
     setError('')
     const params = new URLSearchParams()
-    if (status)   params.set('status', status)
-    if (courseId) params.set('course_id', courseId)
+    if (status)     params.set('status', status)
+    if (courseId)   params.set('course_id', courseId)
     if (yearFilter) params.set('year_of_study', yearFilter)
-    if (search)   params.set('q', search)
+    if (search)     params.set('q', search)
     api.get(`college-admin/${collegeId}/fee-receipts?${params}`)
       .then(r => setRows(r.data.data || []))
       .catch(() => setError('Failed to load fee receipts.'))
@@ -39,7 +53,6 @@ export default function FeeReceipts({ collegeId }) {
 
   useEffect(() => { fetchReceipts() }, [fetchReceipts])
 
-  // Debounce search
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput.trim()), 350)
     return () => clearTimeout(t)
@@ -47,10 +60,16 @@ export default function FeeReceipts({ collegeId }) {
 
   const paid    = rows.filter(r => r.college_fee_paid)
   const pending = rows.filter(r => !r.college_fee_paid)
+  const summary = status === 'paid' ? paid : status === 'pending' ? pending : rows
 
-  const summary = status === 'paid'    ? paid
-                : status === 'pending' ? pending
-                : rows
+  function handleRowClick(row) {
+    setSelected(row)
+  }
+
+  function handlePanelClose() {
+    setSelected(null)
+    fetchReceipts()   // refresh totals after possible payment
+  }
 
   return (
     <section className="space-y-6">
@@ -69,7 +88,6 @@ export default function FeeReceipts({ collegeId }) {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">
-        {/* Search */}
         <input
           type="text"
           value={searchInput}
@@ -77,24 +95,14 @@ export default function FeeReceipts({ collegeId }) {
           placeholder="Search name, phone, reg. no…"
           className="flex-1 min-w-48 rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
         />
-
-        {/* Status filter */}
-        <select
-          value={status}
-          onChange={e => setStatus(e.target.value)}
-          className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-        >
+        <select value={status} onChange={e => setStatus(e.target.value)}
+          className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
           <option value="">All Statuses</option>
           <option value="paid">Paid</option>
           <option value="pending">Pending</option>
         </select>
-
-        {/* Course filter */}
-        <select
-          value={courseId}
-          onChange={e => setCourseId(e.target.value)}
-          className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-        >
+        <select value={courseId} onChange={e => setCourseId(e.target.value)}
+          className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
           <option value="">All Courses</option>
           {courses.map(c => (
             <option key={c.code_no} value={c.code_no}>
@@ -102,13 +110,8 @@ export default function FeeReceipts({ collegeId }) {
             </option>
           ))}
         </select>
-
-        {/* Year filter */}
-        <select
-          value={yearFilter}
-          onChange={e => setYear(e.target.value)}
-          className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
-        >
+        <select value={yearFilter} onChange={e => setYear(e.target.value)}
+          className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
           <option value="">All Years</option>
           <option value="1">FY</option>
           <option value="2">SY</option>
@@ -138,41 +141,45 @@ export default function FeeReceipts({ collegeId }) {
                   <th className="px-4 py-3 text-right">Paid</th>
                   <th className="px-4 py-3 text-right">Remaining</th>
                   <th className="px-4 py-3 text-center">Status</th>
-                  <th className="px-4 py-3 text-left">Paid On</th>
+                  <th className="px-4 py-3 text-left">Last Paid</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
                 {summary.map(r => {
                   const total     = r.fee_total_amount != null ? Number(r.fee_total_amount) : null
-                  const paid      = Number(r.amount_paid) || 0
-                  const remaining = total != null ? Math.max(0, total - paid) : null
+                  const paidAmt   = Number(r.amount_paid) || 0
+                  const remaining = total != null ? Math.max(0, total - paidAmt) : null
                   return (
-                  <tr key={r.application_id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-slate-800">{r.student_name}</p>
-                      <p className="text-xs text-slate-400">{r.student_phone || '—'}</p>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {r.course_name}
-                      <span className="ml-1 text-xs text-slate-400">· {YEAR_LABEL[r.year_of_study]}</span>
-                    </td>
-                    <td className="px-4 py-3 font-mono text-slate-500 text-xs">{r.registration_number || '—'}</td>
-                    <td className="px-4 py-3 text-right text-slate-700">
-                      {total != null ? `₹${total.toLocaleString('en-IN')}` : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-right font-semibold text-emerald-700">
-                      {paid > 0 ? `₹${paid.toLocaleString('en-IN')}` : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-right text-amber-700 font-semibold">
-                      {remaining != null && remaining > 0 ? `₹${remaining.toLocaleString('en-IN')}` : remaining === 0 ? '—' : '—'}
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <StatusBadge paid={!!r.college_fee_paid} />
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 text-xs">
-                      {r.completed_at ? new Date(r.completed_at).toLocaleDateString('en-IN') : '—'}
-                    </td>
-                  </tr>
+                    <tr
+                      key={r.application_id}
+                      onClick={() => handleRowClick(r)}
+                      className="hover:bg-blue-50 cursor-pointer transition"
+                    >
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-slate-800">{r.student_name}</p>
+                        <p className="text-xs text-slate-400">{r.student_phone || '—'}</p>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {r.course_name}
+                        <span className="ml-1 text-xs text-slate-400">· {YEAR_LABEL[r.year_of_study]}</span>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-slate-500 text-xs">{r.registration_number || '—'}</td>
+                      <td className="px-4 py-3 text-right text-slate-700">
+                        {total != null ? `₹${total.toLocaleString('en-IN')}` : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold text-emerald-700">
+                        {paidAmt > 0 ? `₹${paidAmt.toLocaleString('en-IN')}` : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right font-semibold text-amber-700">
+                        {remaining != null && remaining > 0 ? `₹${remaining.toLocaleString('en-IN')}` : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <StatusBadge paid={!!r.college_fee_paid} />
+                      </td>
+                      <td className="px-4 py-3 text-slate-500 text-xs">
+                        {r.completed_at ? fmtDate(r.completed_at) : '—'}
+                      </td>
+                    </tr>
                   )
                 })}
               </tbody>
@@ -183,36 +190,255 @@ export default function FeeReceipts({ collegeId }) {
           <div className="sm:hidden space-y-3">
             {summary.map(r => {
               const total     = r.fee_total_amount != null ? Number(r.fee_total_amount) : null
-              const paid      = Number(r.amount_paid) || 0
-              const remaining = total != null ? Math.max(0, total - paid) : null
+              const paidAmt   = Number(r.amount_paid) || 0
+              const remaining = total != null ? Math.max(0, total - paidAmt) : null
               return (
-              <div key={r.application_id} className="rounded-xl border border-slate-100 bg-white p-4 space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <p className="font-semibold text-slate-800">{r.student_name}</p>
-                    <p className="text-xs text-slate-400">{r.student_phone || '—'}</p>
+                <div
+                  key={r.application_id}
+                  onClick={() => handleRowClick(r)}
+                  className="rounded-xl border border-slate-100 bg-white p-4 space-y-2 cursor-pointer hover:border-blue-200 transition"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="font-semibold text-slate-800">{r.student_name}</p>
+                      <p className="text-xs text-slate-400">{r.student_phone || '—'}</p>
+                    </div>
+                    <StatusBadge paid={!!r.college_fee_paid} />
                   </div>
-                  <StatusBadge paid={!!r.college_fee_paid} />
-                </div>
-                <p className="text-sm text-slate-600">{r.course_name} · {YEAR_LABEL[r.year_of_study]}</p>
-                <div className="flex items-center justify-between text-xs text-slate-400">
-                  <span className="font-mono">{r.registration_number || '—'}</span>
-                  <div className="text-right space-y-0.5">
-                    {total != null && <p className="text-slate-500">Total: <span className="font-semibold text-slate-700">₹{total.toLocaleString('en-IN')}</span></p>}
-                    {paid > 0 && <p className="text-emerald-700 font-semibold">Paid: ₹{paid.toLocaleString('en-IN')}</p>}
-                    {remaining != null && remaining > 0 && <p className="text-amber-700 font-semibold">Due: ₹{remaining.toLocaleString('en-IN')}</p>}
+                  <p className="text-sm text-slate-600">{r.course_name} · {YEAR_LABEL[r.year_of_study]}</p>
+                  <div className="flex items-center justify-between text-xs text-slate-400">
+                    <span className="font-mono">{r.registration_number || '—'}</span>
+                    <div className="text-right space-y-0.5">
+                      {total != null && <p className="text-slate-500">Total: <span className="font-semibold text-slate-700">₹{total.toLocaleString('en-IN')}</span></p>}
+                      {paidAmt > 0 && <p className="text-emerald-700 font-semibold">Paid: ₹{paidAmt.toLocaleString('en-IN')}</p>}
+                      {remaining != null && remaining > 0 && <p className="text-amber-700 font-semibold">Due: ₹{remaining.toLocaleString('en-IN')}</p>}
+                    </div>
                   </div>
                 </div>
-                {r.completed_at && (
-                  <p className="text-xs text-slate-400">Last paid: {new Date(r.completed_at).toLocaleDateString('en-IN')}</p>
-                )}
-              </div>
               )
             })}
           </div>
         </>
       )}
+
+      {/* Student Fee Modal */}
+      {selected && (
+        <CollegeFeeModal
+          row={selected}
+          collegeId={collegeId}
+          onClose={handlePanelClose}
+        />
+      )}
     </section>
+  )
+}
+
+// ── Modal wrapper ─────────────────────────────────────────────
+function CollegeFeeModal({ row, collegeId, onClose }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative z-10 w-full sm:max-w-xl max-h-[92dvh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-white shadow-2xl">
+        <CollegeFeePanel row={row} collegeId={collegeId} onClose={onClose} />
+      </div>
+    </div>
+  )
+}
+
+// ── Fee panel (fee status + cash payment + receipts) ─────────
+function CollegeFeePanel({ row, collegeId, onClose }) {
+  const [feeStatus, setFeeStatus]     = useState(null)
+  const [loading, setLoading]         = useState(true)
+  const [error, setError]             = useState('')
+  const [amount, setAmount]           = useState('')
+  const [note, setNote]               = useState('')
+  const [saving, setSaving]           = useState(false)
+  const [saveMsg, setSaveMsg]         = useState('')
+  const [saveErr, setSaveErr]         = useState('')
+  const [showReceipts, setShowReceipts] = useState(false)
+
+  function fetchStatus() {
+    setLoading(true)
+    api.get(`payments/college-fee-status/${row.application_id}`)
+      .then(r => setFeeStatus(r.data.data))
+      .catch(() => setError('Failed to load fee details.'))
+      .finally(() => setLoading(false))
+  }
+
+  useEffect(() => { fetchStatus() }, [row.application_id])
+
+  async function handleRecord(e) {
+    e.preventDefault()
+    const amt = parseFloat(amount)
+    if (!amt || amt <= 0) { setSaveErr('Enter a valid amount.'); return }
+    setSaveErr('')
+    setSaveMsg('')
+    setSaving(true)
+    try {
+      const res = await api.post(
+        `college-admin/${collegeId}/applications/${row.application_id}/record-cash-payment`,
+        { amount: amt, note: note.trim() || undefined }
+      )
+      setSaveMsg(res.data.message)
+      setAmount('')
+      setNote('')
+      setShowReceipts(true)
+      fetchStatus()
+    } catch (err) {
+      setSaveErr(err?.response?.data?.message || 'Failed to record payment.')
+    } finally { setSaving(false) }
+  }
+
+  const fs      = feeStatus
+  const allPaid = fs?.college_fee_paid || (fs && fs.remaining <= 0)
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-slate-100">
+        <div>
+          <p className="font-bold text-slate-950 text-base">{row.student_name}</p>
+          <p className="text-sm text-slate-500 mt-0.5">{row.course_name} · {YEAR_LABEL[row.year_of_study]}</p>
+          {row.registration_number && (
+            <p className="text-xs font-mono text-slate-400 mt-0.5">{row.registration_number}</p>
+          )}
+        </div>
+        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none mt-0.5">✕</button>
+      </div>
+
+      <div className="px-5 py-4 space-y-5">
+        {loading && <p className="text-slate-400 text-sm">Loading…</p>}
+        {error   && <p className="text-red-500 text-sm">{error}</p>}
+
+        {fs && (
+          <>
+            {/* Fee summary cards */}
+            <div className="grid grid-cols-3 gap-2 text-sm">
+              <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-center">
+                <p className="text-xs text-slate-400">Total Fee</p>
+                <p className="font-bold text-slate-950 mt-0.5">
+                  {fs.total_fee > 0 ? `₹${Number(fs.total_fee).toLocaleString('en-IN')}` : '—'}
+                </p>
+              </div>
+              <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-center">
+                <p className="text-xs text-slate-400">Paid</p>
+                <p className="font-bold text-emerald-700 mt-0.5">
+                  ₹{Number(fs.total_paid).toLocaleString('en-IN')}
+                </p>
+              </div>
+              <div className={`rounded-lg border p-3 text-center ${fs.remaining > 0 ? 'bg-amber-50 border-amber-100' : 'bg-slate-50 border-slate-100'}`}>
+                <p className="text-xs text-slate-400">Remaining</p>
+                <p className={`font-bold mt-0.5 ${fs.remaining > 0 ? 'text-amber-700' : 'text-slate-400'}`}>
+                  ₹{Number(fs.remaining).toLocaleString('en-IN')}
+                </p>
+              </div>
+            </div>
+
+            {/* Already paid notice */}
+            {allPaid && (
+              <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800 font-medium">
+                All fees have been paid in full.
+              </div>
+            )}
+
+            {/* Cash payment form */}
+            {!allPaid && fs.total_fee > 0 && (
+              <form onSubmit={handleRecord} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-4 space-y-3">
+                <p className="text-sm font-semibold text-slate-700">Record Cash / Offline Payment</p>
+
+                <div className="flex gap-3 items-end">
+                  <div className="flex-1">
+                    <label className="text-xs text-slate-500 mb-1 block">Amount (₹)</label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={amount}
+                      onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                      placeholder={`Max ₹${Number(fs.remaining).toLocaleString('en-IN')}`}
+                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                      required
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="shrink-0 rounded-lg bg-slate-900 text-white text-sm font-semibold px-4 py-2 hover:bg-slate-700 disabled:opacity-50 transition"
+                  >
+                    {saving ? 'Saving…' : 'Record'}
+                  </button>
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-500 mb-1 block">Note (optional)</label>
+                  <input
+                    type="text"
+                    value={note}
+                    onChange={e => setNote(e.target.value)}
+                    placeholder="e.g. Cash received at counter"
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  />
+                </div>
+
+                {saveErr && <p className="text-sm text-red-600">{saveErr}</p>}
+                {saveMsg && <p className="text-sm text-emerald-700 font-medium">{saveMsg}</p>}
+              </form>
+            )}
+
+            {/* No fee set yet */}
+            {fs.total_fee === 0 && (
+              <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+                Fee amount not set for this application yet. Set fees from the application detail page.
+              </div>
+            )}
+
+            {/* Transactions list from paid_records */}
+            {fs.paid_records?.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Transactions</p>
+                <div className="space-y-1.5">
+                  {fs.paid_records.map((p, i) => (
+                    <div key={p.id} className="flex items-center justify-between rounded-lg border border-slate-100 bg-white px-3 py-2.5 text-sm">
+                      <div className="flex items-center gap-2.5">
+                        <div className="h-6 w-6 rounded-full bg-emerald-100 flex items-center justify-center text-xs font-bold text-emerald-700 shrink-0">
+                          {i + 1}
+                        </div>
+                        <div>
+                          <p className="font-medium text-slate-800">
+                            {p.razorpay_payment_id?.startsWith('CASH-') ? 'Cash / Offline' : 'Online (Razorpay)'}
+                          </p>
+                          <p className="text-xs text-slate-400">
+                            {fmtDate(p.completed_at)} {fmtTime(p.completed_at)}
+                          </p>
+                        </div>
+                      </div>
+                      <span className="font-bold text-emerald-700">₹{Number(p.amount).toLocaleString('en-IN')}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Receipts toggle */}
+            <div className="border-t border-slate-100 pt-3">
+              <button
+                onClick={() => setShowReceipts(v => !v)}
+                className="flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900 transition"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                {showReceipts ? 'Hide Receipts' : 'View Printable Receipts'}
+              </button>
+              {showReceipts && (
+                <div className="mt-3">
+                  <PaymentReceipts applicationId={row.application_id} />
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   )
 }
 

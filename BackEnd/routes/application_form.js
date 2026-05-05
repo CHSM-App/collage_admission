@@ -18,6 +18,17 @@ const router   = express.Router();
 const db       = require('./db');
 const mssql    = require('mssql');
 
+async function logActivity(appId, action, actorRole, note = null) {
+  try {
+    await db.request()
+      .input('appId',     mssql.Int,     parseInt(appId))
+      .input('action',    mssql.NVarChar, action)
+      .input('actorRole', mssql.NVarChar, actorRole)
+      .input('note',      mssql.NVarChar, note || null)
+      .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
+  } catch (e) { console.warn('logActivity failed:', e.message); }
+}
+
 const MIN_AGE_FOR_FY = 17; // years
 
 // ── Validation helpers ───────────────────────────────────────
@@ -448,6 +459,13 @@ router.get('/student-profile/autofill', async (req, res) => {
   }
 });
 
+async function getCollegeName(appId) {
+  const r = await db.request()
+    .input('id', require('mssql').Int, appId)
+    .query('SELECT c.name FROM applications a JOIN colleges c ON c.id = a.college_id WHERE a.id = @id');
+  return r.recordset[0]?.name || null;
+}
+
 // ── Helper: assert draft and ownership ──────────────────────
 // Editable statuses: student can edit form until scrutiny_accepted
 const EDITABLE_STATUSES = ['draft', 'submitted', 'under_review', 'correction_requested', 'correction_done'];
@@ -659,11 +677,15 @@ router.patch('/applications/:id/previous-exam', async (req, res) => {
     subjects, // array: [{ subject_name, marks_obtained, marks_max }]
   } = req.body;
 
+  // For SY/TY, fall back to the college name stored on the application
+  const effectiveCollegeName = board_or_college_name?.toString().trim()
+    || (app.year_of_study > 1 ? await getCollegeName(appId) : null);
+
   const errors = {};
-  if (!board_or_college_name)  errors.board_or_college_name = 'Board / college name is required.';
+  if (!effectiveCollegeName) errors.board_or_college_name = 'Board / college name is required.';
   if (!year_of_passing)        errors.year_of_passing       = 'Year of passing is required.';
   if (!seat_number && !prn_or_seat) errors.seat_number      = 'Seat number is required.';
-  if (total_marks_obtained == null) errors.total_marks_obtained = 'Total marks obtained is required.';
+  if (total_marks_obtained === '' || total_marks_obtained == null) errors.total_marks_obtained = 'Total marks obtained is required.';
   if (!total_marks_max)        errors.total_marks_max       = 'Total maximum marks is required.';
   if (app.year_of_study > 1 && !result) errors.result      = 'Result is required for SY/TY.';
   if (!Array.isArray(subjects) || subjects.length === 0) {
@@ -685,7 +707,7 @@ router.patch('/applications/:id/previous-exam', async (req, res) => {
       examId = existing.recordset[0].id;
       await db.request()
         .input('id',    mssql.Int,      examId)
-        .input('bcn',   mssql.NVarChar, board_or_college_name)
+        .input('bcn',   mssql.NVarChar, effectiveCollegeName)
         .input('addr',  mssql.NVarChar, school_or_college_address || null)
         .input('seat',  mssql.NVarChar, seat_number    || null)
         .input('prn',   mssql.NVarChar, prn_or_seat    || null)
@@ -704,7 +726,7 @@ router.patch('/applications/:id/previous-exam', async (req, res) => {
     } else {
       const ins = await db.request()
         .input('appId', mssql.Int,      appId)
-        .input('bcn',   mssql.NVarChar, board_or_college_name)
+        .input('bcn',   mssql.NVarChar, effectiveCollegeName)
         .input('addr',  mssql.NVarChar, school_or_college_address || null)
         .input('seat',  mssql.NVarChar, seat_number    || null)
         .input('prn',   mssql.NVarChar, prn_or_seat    || null)
@@ -978,6 +1000,8 @@ router.post('/applications/:id/resubmit', async (req, res) => {
           status_updated_at = GETDATE()
         WHERE id = @id
       `);
+
+    await logActivity(appId, 'correction_resubmitted', 'student', null);
 
     return res.json({ success: true, message: 'Application resubmitted successfully.' });
   } catch (err) {

@@ -22,6 +22,24 @@
 const express = require('express');
 const router  = express.Router({ mergeParams: true });
 const db      = require('./db');
+const mssqlShared = require('mssql');
+
+// ── Activity log helper ─────────────────────────────────────
+async function logActivity(appId, action, actorRole, note = null) {
+  try {
+    await db.request()
+      .input('appId',     mssqlShared.Int,      parseInt(appId))
+      .input('action',    mssqlShared.NVarChar,  action)
+      .input('actorRole', mssqlShared.NVarChar,  actorRole)
+      .input('note',      mssqlShared.NVarChar,  note || null)
+      .query(`
+        INSERT INTO application_activity_log (application_id, action, actor_role, note)
+        VALUES (@appId, @action, @actorRole, @note)
+      `);
+  } catch (e) {
+    console.warn('logActivity failed:', e.message);
+  }
+}
 
 // ── Admission Periods ───────────────────────────────────────
 
@@ -273,9 +291,18 @@ router.get('/:collegeId/applications/:appId', async (req, res) => {
       delete exam.subjects_json;
     }
 
+    const activityRes = await db.request()
+      .input('appId', parseInt(req.params.appId))
+      .query(`
+        SELECT id, action, actor_role, note, created_at
+        FROM application_activity_log
+        WHERE application_id = @appId
+        ORDER BY created_at ASC
+      `);
+
     return res.json({
       success: true,
-      data: { ...result.recordset[0], documents: docs.recordset, exam },
+      data: { ...result.recordset[0], documents: docs.recordset, exam, activity: activityRes.recordset },
     });
   } catch (err) {
     console.error(err);
@@ -302,15 +329,16 @@ router.post('/:collegeId/applications/:appId/request-correction', async (req, re
       return res.status(400).json({ success: false, message: 'Correction can only be requested for submitted or under-review applications.' });
     }
 
-    const mssql = require('mssql');
     await db.request()
-      .input('id',   mssql.Int,      parseInt(req.params.appId))
-      .input('note', mssql.NVarChar, note.trim())
+      .input('id',   mssqlShared.Int,      parseInt(req.params.appId))
+      .input('note', mssqlShared.NVarChar, note.trim())
       .query(`
         UPDATE applications
         SET status = 'correction_requested', correction_note = @note, updated_at = GETDATE(), status_updated_at = GETDATE()
         WHERE id = @id
       `);
+
+    await logActivity(req.params.appId, 'correction_requested', 'college', note.trim());
 
     return res.json({ success: true, message: 'Correction requested. Student has been notified.' });
   } catch (err) {
@@ -319,7 +347,8 @@ router.post('/:collegeId/applications/:appId/request-correction', async (req, re
   }
 });
 
-// ── Scrutiny Accept (submitted/correction_requested → scrutiny_accepted) ─────
+// ── Accept Application (submitted/correction_done → doc_verified) ────────────
+// College accepts the application. Student is notified to visit for doc check.
 router.post('/:collegeId/applications/:appId/approve', async (req, res) => {
   try {
     const appRes = await db.request()
@@ -331,10 +360,10 @@ router.post('/:collegeId/applications/:appId/approve', async (req, res) => {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
     if (!['submitted', 'under_review', 'correction_requested', 'correction_done'].includes(appRes.recordset[0].status)) {
-      return res.status(400).json({ success: false, message: 'Application must be submitted/under_review to accept.' });
+      return res.status(400).json({ success: false, message: 'Application must be under review to accept.' });
     }
 
-    // Hold a seat
+    // Hold a seat in the admission period
     await db.request()
       .input('pid', appRes.recordset[0].admission_period_id)
       .query('UPDATE admission_periods SET filled_seats = filled_seats + 1 WHERE id = @pid AND filled_seats < total_seats');
@@ -343,12 +372,14 @@ router.post('/:collegeId/applications/:appId/approve', async (req, res) => {
       .input('id', parseInt(req.params.appId))
       .query(`
         UPDATE applications
-        SET status = 'scrutiny_accepted', approved_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(),
+        SET status = 'doc_verified', approved_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(),
             correction_note = NULL
         WHERE id = @id
       `);
 
-    return res.json({ success: true, message: 'Scrutiny accepted. Application accepted.' });
+    await logActivity(req.params.appId, 'accepted', 'college', null);
+
+    return res.json({ success: true, message: 'Application accepted. Student has been notified to visit the college.' });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });
@@ -368,7 +399,7 @@ router.post('/:collegeId/applications/:appId/reject', async (req, res) => {
     if (appRes.recordset.length === 0) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
-    if (!['submitted', 'under_review', 'correction_requested', 'correction_done', 'scrutiny_accepted'].includes(appRes.recordset[0].status)) {
+    if (!['submitted', 'under_review', 'correction_requested', 'correction_done', 'doc_verified'].includes(appRes.recordset[0].status)) {
       return res.status(400).json({ success: false, message: 'Application cannot be rejected in current status.' });
     }
 
@@ -381,6 +412,8 @@ router.post('/:collegeId/applications/:appId/reject', async (req, res) => {
         WHERE id = @id
       `);
 
+    await logActivity(req.params.appId, 'rejected', 'college', reason || null);
+
     return res.json({ success: true, message: 'Application rejected.' });
   } catch (err) {
     console.error(err);
@@ -388,60 +421,24 @@ router.post('/:collegeId/applications/:appId/reject', async (req, res) => {
   }
 });
 
-// ── Call for physical doc verification (scrutiny_accepted → doc_verification_pending) ──
-// College selects this student for physical document visit. Can be triggered multiple times
-// (e.g. student didn't come, re-invite). Always sets status to doc_verification_pending.
-router.post('/:collegeId/applications/:appId/call-for-doc-verification', async (req, res) => {
-  try {
-    const appRes = await db.request()
-      .input('id',  parseInt(req.params.appId))
-      .input('col', parseInt(req.params.collegeId))
-      .query('SELECT id, status FROM applications WHERE id=@id AND college_id=@col');
-
-    if (appRes.recordset.length === 0) {
-      return res.status(404).json({ success: false, message: 'Application not found.' });
-    }
-    // Allow from scrutiny_accepted or re-trigger from doc_verification_pending
-    if (!['scrutiny_accepted', 'doc_verification_pending'].includes(appRes.recordset[0].status)) {
-      return res.status(400).json({ success: false, message: 'Application must be scrutiny accepted to call for doc verification.' });
-    }
-
-    await db.request()
-      .input('id', parseInt(req.params.appId))
-      .query(`
-        UPDATE applications
-        SET status = 'doc_verification_pending', updated_at = GETDATE(), status_updated_at = GETDATE()
-        WHERE id = @id
-      `);
-
-    return res.json({ success: true, message: 'Student called for physical document verification.' });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ success: false, message: 'Server error.' });
-  }
-});
-
-// ── Verify-docs alias (kept for backward compat) ─────────────
-router.post('/:collegeId/applications/:appId/verify-docs', async (req, res) => {
-  req.url = req.url.replace('verify-docs', 'call-for-doc-verification');
-  // Forward to call-for-doc-verification
-  const appRes = await db.request()
-    .input('id',  parseInt(req.params.appId))
-    .input('col', parseInt(req.params.collegeId))
-    .query('SELECT id, status FROM applications WHERE id=@id AND college_id=@col');
-  if (!appRes.recordset.length) return res.status(404).json({ success: false, message: 'Not found.' });
-  if (!['scrutiny_accepted', 'doc_verification_pending', 'approved'].includes(appRes.recordset[0].status)) {
-    return res.status(400).json({ success: false, message: 'Invalid status for doc verification.' });
-  }
-  await db.request().input('id', parseInt(req.params.appId)).query(`
-    UPDATE applications SET status = 'doc_verification_pending', updated_at = GETDATE(), status_updated_at = GETDATE() WHERE id = @id
-  `);
-  return res.json({ success: true, message: 'Student called for physical document verification.' });
-});
-
-// ── Confirm admission (after physical doc check) ─────────────
+// ── Confirm after doc visit: set fees and move to confirmed ──────────────────
+// Student visited college. College verifies docs, sets fees, confirms admission.
+// Status: doc_verified → confirmed
 router.post('/:collegeId/applications/:appId/confirm', async (req, res) => {
-  const { document_ids_verified } = req.body; // optional: array of application_documents ids to mark verified
+  const { fee_total_amount, fee_pay_now_amount, document_ids_verified } = req.body;
+
+  const total  = parseFloat(fee_total_amount);
+  const payNow = parseFloat(fee_pay_now_amount);
+
+  if (!total || total <= 0) {
+    return res.status(400).json({ success: false, message: 'Total payable amount is required and must be positive.' });
+  }
+  if (isNaN(payNow) || payNow <= 0) {
+    return res.status(400).json({ success: false, message: 'Amount to pay now must be a positive number.' });
+  }
+  if (payNow > total + 0.01) {
+    return res.status(400).json({ success: false, message: 'Amount to pay now cannot exceed the total payable amount.' });
+  }
 
   try {
     const appRes = await db.request()
@@ -452,11 +449,11 @@ router.post('/:collegeId/applications/:appId/confirm', async (req, res) => {
     if (appRes.recordset.length === 0) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
-    if (appRes.recordset[0].status !== 'doc_verification_pending') {
-      return res.status(400).json({ success: false, message: 'Application must be in doc_verification_pending status to confirm.' });
+    if (appRes.recordset[0].status !== 'doc_verified') {
+      return res.status(400).json({ success: false, message: 'Application must be in doc_verified status to confirm.' });
     }
 
-    // Mark submitted documents as physically verified
+    // Mark documents as physically verified
     if (Array.isArray(document_ids_verified) && document_ids_verified.length > 0) {
       for (const docId of document_ids_verified) {
         await db.request()
@@ -471,14 +468,19 @@ router.post('/:collegeId/applications/:appId/confirm', async (req, res) => {
     }
 
     await db.request()
-      .input('id', parseInt(req.params.appId))
+      .input('id',    mssqlShared.Int,     parseInt(req.params.appId))
+      .input('total', mssqlShared.Decimal, total)
+      .input('now',   mssqlShared.Decimal, payNow)
       .query(`
         UPDATE applications
-        SET status = 'confirmed', confirmed_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE()
+        SET status = 'confirmed', confirmed_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(),
+            fee_total_amount = @total, fee_pay_now_amount = @now
         WHERE id = @id
       `);
 
-    return res.json({ success: true, message: 'Admission confirmed. Student can now pay college fee.' });
+    await logActivity(req.params.appId, 'confirmed', 'college', `Total fee: ₹${total}, Pay now: ₹${payNow}`);
+
+    return res.json({ success: true, message: 'Admission confirmed. Student can now pay the college fee.' });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });
@@ -511,8 +513,8 @@ router.post('/:collegeId/applications/:appId/set-fee', async (req, res) => {
     if (!appRes.recordset.length) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
-    if (!['confirmed', 'fees_paid'].includes(appRes.recordset[0].status)) {
-      return res.status(400).json({ success: false, message: 'Fee can only be set for confirmed applications.' });
+    if (!['doc_verified', 'confirmed', 'fees_paid'].includes(appRes.recordset[0].status)) {
+      return res.status(400).json({ success: false, message: 'Fee can only be set for accepted or confirmed applications.' });
     }
 
     await db.request()
@@ -548,8 +550,8 @@ router.post('/:collegeId/applications/:appId/cancel', async (req, res) => {
 
     const { status, admission_period_id } = appRes.recordset[0];
 
-    // Free the seat if one was held (scrutiny_accepted or later)
-    if (['scrutiny_accepted', 'doc_verification_pending', 'confirmed'].includes(status)) {
+    // Free the seat if one was held (doc_verified or later)
+    if (['doc_verified', 'scrutiny_accepted', 'doc_verification_pending', 'confirmed'].includes(status)) {
       await db.request()
         .input('pid', admission_period_id)
         .query('UPDATE admission_periods SET filled_seats = filled_seats - 1 WHERE id = @pid AND filled_seats > 0');
@@ -564,7 +566,107 @@ router.post('/:collegeId/applications/:appId/cancel', async (req, res) => {
         WHERE id = @id
       `);
 
+    await logActivity(req.params.appId, 'cancelled', 'college', reason || null);
+
     return res.json({ success: true, message: 'Application cancelled and seat freed.' });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── Record offline (cash) college fee payment ────────────────
+// POST /:collegeId/applications/:appId/record-cash-payment
+// body: { amount, note? }
+router.post('/:collegeId/applications/:appId/record-cash-payment', async (req, res) => {
+  const { amount, note } = req.body;
+  const amt = parseFloat(amount);
+
+  if (!amt || amt <= 0) {
+    return res.status(400).json({ success: false, message: 'Amount must be a positive number.' });
+  }
+
+  const appId    = parseInt(req.params.appId);
+  const collegeId = parseInt(req.params.collegeId);
+
+  try {
+    const appRes = await db.request()
+      .input('id',  mssqlShared.Int, appId)
+      .input('col', mssqlShared.Int, collegeId)
+      .query(`
+        SELECT id, status, fee_total_amount
+        FROM applications
+        WHERE id = @id AND college_id = @col
+      `);
+
+    if (!appRes.recordset.length) {
+      return res.status(404).json({ success: false, message: 'Application not found.' });
+    }
+    const app = appRes.recordset[0];
+    if (!['confirmed', 'fees_paid'].includes(app.status)) {
+      return res.status(400).json({ success: false, message: 'Application must be in confirmed or fees_paid status.' });
+    }
+
+    const totalFee = parseFloat(app.fee_total_amount) || 0;
+
+    // Check already paid
+    const paidRes = await db.request()
+      .input('appId', mssqlShared.Int, appId)
+      .query(`
+        SELECT ISNULL(SUM(amount), 0) AS total_paid
+        FROM payments
+        WHERE application_id = @appId AND payment_type = 'college_fee' AND status = 'success'
+      `);
+    const alreadyPaid = parseFloat(paidRes.recordset[0].total_paid) || 0;
+    const remaining   = Math.max(0, totalFee - alreadyPaid);
+
+    if (remaining <= 0) {
+      return res.status(400).json({ success: false, message: 'Fee has already been fully paid.' });
+    }
+    if (amt > remaining + 0.01) {
+      return res.status(400).json({ success: false, message: `Amount (₹${amt}) exceeds remaining balance (₹${remaining}).` });
+    }
+
+    // Record payment
+    await db.request()
+      .input('appId',  mssqlShared.Int,      appId)
+      .input('amount', mssqlShared.Decimal,   amt)
+      .input('note',   mssqlShared.NVarChar,  note || null)
+      .query(`
+        INSERT INTO payments (application_id, payment_type, amount, status,
+          razorpay_order_id, razorpay_payment_id, completed_at)
+        VALUES (@appId, 'college_fee', @amount, 'success',
+          CONCAT('CASH-', CAST(@appId AS NVARCHAR), '-', CAST(CHECKSUM(NEWID()) AS NVARCHAR)),
+          CONCAT('CASH-', FORMAT(GETDATE(),'yyyyMMddHHmmss')),
+          GETDATE())
+      `);
+
+    const newTotalPaid = alreadyPaid + amt;
+    const allPaid      = totalFee > 0 && newTotalPaid >= totalFee - 0.01;
+
+    if (allPaid) {
+      await db.request()
+        .input('id', mssqlShared.Int, appId)
+        .query(`
+          UPDATE applications
+          SET status = 'fees_paid', college_fee_paid = 1, updated_at = GETDATE(), status_updated_at = GETDATE()
+          WHERE id = @id
+        `);
+    }
+
+    const noteText = note ? ` — ${note}` : '';
+    if (allPaid) {
+      await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${amt.toLocaleString('en-IN')} (full)${noteText}`);
+    } else {
+      const newRemaining = totalFee - newTotalPaid;
+      await logActivity(appId, 'fee_instalment_paid', 'college', `Cash: ₹${amt.toLocaleString('en-IN')}, ₹${newRemaining.toLocaleString('en-IN')} remaining${noteText}`);
+    }
+
+    return res.json({
+      success:    true,
+      message:    allPaid ? 'Fee fully paid!' : `₹${amt.toLocaleString('en-IN')} recorded. ₹${(totalFee - newTotalPaid).toLocaleString('en-IN')} remaining.`,
+      data: { all_paid: allPaid, total_paid: newTotalPaid, remaining: Math.max(0, totalFee - newTotalPaid) },
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });

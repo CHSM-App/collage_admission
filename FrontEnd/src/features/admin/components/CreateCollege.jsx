@@ -27,13 +27,19 @@ export default function CreateCollege({ onCreated }) {
   const [error, setError]     = useState('')
 
   function handleChange(e) {
-    setForm(f => ({ ...f, [e.target.name]: e.target.value }))
+    let value = e.target.value
+    if (e.target.name === 'phone') value = value.replace(/\D/g, '').slice(0, 10)
+    setForm(f => ({ ...f, [e.target.name]: value }))
     setError('')
     setSuccess(null)
   }
 
   async function handleSubmit(e) {
     e.preventDefault()
+    if (form.phone && form.phone.length !== 10) {
+      setError('Phone number must be exactly 10 digits.')
+      return
+    }
     setSaving(true)
     setError('')
     setSuccess(null)
@@ -78,7 +84,8 @@ export default function CreateCollege({ onCreated }) {
             </Field>
             <Field label="Phone">
               <input name="phone" value={form.phone} onChange={handleChange}
-                placeholder="02366-262XXX" className={inputCls} />
+                placeholder="e.g. 9876543210" inputMode="numeric" pattern="[0-9]{10}"
+                maxLength={10} className={inputCls} />
             </Field>
           </div>
           <Field label="Address">

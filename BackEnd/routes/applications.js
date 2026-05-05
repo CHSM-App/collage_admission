@@ -12,6 +12,18 @@
 const express = require('express');
 const router  = express.Router();
 const db      = require('./db');
+const mssql   = require('mssql');
+
+async function logActivity(appId, action, actorRole, note = null) {
+  try {
+    await db.request()
+      .input('appId',     mssql.Int,     parseInt(appId))
+      .input('action',    mssql.NVarChar, action)
+      .input('actorRole', mssql.NVarChar, actorRole)
+      .input('note',      mssql.NVarChar, note || null)
+      .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
+  } catch (e) { console.warn('logActivity failed:', e.message); }
+}
 
 // ── Helper: generate registration number ────────────────────
 async function generateRegNumber(collegeId, courseId, year, academicYear) {
@@ -45,6 +57,7 @@ router.get('/', async (req, res) => {
         a.status, a.roll_number, a.submitted_at, a.created_at,
         a.rejection_reason, a.cancellation_reason, a.correction_note,
         a.application_fee_paid, a.college_fee_paid,
+        a.fee_total_amount, a.fee_pay_now_amount,
         c.id   AS college_id,   c.name  AS college_name,  c.city AS college_city,
         a.course_id,    COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
         COALESCE(c.application_fee, 0) AS application_fee, ap.total_seats, ap.filled_seats
@@ -309,6 +322,8 @@ router.post('/:id/submit', async (req, res) => {
         WHERE id = @id
       `);
 
+    await logActivity(appId, 'submitted', 'student', null);
+
     return res.json({
       success: true,
       message: 'Application submitted successfully.',
@@ -342,7 +357,7 @@ router.post('/:id/pay-college-fee', async (req, res) => {
 
     const app = appRes.recordset[0];
 
-    if (app.status !== 'confirmed') {
+    if (!['confirmed', 'fees_paid'].includes(app.status)) {
       return res.status(400).json({ success: false, message: 'Application must be confirmed before paying college fee.' });
     }
 
@@ -385,6 +400,8 @@ router.post('/:id/pay-college-fee', async (req, res) => {
             status_updated_at = GETDATE()
         WHERE id = @id
       `);
+
+    await logActivity(appId, 'fees_paid', 'student', null);
 
     return res.json({ success: true, message: 'College fee paid successfully.' });
   } catch (err) {
@@ -485,6 +502,8 @@ router.post('/:id/subjects', async (req, res) => {
         SET status = 'enrolled', enrolled_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE()
         WHERE id = @id
       `);
+
+    await logActivity(appId, 'enrolled', 'student', null);
 
     return res.json({ success: true, message: 'Subjects selected. Enrollment complete.' });
   } catch (err) {

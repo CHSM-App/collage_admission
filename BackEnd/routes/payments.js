@@ -21,6 +21,17 @@ const db       = require('./db');
 const mssql    = require('mssql');
 const feeSvc   = require('../services/FeeDeterminationService');
 
+async function logActivity(appId, action, actorRole, note = null) {
+  try {
+    await db.request()
+      .input('appId',     mssql.Int,     parseInt(appId))
+      .input('action',    mssql.NVarChar, action)
+      .input('actorRole', mssql.NVarChar, actorRole)
+      .input('note',      mssql.NVarChar, note || null)
+      .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
+  } catch (e) { console.warn('logActivity failed:', e.message); }
+}
+
 const razorpay = new Razorpay({
   key_id:     process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
@@ -433,6 +444,8 @@ router.post('/verify', async (req, res) => {
           WHERE id = @id
         `);
 
+      await logActivity(appId, 'submitted', 'student', null);
+
       return res.json({
         success: true,
         message: 'Application fee paid. Application submitted.',
@@ -482,6 +495,9 @@ router.post('/verify', async (req, res) => {
             WHERE id = @id
           `);
       }
+
+      if (allPaid) await logActivity(appId, 'fees_paid', 'student', `₹${totalPaid.toLocaleString('en-IN')} paid`);
+      else         await logActivity(appId, 'fee_instalment_paid', 'student', `₹${amount.toLocaleString('en-IN')} paid, ₹${(totalFee - totalPaid).toLocaleString('en-IN')} remaining`);
 
       return res.json({
         success: true,

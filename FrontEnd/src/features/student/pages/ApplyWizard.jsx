@@ -91,6 +91,7 @@ function reducer(state, action) {
         maxStep:             action.currentStep,
         appStatus:           action.appStatus,
         applicationFeePaid:  action.applicationFeePaid,
+        correctionNote:      action.correctionNote || null,
         loading:             false,
       }
     case 'SET_DATA':
@@ -161,8 +162,10 @@ export default function ApplyWizard() {
         const requiredDocs = rdRes.data.data || []
 
         // Build subjects from existing exam
+        // For SY/TY with no saved exam yet, pre-fill college name
+        const defaultCollegeName = app.year_of_study > 1 ? (app.college_name || '') : ''
         const examData = previous_exam ? {
-          board_or_college_name:      previous_exam.board_or_college_name || '',
+          board_or_college_name:      previous_exam.board_or_college_name || defaultCollegeName,
           school_or_college_address:  previous_exam.school_or_college_address || '',
           seat_number:                previous_exam.seat_number || '',
           prn_or_seat:                previous_exam.prn_or_seat || '',
@@ -177,7 +180,7 @@ export default function ApplyWizard() {
                 marks_max:      s.marks_max,
               }))
             : [{ subject_name: '', marks_obtained: '', marks_max: '' }],
-        } : {}
+        } : { board_or_college_name: defaultCollegeName }
 
         dispatch({
           type: 'SET_DATA',
@@ -191,7 +194,7 @@ export default function ApplyWizard() {
         })
 
         const resumeStep = app.current_step || 1
-        dispatch({ type: 'INIT_APP', applicationId: appId, currentStep: resumeStep, appStatus: app.status, applicationFeePaid: !!app.application_fee_paid })
+        dispatch({ type: 'INIT_APP', applicationId: appId, currentStep: resumeStep, appStatus: app.status, applicationFeePaid: !!app.application_fee_paid, correctionNote: app.correction_note || null })
       } catch (err) {
         dispatch({ type: 'SET_GLOBAL_ERR', message: err?.response?.data?.message || 'Failed to load application.' })
         dispatch({ type: 'SET_LOADING', value: false })
@@ -241,7 +244,7 @@ export default function ApplyWizard() {
     }
   }
 
-  const { data, currentStep, loading, saving, errors, globalError, applicationId, appStatus, applicationFeePaid } = state
+  const { data, currentStep, loading, saving, errors, globalError, applicationId, appStatus, applicationFeePaid, correctionNote } = state
   const readOnly = !!appStatus && !EDITABLE_STATUSES.includes(appStatus)
 
   if (loading) {
@@ -306,7 +309,10 @@ export default function ApplyWizard() {
         {appStatus === 'correction_requested' && !readOnly && (
           <div className="rounded-lg border border-orange-300 bg-orange-50 px-4 py-3 text-sm text-orange-800">
             <p className="font-semibold">The college has requested corrections to your application.</p>
-            <p className="mt-0.5">Please make the required changes and resubmit.</p>
+            {correctionNote && (
+              <p className="mt-2 text-orange-900 whitespace-pre-wrap">{correctionNote}</p>
+            )}
+            <p className="mt-1.5">Please make the required changes and resubmit.</p>
           </div>
         )}
 
