@@ -29,7 +29,7 @@ async function generateCollegeCode() {
 
 // Create a new college (admin onboarding)
 router.post('/', async (req, res) => {
-  const { name, address, city, phone, email, admin_email, admin_password, college_code } = req.body
+  const { name, address, city, phone, email, admin_email, admin_password, college_code, application_fee } = req.body
 
   if (!name || !email || !admin_email || !admin_password) {
     return res.status(400).json({ success: false, message: 'name, email, admin_email and admin_password are required.' })
@@ -62,18 +62,19 @@ router.post('/', async (req, res) => {
     }
 
     const result = await db.request()
-      .input('name',  mssql.NVarChar, name)
-      .input('addr',  mssql.NVarChar, address    || null)
-      .input('city',  mssql.NVarChar, city       || null)
-      .input('phone', mssql.NVarChar, phone      || null)
-      .input('email', mssql.NVarChar, email)
-      .input('ae',    mssql.NVarChar, admin_email)
-      .input('hash',  mssql.NVarChar, hash)
-      .input('code',  mssql.NVarChar, code)
+      .input('name',  mssql.NVarChar,  name)
+      .input('addr',  mssql.NVarChar,  address    || null)
+      .input('city',  mssql.NVarChar,  city       || null)
+      .input('phone', mssql.NVarChar,  phone      || null)
+      .input('email', mssql.NVarChar,  email)
+      .input('ae',    mssql.NVarChar,  admin_email)
+      .input('hash',  mssql.NVarChar,  hash)
+      .input('code',  mssql.NVarChar,  code)
+      .input('fee',   mssql.Decimal,   application_fee ? parseFloat(application_fee) : null)
       .query(`
-        INSERT INTO colleges (name, address, city, phone, email, admin_email, admin_password_hash, college_code)
+        INSERT INTO colleges (name, address, city, phone, email, admin_email, admin_password_hash, college_code, application_fee)
         OUTPUT INSERTED.id, INSERTED.name, INSERTED.admin_email, INSERTED.college_code
-        VALUES (@name, @addr, @city, @phone, @email, @ae, @hash, @code)
+        VALUES (@name, @addr, @city, @phone, @email, @ae, @hash, @code, @fee)
       `)
 
     const college = result.recordset[0]

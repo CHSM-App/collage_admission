@@ -284,10 +284,11 @@ router.post('/create-order', async (req, res) => {
         SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study, a.academic_year,
                a.admission_period_id, a.student_id,
                a.fee_total_amount, a.fee_pay_now_amount,
-               ap.application_fee,
+               COALESCE(c.application_fee, 0) AS application_fee,
                s.full_name AS student_name, s.email AS student_email, s.phone AS student_phone
         FROM applications a
         JOIN admission_periods ap ON ap.id = a.admission_period_id
+        JOIN colleges c ON c.id = a.college_id
         JOIN students s ON s.id = a.student_id
         WHERE a.id = @id
       `);
@@ -404,9 +405,10 @@ router.post('/verify', async (req, res) => {
       .query(`
         SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study, a.academic_year,
                a.admission_period_id, a.fee_total_amount, a.fee_pay_now_amount,
-               ap.application_fee
+               COALESCE(c.application_fee, 0) AS application_fee
         FROM applications a
         JOIN admission_periods ap ON ap.id = a.admission_period_id
+        JOIN colleges c ON c.id = a.college_id
         WHERE a.id = @id
       `);
     if (!appRes.recordset.length) {

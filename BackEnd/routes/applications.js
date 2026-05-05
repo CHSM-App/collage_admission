@@ -47,7 +47,7 @@ router.get('/', async (req, res) => {
         a.application_fee_paid, a.college_fee_paid,
         c.id   AS college_id,   c.name  AS college_name,  c.city AS college_city,
         a.course_id,    COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
-        ap.application_fee, ap.total_seats, ap.filled_seats
+        COALESCE(c.application_fee, 0) AS application_fee, ap.total_seats, ap.filled_seats
       FROM applications a
       JOIN colleges        c  ON c.id       = a.college_id
       LEFT JOIN faculty_master cr ON cr.code_no = a.course_id AND cr.college_id = a.college_id
@@ -83,7 +83,7 @@ router.get('/:id', async (req, res) => {
           s.phone, s.dob, s.gender, s.address, s.city, s.category,
           c.name  AS college_name,  c.city   AS college_city,
           COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
-          ap.application_fee, ap.total_seats, ap.filled_seats,
+          COALESCE(c.application_fee, 0) AS application_fee, ap.total_seats, ap.filled_seats,
           ap.start_date, ap.end_date
         FROM applications a
         JOIN students       s  ON s.id       = a.student_id
@@ -237,9 +237,10 @@ router.delete('/:id', async (req, res) => {
     }
 
     // Remove child rows first
-    await db.request().input('appId', appId).query('DELETE FROM application_documents WHERE application_id = @appId');
-    await db.request().input('appId', appId).query('DELETE FROM application_subjects  WHERE application_id = @appId');
-    await db.request().input('appId', appId).query('DELETE FROM applications          WHERE id = @appId');
+    await db.request().input('appId', appId).query('DELETE FROM application_documents     WHERE application_id = @appId');
+    await db.request().input('appId', appId).query('DELETE FROM application_subjects      WHERE application_id = @appId');
+    await db.request().input('appId', appId).query('DELETE FROM application_previous_exam WHERE application_id = @appId');
+    await db.request().input('appId', appId).query('DELETE FROM applications              WHERE id = @appId');
 
     return res.json({ success: true, message: 'Draft application deleted.' });
   } catch (err) {
@@ -260,9 +261,10 @@ router.post('/:id/submit', async (req, res) => {
       .query(`
         SELECT a.id, a.status, a.student_id, a.college_id, a.course_id,
                a.year_of_study, a.academic_year, a.admission_period_id,
-               ap.application_fee
+               COALESCE(c.application_fee, 0) AS application_fee
         FROM applications a
         JOIN admission_periods ap ON ap.id = a.admission_period_id
+        JOIN colleges c ON c.id = a.college_id
         WHERE a.id = @id
       `);
 

@@ -95,8 +95,8 @@ router.post('/applications/init', async (req, res) => {
     // Always use the year from the admission period — never trust client or auto-detect
     yr = p.year_of_study;
 
-    // Re-check for existing draft with the correct year (may have changed from auto-detect)
-    const existingWithCorrectYear = await db.request()
+    // Check for any existing application for this course+year (any status, any period)
+    const existingAny = await db.request()
       .input('sid', mssql.Int, parseInt(student_id))
       .input('col', mssql.Int, parseInt(college_id))
       .input('crs', mssql.Int, parseInt(course_id))
@@ -106,43 +106,32 @@ router.post('/applications/init', async (req, res) => {
         SELECT id, status, current_step FROM applications
         WHERE student_id = @sid AND college_id = @col AND course_id = @crs
           AND year_of_study = @yr AND academic_year = @ay
-          AND status = 'draft'
       `);
 
-    if (existingWithCorrectYear.recordset.length > 0) {
-      return res.json({
-        success: true,
-        data: {
-          application_id: existingWithCorrectYear.recordset[0].id,
-          year_of_study:  yr,
-          current_step:   existingWithCorrectYear.recordset[0].current_step || 1,
-          resumed: true,
-        },
-      });
+    if (existingAny.recordset.length > 0) {
+      const existing = existingAny.recordset[0];
+      // Resume an existing draft
+      if (existing.status === 'draft') {
+        return res.json({
+          success: true,
+          data: {
+            application_id: existing.id,
+            year_of_study:  yr,
+            current_step:   existing.current_step || 1,
+            resumed: true,
+          },
+        });
+      }
+      // Block if active application already exists
+      if (!['cancelled', 'rejected'].includes(existing.status)) {
+        return res.status(409).json({
+          success: false,
+          message: 'You have already applied for this course at this college. Applying again for the same course is not allowed.',
+        });
+      }
     }
 
-    // Block if an active (non-draft, non-cancelled, non-rejected) application already exists
-    const activeCheck = await db.request()
-      .input('sid', mssql.Int, parseInt(student_id))
-      .input('col', mssql.Int, parseInt(college_id))
-      .input('crs', mssql.Int, parseInt(course_id))
-      .input('yr',  mssql.Int, yr)
-      .input('ay',  mssql.NVarChar, academic_year)
-      .query(`
-        SELECT id, status FROM applications
-        WHERE student_id = @sid AND college_id = @col AND course_id = @crs
-          AND year_of_study = @yr AND academic_year = @ay
-          AND status NOT IN ('draft','cancelled','rejected')
-      `);
-
-    if (activeCheck.recordset.length > 0) {
-      return res.status(409).json({
-        success: false,
-        message: 'You have already applied for this course at this college. Applying again for the same course is not allowed.',
-      });
-    }
-
-    // Create draft
+    // Create draft — use MERGE to avoid race-condition duplicate inserts
     const result = await db.request()
       .input('sid',  mssql.Int, parseInt(student_id))
       .input('col',  mssql.Int, parseInt(college_id))
@@ -151,12 +140,47 @@ router.post('/applications/init', async (req, res) => {
       .input('ay',   mssql.NVarChar, academic_year)
       .input('apid', mssql.Int, parseInt(admission_period_id))
       .query(`
-        INSERT INTO applications
-          (student_id, college_id, course_id, year_of_study, academic_year,
-           admission_period_id, status, current_step)
-        OUTPUT INSERTED.id
-        VALUES (@sid, @col, @crs, @yr, @ay, @apid, 'draft', 1)
+        MERGE applications AS target
+        USING (SELECT @sid AS student_id, @col AS college_id, @crs AS course_id,
+                      @yr AS year_of_study, @ay AS academic_year) AS src
+          ON  target.student_id    = src.student_id
+          AND target.college_id    = src.college_id
+          AND target.course_id     = src.course_id
+          AND target.year_of_study = src.year_of_study
+          AND target.academic_year = src.academic_year
+          AND target.status        = 'draft'
+        WHEN NOT MATCHED THEN
+          INSERT (student_id, college_id, course_id, year_of_study, academic_year,
+                  admission_period_id, status, current_step)
+          VALUES (@sid, @col, @crs, @yr, @ay, @apid, 'draft', 1)
+        OUTPUT INSERTED.id, $action AS merge_action;
       `);
+
+    // If MERGE matched an existing draft (no INSERT happened), fetch it
+    if (!result.recordset.length || result.recordset[0].merge_action !== 'INSERT') {
+      const existing2 = await db.request()
+        .input('sid', mssql.Int, parseInt(student_id))
+        .input('col', mssql.Int, parseInt(college_id))
+        .input('crs', mssql.Int, parseInt(course_id))
+        .input('yr',  mssql.Int, yr)
+        .input('ay',  mssql.NVarChar, academic_year)
+        .query(`
+          SELECT id, current_step FROM applications
+          WHERE student_id=@sid AND college_id=@col AND course_id=@crs
+            AND year_of_study=@yr AND academic_year=@ay AND status='draft'
+        `);
+      if (existing2.recordset.length) {
+        return res.json({
+          success: true,
+          data: {
+            application_id: existing2.recordset[0].id,
+            year_of_study:  yr,
+            current_step:   existing2.recordset[0].current_step || 1,
+            resumed: true,
+          },
+        });
+      }
+    }
 
     return res.status(201).json({
       success: true,
@@ -168,6 +192,33 @@ router.post('/applications/init', async (req, res) => {
       },
     });
   } catch (err) {
+    // Gracefully handle duplicate-key race condition
+    if (err.number === 2601 || err.number === 2627) {
+      try {
+        const existing3 = await db.request()
+          .input('sid', mssql.Int, parseInt(student_id))
+          .input('col', mssql.Int, parseInt(college_id))
+          .input('crs', mssql.Int, parseInt(course_id))
+          .input('ay',  mssql.NVarChar, academic_year)
+          .query(`
+            SELECT id, year_of_study, current_step FROM applications
+            WHERE student_id=@sid AND college_id=@col AND course_id=@crs
+              AND academic_year=@ay AND status='draft'
+          `);
+        if (existing3.recordset.length) {
+          const r = existing3.recordset[0];
+          return res.json({
+            success: true,
+            data: {
+              application_id: r.id,
+              year_of_study:  r.year_of_study,
+              current_step:   r.current_step || 1,
+              resumed: true,
+            },
+          });
+        }
+      } catch (_) { /* fall through */ }
+    }
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
@@ -943,9 +994,9 @@ router.get('/required-documents', async (req, res) => {
       .query(`
         SELECT rd.id, rd.document_type_id, rd.is_mandatory,
                dt.name AS document_name, dt.description
-        FROM required_documents rd
+        FROM college_required_documents rd
         JOIN document_types dt ON dt.id = rd.document_type_id
-        WHERE rd.college_id = @col AND rd.course_id = @crs AND rd.year_of_study = @yr
+        WHERE rd.college_id = @col AND rd.faculty_master_id = @crs AND rd.year_of_study = @yr
         ORDER BY rd.is_mandatory DESC, dt.name
       `);
 

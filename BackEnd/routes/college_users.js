@@ -27,6 +27,7 @@ const mssql   = require('mssql');
 const ALL_PERMISSIONS = [
   'submit_application',
   'review_application',
+  'edit_application',
   'upload_documents',
   'review_documents',
   'assign_subjects',
@@ -34,11 +35,49 @@ const ALL_PERMISSIONS = [
   'masters',
 ];
 
+const NAV_ITEMS = [
+  'overview',
+  'periods',
+  'inbox',
+  'add-application',
+  'rollnumbers',
+  'master-faculty',
+  'master-bank',
+  'master-course',
+  'master-group',
+  'master-division',
+  'master-fees',
+  'master-documents',
+];
+
+// ── PUT /admin/colleges/:id ──────────────────────────────────
+router.put('/colleges/:id', async (req, res) => {
+  const { application_fee } = req.body;
+  const id = parseInt(req.params.id);
+  if (application_fee === undefined || application_fee === null || application_fee === '') {
+    return res.status(400).json({ success: false, message: 'application_fee is required.' });
+  }
+  const fee = parseFloat(application_fee);
+  if (isNaN(fee) || fee < 0) {
+    return res.status(400).json({ success: false, message: 'application_fee must be a non-negative number.' });
+  }
+  try {
+    await db.request()
+      .input('fee', mssql.Decimal, fee)
+      .input('id',  mssql.Int,     id)
+      .query(`UPDATE colleges SET application_fee = @fee WHERE id = @id`);
+    return res.json({ success: true, message: 'Application fee updated.' });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
 // ── GET /admin/colleges ──────────────────────────────────────
 router.get('/colleges', async (req, res) => {
   try {
     const result = await db.request().query(`
-      SELECT c.id, c.name, c.city, c.email, c.college_code,
+      SELECT c.id, c.name, c.city, c.email, c.college_code, c.application_fee,
              (SELECT COUNT(*) FROM college_users cu WHERE cu.college_id = c.id AND cu.is_active = 1) AS active_users,
              (SELECT COUNT(*) FROM college_roles cr WHERE cr.college_id = c.id) AS roles_count
       FROM colleges c
@@ -88,10 +127,10 @@ router.get('/colleges/:collegeId/roles', async (req, res) => {
 });
 
 // ── POST /admin/colleges/:collegeId/roles ────────────────────
-// body: { role_name, permissions: { submit_application: true, review_application: false, ... } }
+// body: { role_name, permissions: { submit_application: true, ... }, nav_visibility: { inbox: true, ... } }
 router.post('/colleges/:collegeId/roles', async (req, res) => {
   const collegeId = parseInt(req.params.collegeId);
-  const { role_name, permissions = {} } = req.body;
+  const { role_name, permissions = {}, nav_visibility = {} } = req.body;
 
   if (!role_name?.trim()) {
     return res.status(400).json({ success: false, message: 'role_name is required.' });
@@ -119,6 +158,16 @@ router.post('/colleges/:collegeId/roles', async (req, res) => {
         .query(`INSERT INTO college_role_permissions (role_id, permission, can_write) VALUES (@rid, @perm, @write)`);
     }
 
+    // Insert nav visibility
+    for (const key of NAV_ITEMS) {
+      const visible = nav_visibility[key] !== false ? 1 : 0;
+      await db.request()
+        .input('rid',   mssql.Int,      roleId)
+        .input('perm',  mssql.NVarChar, `nav:${key}`)
+        .input('write', mssql.Bit,      visible)
+        .query(`INSERT INTO college_role_permissions (role_id, permission, can_write) VALUES (@rid, @perm, @write)`);
+    }
+
     return res.status(201).json({ success: true, data: { id: roleId, role_name: role_name.trim() } });
   } catch (err) {
     if (err.number === 2627 || err.number === 2601) {
@@ -132,7 +181,7 @@ router.post('/colleges/:collegeId/roles', async (req, res) => {
 // ── PUT /admin/colleges/:collegeId/roles/:roleId ─────────────
 router.put('/colleges/:collegeId/roles/:roleId', async (req, res) => {
   const roleId = parseInt(req.params.roleId);
-  const { role_name, permissions = {} } = req.body;
+  const { role_name, permissions = {}, nav_visibility = {} } = req.body;
 
   try {
     if (role_name?.trim()) {
@@ -149,6 +198,22 @@ router.put('/colleges/:collegeId/roles/:roleId', async (req, res) => {
         .input('rid',   mssql.Int,      roleId)
         .input('perm',  mssql.NVarChar, perm)
         .input('write', mssql.Bit,      canWrite)
+        .query(`
+          MERGE college_role_permissions AS target
+          USING (SELECT @rid AS role_id, @perm AS permission) AS src
+            ON target.role_id = src.role_id AND target.permission = src.permission
+          WHEN MATCHED THEN UPDATE SET can_write = @write
+          WHEN NOT MATCHED THEN INSERT (role_id, permission, can_write) VALUES (@rid, @perm, @write);
+        `);
+    }
+
+    // Upsert nav visibility
+    for (const key of NAV_ITEMS) {
+      const visible = nav_visibility[key] !== false ? 1 : 0;
+      await db.request()
+        .input('rid',   mssql.Int,      roleId)
+        .input('perm',  mssql.NVarChar, `nav:${key}`)
+        .input('write', mssql.Bit,      visible)
         .query(`
           MERGE college_role_permissions AS target
           USING (SELECT @rid AS role_id, @perm AS permission) AS src

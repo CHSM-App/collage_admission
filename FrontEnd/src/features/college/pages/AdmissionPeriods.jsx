@@ -8,13 +8,14 @@ const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
 export default function AdmissionPeriods({ collegeId }) {
   const { canWrite } = usePermissions()
   const rw = canWrite('masters')
-  const [periods, setPeriods]   = useState([])
-  const [courses, setCourses]   = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [showForm, setShowForm] = useState(false)
-  const [saving, setSaving]     = useState(false)
-  const [error, setError]       = useState('')
-  const [form, setForm]         = useState({
+  const [periods, setPeriods]       = useState([])
+  const [courses, setCourses]       = useState([])
+  const [collegeFee, setCollegeFee] = useState(null)
+  const [loading, setLoading]       = useState(true)
+  const [showForm, setShowForm]     = useState(false)
+  const [saving, setSaving]         = useState(false)
+  const [error, setError]           = useState('')
+  const [form, setForm]             = useState({
     course_id: '', year_of_study: '1', academic_year: '2026-27',
     start_date: '', end_date: '', total_seats: '',
   })
@@ -29,10 +30,13 @@ export default function AdmissionPeriods({ collegeId }) {
     Promise.all([
       api.get(`college-admin/${collegeId}/admission-periods`),
       api.get(`masters/${collegeId}/faculty`),
+      api.get(`admin/colleges`),
     ])
-      .then(([pRes, cRes]) => {
+      .then(([pRes, cRes, colRes]) => {
         setPeriods(pRes.data.data || [])
         setCourses((cRes.data.data || []).filter(f => f.is_active))
+        const col = (colRes.data.data || []).find(c => String(c.id) === String(collegeId))
+        setCollegeFee(col?.application_fee ?? null)
       })
       .catch(() => setError('Failed to load data.'))
       .finally(() => setLoading(false))
@@ -152,6 +156,12 @@ export default function AdmissionPeriods({ collegeId }) {
           <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">College portal</p>
           <h1 className="mt-2 text-3xl font-bold text-slate-950">Admission Periods</h1>
           <p className="mt-1 text-slate-600">Control when students can apply for each course and year.</p>
+          {collegeFee !== null && (
+            <p className="mt-1 text-sm text-slate-500">
+              Application fee: <span className="font-semibold text-slate-800">₹{Number(collegeFee).toLocaleString('en-IN')}</span>
+              <span className="text-xs text-slate-400 ml-1">(set by admin — applied to all periods)</span>
+            </p>
+          )}
         </div>
         {rw && <Button onClick={() => { setShowForm(v => !v); setError('') }}>
           {showForm ? 'Cancel' : '+ New Period'}
@@ -236,8 +246,7 @@ export default function AdmissionPeriods({ collegeId }) {
                   <p className="text-sm text-slate-400">
                     {new Date(p.start_date).toLocaleDateString('en-IN')} →{' '}
                     {new Date(p.end_date).toLocaleDateString('en-IN')} ·
-                    Seats: {p.filled_seats}/{p.total_seats} ·
-                    App fee: ₹{Number(p.application_fee).toLocaleString('en-IN')}
+                    Seats: {p.filled_seats}/{p.total_seats}
                   </p>
                 </div>
 

@@ -4,7 +4,7 @@ import Button from '../../../shared/components/Button.jsx'
 
 const EMPTY = {
   name: '', address: '', city: '', phone: '',
-  email: '', admin_email: '', admin_password: '', college_code: '',
+  email: '', admin_email: '', admin_password: '', college_code: '', application_fee: '',
 }
 
 const inputCls = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500'
@@ -96,6 +96,12 @@ export default function CreateCollege({ onCreated }) {
               maxLength={20}
               className={`${inputCls} font-mono tracking-widest uppercase`} />
             <p className="mt-1 text-xs text-slate-400">This code is shared with students so they can find the college.</p>
+          </Field>
+          <Field label="Application Fee (₹)" required>
+            <input name="application_fee" type="number" min="0" step="1"
+              value={form.application_fee} onChange={handleChange} required
+              placeholder="e.g. 500" className={inputCls} />
+            <p className="mt-1 text-xs text-slate-400">Charged to students when they submit an application. Applied to all admission periods.</p>
           </Field>
         </fieldset>
 

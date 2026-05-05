@@ -15,6 +15,23 @@ const ALL_PERMISSIONS = [
 
 const emptyPerms = () => Object.fromEntries(ALL_PERMISSIONS.map(p => [p.key, false]))
 
+const ALL_NAV_ITEMS = [
+  { key: 'overview',          label: 'Overview' },
+  { key: 'periods',           label: 'Admission Periods' },
+  { key: 'inbox',             label: 'Admission Inbox' },
+  { key: 'add-application',   label: 'Admission (Add)' },
+  { key: 'rollnumbers',       label: 'Roll Numbers' },
+  { key: 'master-faculty',    label: 'Program Master' },
+  { key: 'master-class',      label: 'Class Master' },
+  { key: 'master-bank',       label: 'Bank Master' },
+  { key: 'master-course',     label: 'Course Master' },
+  { key: 'master-group',      label: 'Group Master' },
+  { key: 'master-division',   label: 'Division Master' },
+  { key: 'master-fees',       label: 'Fees Master' },
+  { key: 'master-documents',  label: 'Required Documents' },
+]
+const emptyNav = () => Object.fromEntries(ALL_NAV_ITEMS.map(n => [n.key, true]))
+
 export default function RolesPanel({ college }) {
   const [roles,     setRoles]     = useState([])
   const [loading,   setLoading]   = useState(true)
@@ -23,7 +40,7 @@ export default function RolesPanel({ college }) {
   // Role form
   const [showRoleForm, setShowRoleForm] = useState(false)
   const [editingRole,  setEditingRole]  = useState(null)   // role object when editing
-  const [roleForm,     setRoleForm]     = useState({ role_name: '', permissions: emptyPerms() })
+  const [roleForm,     setRoleForm]     = useState({ role_name: '', permissions: emptyPerms(), nav_visibility: emptyNav() })
   const [roleSaving,   setRoleSaving]   = useState(false)
   const [roleError,    setRoleError]    = useState('')
 
@@ -49,16 +66,23 @@ export default function RolesPanel({ college }) {
   // ── Role helpers ─────────────────────────────────────────
   function openNewRole() {
     setEditingRole(null)
-    setRoleForm({ role_name: '', permissions: emptyPerms() })
+    setRoleForm({ role_name: '', permissions: emptyPerms(), nav_visibility: emptyNav() })
     setRoleError('')
     setShowRoleForm(true)
   }
 
   function openEditRole(role) {
     const perms = emptyPerms()
-    role.permissions.forEach(p => { perms[p.permission] = !!p.can_write })
+    const nav = emptyNav()
+    role.permissions.forEach(p => {
+      if (p.permission.startsWith('nav:')) {
+        nav[p.permission.slice(4)] = !!p.can_write
+      } else {
+        perms[p.permission] = !!p.can_write
+      }
+    })
     setEditingRole(role)
-    setRoleForm({ role_name: role.role_name, permissions: perms })
+    setRoleForm({ role_name: role.role_name, permissions: perms, nav_visibility: nav })
     setRoleError('')
     setShowRoleForm(true)
   }
@@ -221,6 +245,23 @@ export default function RolesPanel({ college }) {
                 </div>
               </div>
 
+              <div>
+                <p className="text-xs font-semibold text-slate-600 mb-2">Sidebar Visibility <span className="text-slate-400 font-normal">(checked = visible in sidebar)</span></p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {ALL_NAV_ITEMS.map(n => (
+                    <label key={n.key} className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 cursor-pointer hover:bg-slate-50">
+                      <input
+                        type="checkbox"
+                        checked={!!roleForm.nav_visibility[n.key]}
+                        onChange={e => setRoleForm(f => ({ ...f, nav_visibility: { ...f.nav_visibility, [n.key]: e.target.checked } }))}
+                        className="accent-blue-500 w-4 h-4"
+                      />
+                      <span className="text-sm text-slate-700">{n.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
               {roleError && <p className="text-sm text-red-600">{roleError}</p>}
 
               <div className="flex gap-3">
@@ -262,6 +303,24 @@ export default function RolesPanel({ college }) {
                         </span>
                       )
                     })}
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">Sidebar</p>
+                    <div className="flex flex-wrap gap-2">
+                      {ALL_NAV_ITEMS.map(n => {
+                        const entry = role.permissions.find(rp => rp.permission === `nav:${n.key}`)
+                        const visible = entry ? !!entry.can_write : true
+                        return (
+                          <span key={n.key} className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                            visible ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                    : 'bg-slate-100 text-slate-400'
+                          }`}>
+                            {visible ? '👁' : '–'} {n.label}
+                          </span>
+                        )
+                      })}
+                    </div>
                   </div>
                 </div>
               ))}

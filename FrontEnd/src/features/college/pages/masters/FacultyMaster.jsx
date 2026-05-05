@@ -68,7 +68,7 @@ export default function FacultyMaster({ collegeId }) {
   return (
     <div>
       <div className="flex items-center justify-between mb-4 gap-2">
-        <h2 className="text-lg font-semibold text-slate-800">Faculty Master <span className="text-sm font-normal text-slate-400">(Degree Courses)</span></h2>
+        <h2 className="text-lg font-semibold text-slate-800">Program Master <span className="text-sm font-normal text-slate-400">(Degree Courses)</span></h2>
         {rw && <button onClick={openNew} className="shrink-0 px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700">+ New</button>}
       </div>
 

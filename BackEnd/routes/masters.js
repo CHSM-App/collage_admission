@@ -888,4 +888,80 @@ router.delete('/:collegeId/required-documents/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }) }
 })
 
+// ═══════════════════════════════════════════════════════════════
+// CLASS MASTER
+// ═══════════════════════════════════════════════════════════════
+
+// GET /masters/:collegeId/class — list all, joined with faculty_master
+router.get('/:collegeId/class', async (req, res) => {
+  try {
+    const r = await db.request()
+      .input('cid', mssql.Int, cid(req))
+      .query(`
+        SELECT cm.*, fm.degree_course_code, fm.degree_course_name
+        FROM class_master cm
+        JOIN faculty_master fm ON fm.code_no = cm.faculty_master_id
+        WHERE cm.college_id = @cid
+        ORDER BY fm.degree_course_code, cm.year_of_study
+      `)
+    res.json({ success: true, data: r.recordset })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// POST /masters/:collegeId/class — create
+router.post('/:collegeId/class', async (req, res) => {
+  const { faculty_master_id, year_of_study, label, is_active = true } = req.body
+  if (!faculty_master_id) return res.status(422).json({ success: false, message: 'faculty_master_id is required.' })
+  if (!year_of_study || ![1, 2, 3].includes(parseInt(year_of_study)))
+    return res.status(422).json({ success: false, message: 'year_of_study must be 1, 2, or 3.' })
+  try {
+    const r = await db.request()
+      .input('cid', mssql.Int,      cid(req))
+      .input('fid', mssql.Int,      parseInt(faculty_master_id))
+      .input('yr',  mssql.TinyInt,  parseInt(year_of_study))
+      .input('lbl', mssql.NVarChar, label?.trim() || null)
+      .input('ia',  mssql.Bit,      is_active ? 1 : 0)
+      .query(`
+        INSERT INTO class_master (college_id, faculty_master_id, year_of_study, label, is_active)
+        OUTPUT INSERTED.*
+        VALUES (@cid, @fid, @yr, @lbl, @ia)
+      `)
+    res.status(201).json({ success: true, data: r.recordset[0] })
+  } catch (e) {
+    if (e.number === 2627 || e.number === 2601)
+      return res.status(409).json({ success: false, message: 'This program + year combination already exists.' })
+    res.status(500).json({ success: false, message: e.message })
+  }
+})
+
+// PUT /masters/:collegeId/class/:id — update label and/or is_active
+router.put('/:collegeId/class/:id', async (req, res) => {
+  const { label, is_active } = req.body
+  try {
+    const r = await db.request()
+      .input('id',  mssql.Int,      parseInt(req.params.id))
+      .input('cid', mssql.Int,      cid(req))
+      .input('lbl', mssql.NVarChar, label?.trim() || null)
+      .input('ia',  mssql.Bit,      is_active ? 1 : 0)
+      .query(`
+        UPDATE class_master SET label=@lbl, is_active=@ia
+        OUTPUT INSERTED.*
+        WHERE id=@id AND college_id=@cid
+      `)
+    if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Record not found.' })
+    res.json({ success: true, data: r.recordset[0] })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
+// DELETE /masters/:collegeId/class/:id — hard delete
+router.delete('/:collegeId/class/:id', async (req, res) => {
+  try {
+    await db.request()
+      .input('id',  mssql.Int, parseInt(req.params.id))
+      .input('cid', mssql.Int, cid(req))
+      .query(`DELETE FROM class_master WHERE id=@id AND college_id=@cid`)
+    res.json({ success: true })
+  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+})
+
 module.exports = router

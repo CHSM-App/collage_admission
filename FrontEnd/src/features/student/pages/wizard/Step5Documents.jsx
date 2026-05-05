@@ -65,12 +65,23 @@ export default function Step5Documents({
 
     setUploading(u => ({ ...u, [dtId]: true }))
     try {
-      // Simulate upload — in production send FormData to a multer endpoint
+      // Step 1: Upload file to server via multipart form
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('document_type_id', dtId)
+      const uploadRes = await api.post(
+        `student-documents?student_id=${studentId}`,
+        fd,
+        { headers: { 'Content-Type': 'multipart/form-data' } }
+      )
+      const { file_path, file_name } = uploadRes.data.data
+
+      // Step 2: Link the uploaded document to this application
       await api.post(`api/applications/${appId}/form-documents`, {
         student_id:       studentId,
         document_type_id: dtId,
-        file_name:        file.name,
-        file_path:        `/uploads/${studentId}/${Date.now()}_${file.name}`,
+        file_name,
+        file_path,
       })
       refreshLinked()
     } catch (err) {

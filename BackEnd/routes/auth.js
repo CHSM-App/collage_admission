@@ -115,7 +115,14 @@ router.post('/login/college', async (req, res) => {
 
     const permsArray = staff.permissions_json ? JSON.parse(staff.permissions_json) : [];
     const permissions = {};
-    permsArray.forEach(p => { permissions[p.permission] = !!p.can_write; });
+    const nav_visibility = {};
+    permsArray.forEach(p => {
+      if (p.permission.startsWith('nav:')) {
+        nav_visibility[p.permission.slice(4)] = !!p.can_write;
+      } else {
+        permissions[p.permission] = !!p.can_write;
+      }
+    });
 
     return res.json({
       message: 'Login successful',
@@ -129,6 +136,7 @@ router.post('/login/college', async (req, res) => {
         staff_name:   staff.full_name,
         role_name:    staff.role_name,
         permissions,
+        nav_visibility,
         is_staff:     true,
       },
     });
@@ -210,7 +218,14 @@ router.post('/login/college-user', async (req, res) => {
     // Build permissions map: { submit_application: true/false, ... }
     const permsArray = user.permissions_json ? JSON.parse(user.permissions_json) : [];
     const permissions = {};
-    permsArray.forEach(p => { permissions[p.permission] = !!p.can_write; });
+    const nav_visibility = {};
+    permsArray.forEach(p => {
+      if (p.permission.startsWith('nav:')) {
+        nav_visibility[p.permission.slice(4)] = !!p.can_write;
+      } else {
+        permissions[p.permission] = !!p.can_write;
+      }
+    });
 
     return res.json({
       message: 'Login successful',
@@ -225,6 +240,7 @@ router.post('/login/college-user', async (req, res) => {
         staff_name:   user.full_name,
         role_name:    user.role_name,
         permissions,
+        nav_visibility,
         is_staff:     true,
       },
     });

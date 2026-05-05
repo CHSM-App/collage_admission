@@ -50,13 +50,19 @@ router.get('/:collegeId/admission-periods', async (req, res) => {
 });
 
 router.post('/:collegeId/admission-periods', async (req, res) => {
-  const { course_id, year_of_study, academic_year, start_date, end_date, total_seats, application_fee } = req.body;
+  const { course_id, year_of_study, academic_year, start_date, end_date, total_seats } = req.body;
 
   if (!course_id || !year_of_study || !academic_year || !start_date || !end_date || !total_seats) {
     return res.status(400).json({ success: false, message: 'Missing required fields.' });
   }
 
   try {
+    // Read application_fee from the college record (set by admin)
+    const collegeRes = await db.request()
+      .input('col', parseInt(req.params.collegeId))
+      .query(`SELECT application_fee FROM colleges WHERE id = @col`);
+    const appFee = collegeRes.recordset[0]?.application_fee ?? 0;
+
     const result = await db.request()
       .input('col',  parseInt(req.params.collegeId))
       .input('crs',  parseInt(course_id))
@@ -65,7 +71,7 @@ router.post('/:collegeId/admission-periods', async (req, res) => {
       .input('sd',   start_date)
       .input('ed',   end_date)
       .input('seats',parseInt(total_seats))
-      .input('fee',  parseFloat(application_fee) || 0)
+      .input('fee',  parseFloat(appFee) || 0)
       .query(`
         INSERT INTO admission_periods
           (college_id, course_id, year_of_study, academic_year, start_date, end_date, total_seats, application_fee, is_active)

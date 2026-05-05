@@ -39,7 +39,7 @@ export default function Step4Exam({ data, errors, globalError, saving, onChange,
     }
     setLocalError('')
     onNext({
-      board_or_college_name:     data.board_or_college_name,
+      board_or_college_name:     isFY ? data.board_or_college_name : (data.board_or_college_name || data.college_name),
       school_or_college_address: data.school_or_college_address,
       seat_number:               isFY ? data.seat_number : undefined,
       prn_or_seat:               !isFY ? data.prn_or_seat : undefined,

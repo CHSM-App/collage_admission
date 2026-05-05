@@ -28,7 +28,8 @@ const sidebarItems = {
     { label: 'Admission',   to: `${DASHBOARD_PATHS.college}?section=add-application`,      perm: 'submit_application' },
     { label: 'Roll Numbers',      to: `${DASHBOARD_PATHS.college}?section=rollnumbers`,          perm: 'assign_subjects' },
     { label: '— Masters —',       to: null },
-    { label: 'Faculty Master',    to: `${DASHBOARD_PATHS.college}?section=master-faculty`,       perm: 'masters' },
+    { label: 'Program Master',    to: `${DASHBOARD_PATHS.college}?section=master-faculty`,       perm: 'masters' },
+    { label: 'Class Master',      to: `${DASHBOARD_PATHS.college}?section=master-class`,         perm: 'masters' },
     { label: 'Bank Master',       to: `${DASHBOARD_PATHS.college}?section=master-bank`,          perm: 'masters' },
     { label: 'Course Master',     to: `${DASHBOARD_PATHS.college}?section=master-course`,        perm: 'masters' },
     { label: 'Group Master',      to: `${DASHBOARD_PATHS.college}?section=master-group`,         perm: 'masters' },
@@ -118,6 +119,26 @@ export default function DashboardLayout() {
       }
       if (item.perm === null || item.perm === undefined) return true
       return item.perm in permissions
+    })
+  }
+
+  // For staff: additionally hide items based on nav_visibility
+  const navVisibility = user?.nav_visibility
+  if (role === 'college' && isStaff && navVisibility) {
+    currentItems = currentItems.filter((item, idx, arr) => {
+      if (!item.to) {
+        // Keep separator only if at least one following nav item is visible
+        const nextVisible = arr.slice(idx + 1).some(i => {
+          if (!i.to) return false
+          const params = new URLSearchParams(i.to.split('?')[1] || '')
+          const key = params.get('section') || 'overview'
+          return navVisibility[key] !== false
+        })
+        return nextVisible
+      }
+      const params = new URLSearchParams(item.to.split('?')[1] || '')
+      const key = params.get('section') || 'overview'
+      return navVisibility[key] !== false
     })
   }
 

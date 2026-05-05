@@ -13,11 +13,21 @@ import GroupMaster         from './masters/GroupMaster.jsx'
 import DivisionMaster      from './masters/DivisionMaster.jsx'
 import FeesMaster          from './masters/FeesMaster.jsx'
 import DocumentsMaster     from './masters/DocumentsMaster.jsx'
+import ClassMaster         from './masters/ClassMaster.jsx'
 
 function ReadOnlyBanner({ label }) {
   return (
     <div className="mb-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-2 text-sm text-amber-800 flex items-center gap-2">
       <span className="font-bold">View only</span> — you do not have write access to {label}.
+    </div>
+  )
+}
+
+function NavBlocked() {
+  return (
+    <div className="rounded-lg bg-red-50 border border-red-200 px-5 py-6 text-red-800 text-sm">
+      <p className="font-bold text-base mb-1">Access Denied</p>
+      You do not have access to this section.
     </div>
   )
 }
@@ -31,18 +41,18 @@ export default function CollegeDashboard() {
 
   const readOnly = (perm) => !canWrite(perm)
 
-  if (section === 'periods') return (
-    <>
-      {readOnly('masters') && <ReadOnlyBanner label="Admission Periods" />}
-      <AdmissionPeriods collegeId={user?.id} readOnly={readOnly('masters')} />
-    </>
-  )
-  if (section === 'inbox') return (
-    <>
-      {readOnly('review_application') && <ReadOnlyBanner label="Applications" />}
-      <ApplicationInbox collegeId={user?.id} readOnly={readOnly('review_application')} />
-    </>
-  )
+  // nav_visibility only applies to staff users; non-staff (main college admin) sees everything
+  const navVis = user?.is_staff ? (user?.nav_visibility || {}) : null
+  const navAllowed = (key) => !navVis || navVis[key] !== false
+
+  if (section === 'periods') {
+    if (!navAllowed('periods')) return <NavBlocked />
+    return <>{readOnly('masters') && <ReadOnlyBanner label="Admission Periods" />}<AdmissionPeriods collegeId={user?.id} readOnly={readOnly('masters')} /></>
+  }
+  if (section === 'inbox') {
+    if (!navAllowed('inbox')) return <NavBlocked />
+    return <>{readOnly('review_application') && <ReadOnlyBanner label="Applications" />}<ApplicationInbox collegeId={user?.id} readOnly={readOnly('review_application')} /></>
+  }
   if (section === 'app' && appId) return (
     <ApplicationDetail collegeId={user?.id} appId={appId}
       readOnly={readOnly('review_application')}
@@ -50,13 +60,12 @@ export default function CollegeDashboard() {
       canReviewDocs={canWrite('review_documents')}
       canCollectFees={canWrite('collect_fees')} />
   )
-  if (section === 'rollnumbers') return (
-    <>
-      {readOnly('assign_subjects') && <ReadOnlyBanner label="Roll Numbers" />}
-      <RollNumbers collegeId={user?.id} readOnly={readOnly('assign_subjects')} />
-    </>
-  )
+  if (section === 'rollnumbers') {
+    if (!navAllowed('rollnumbers')) return <NavBlocked />
+    return <>{readOnly('assign_subjects') && <ReadOnlyBanner label="Roll Numbers" />}<RollNumbers collegeId={user?.id} readOnly={readOnly('assign_subjects')} /></>
+  }
   if (section === 'add-application') {
+    if (!navAllowed('add-application')) return <NavBlocked />
     if (readOnly('submit_application')) return (
       <div className="rounded-lg bg-amber-50 border border-amber-200 px-5 py-6 text-amber-800 text-sm">
         <p className="font-bold text-base mb-1">Access Denied</p>
@@ -67,18 +76,29 @@ export default function CollegeDashboard() {
   }
 
   const masterReadOnly = readOnly('masters')
-  if (section === 'master-faculty')  return <>{masterReadOnly && <ReadOnlyBanner label="Faculty Master" />}<FacultyMaster   collegeId={user?.id} readOnly={masterReadOnly} /></>
-  if (section === 'master-bank')     return <>{masterReadOnly && <ReadOnlyBanner label="Bank Master" />}<BankMaster      collegeId={user?.id} readOnly={masterReadOnly} /></>
-  if (section === 'master-course')   return <>{masterReadOnly && <ReadOnlyBanner label="Course Master" />}<CourseMaster    collegeId={user?.id} readOnly={masterReadOnly} /></>
-  if (section === 'master-group')    return <>{masterReadOnly && <ReadOnlyBanner label="Group Master" />}<GroupMaster     collegeId={user?.id} readOnly={masterReadOnly} /></>
-  if (section === 'master-division') return <>{masterReadOnly && <ReadOnlyBanner label="Division Master" />}<DivisionMaster collegeId={user?.id} readOnly={masterReadOnly} /></>
-  if (section === 'master-fees')      return <>{masterReadOnly && <ReadOnlyBanner label="Fees Master" />}<FeesMaster        collegeId={user?.id} readOnly={masterReadOnly} /></>
-  if (section === 'master-documents') return <>{masterReadOnly && <ReadOnlyBanner label="Required Documents" />}<DocumentsMaster  collegeId={user?.id} readOnly={masterReadOnly} /></>
+  if (section === 'master-faculty')   return navAllowed('master-faculty')   ? <>{masterReadOnly && <ReadOnlyBanner label="Program Master" />}<FacultyMaster   collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
+  if (section === 'master-class')     return navAllowed('master-class')     ? <ClassMaster collegeId={user?.id} />                                                                                                              : <NavBlocked />
+  if (section === 'master-bank')      return navAllowed('master-bank')      ? <>{masterReadOnly && <ReadOnlyBanner label="Bank Master" />}<BankMaster          collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
+  if (section === 'master-course')    return navAllowed('master-course')    ? <>{masterReadOnly && <ReadOnlyBanner label="Course Master" />}<CourseMaster      collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
+  if (section === 'master-group')     return navAllowed('master-group')     ? <>{masterReadOnly && <ReadOnlyBanner label="Group Master" />}<GroupMaster        collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
+  if (section === 'master-division')  return navAllowed('master-division')  ? <>{masterReadOnly && <ReadOnlyBanner label="Division Master" />}<DivisionMaster  collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
+  if (section === 'master-fees')      return navAllowed('master-fees')      ? <>{masterReadOnly && <ReadOnlyBanner label="Fees Master" />}<FeesMaster          collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
+  if (section === 'master-documents') return navAllowed('master-documents') ? <>{masterReadOnly && <ReadOnlyBanner label="Required Documents" />}<DocumentsMaster collegeId={user?.id} readOnly={masterReadOnly} /></> : <NavBlocked />
 
-  return <Overview user={user} />
+  return <Overview user={user} navAllowed={navAllowed} />
 }
 
-function Overview({ user }) {
+function Overview({ user, navAllowed }) {
+  const allCards = [
+    { title: 'Admission Periods',    desc: 'Open or close admissions for each course and year.', section: 'periods',         accent: 'blue' },
+    { title: 'Application Inbox',    desc: 'Review, approve, or reject student applications.',   section: 'inbox',            accent: 'teal' },
+    { title: 'Add Application',      desc: 'Fill in the admission form on behalf of a student.', section: 'add-application',  accent: 'indigo' },
+    { title: 'Roll Numbers',         desc: 'Generate roll numbers for confirmed students.',       section: 'rollnumbers',      accent: 'violet' },
+    { title: 'Faculty Master',       desc: 'Manage degree programs and university codes.',        section: 'master-faculty',   accent: 'slate' },
+    { title: 'Fees Master',          desc: 'Configure fee heads, slabs, and classwise overrides.',section: 'master-fees',     accent: 'rose' },
+  ]
+  const cards = allCards.filter(c => navAllowed(c.section))
+
   return (
     <section className="space-y-6">
       <div>
@@ -95,15 +115,7 @@ function Overview({ user }) {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {[
-          { title: 'Admission Periods', desc: 'Open or close admissions for each course and year.', section: 'periods', accent: 'blue' },
-          { title: 'Application Inbox', desc: 'Review, approve, or reject student applications.', section: 'inbox', accent: 'teal' },
-          { title: 'Add Application', desc: 'Fill in the admission form on behalf of a student.', section: 'add-application', accent: 'indigo' },
-          { title: 'Document Verification', desc: 'Confirm students who have visited with documents.', section: 'inbox', accent: 'orange' },
-          { title: 'Roll Numbers', desc: 'Generate roll numbers for confirmed students.', section: 'rollnumbers', accent: 'violet' },
-          { title: 'Faculty Master', desc: 'Manage degree programs and university codes.', section: 'master-faculty', accent: 'slate' },
-          { title: 'Fees Master',    desc: 'Configure fee heads, slabs, and classwise overrides.', section: 'master-fees', accent: 'rose' },
-        ].map(card => (
+        {cards.map(card => (
           <ActionCard key={card.section} {...card} />
         ))}
       </div>
