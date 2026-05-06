@@ -199,27 +199,37 @@ router.get('/:collegeId/applications', requirePerm('review_application'), async 
   const { page, limit, offset } = parsePage(req.query);
 
   try {
-    let where = `WHERE a.college_id = @col AND a.status <> 'draft'`;
-    const req2 = db.request().input('col', parseInt(req.params.collegeId));
+    const pool = await db;
+    const collegeId = parseInt(req.params.collegeId);
 
+    let where = `WHERE a.college_id = @col AND a.status <> 'draft'`;
+
+    // Build shared inputs map to apply to both requests independently
+    const extraInputs = [];
     if (status) {
       const statuses = status.split(',').map(s => s.trim()).filter(Boolean);
       if (statuses.length === 1) {
         where += ' AND a.status = @status';
-        req2.input('status', statuses[0]);
+        extraInputs.push(r => r.input('status', statuses[0]));
       } else {
         const placeholders = statuses.map((_, i) => `@s${i}`).join(',');
         where += ` AND a.status IN (${placeholders})`;
-        statuses.forEach((s, i) => req2.input(`s${i}`, s));
+        statuses.forEach((s, i) => extraInputs.push(r => r.input(`s${i}`, s)));
       }
     }
     if (course_id) {
       where += ' AND a.course_id = @crs';
-      req2.input('crs', parseInt(course_id));
+      extraInputs.push(r => r.input('crs', parseInt(course_id)));
     }
     if (year_of_study) {
       where += ' AND a.year_of_study = @yr';
-      req2.input('yr', parseInt(year_of_study));
+      extraInputs.push(r => r.input('yr', parseInt(year_of_study)));
+    }
+
+    function makeRequest() {
+      const r = pool.request().input('col', collegeId);
+      extraInputs.forEach(fn => fn(r));
+      return r;
     }
 
     const joins = `
@@ -228,21 +238,22 @@ router.get('/:collegeId/applications', requirePerm('review_application'), async 
       LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
     `;
 
-    const countRes = await req2.query(`SELECT COUNT(*) AS total ${joins} ${where}`);
-    const total    = countRes.recordset[0].total;
+    // Use separate request objects — mssql requests are single-use
+    const [countRes, dataRes] = await Promise.all([
+      makeRequest().query(`SELECT COUNT(*) AS total ${joins} ${where}`),
+      makeRequest().query(`
+        SELECT
+          a.id, a.registration_number, a.year_of_study, a.academic_year,
+          a.status, a.submitted_at, a.roll_number, a.course_id,
+          s.full_name AS student_name, s.email AS student_email, s.phone,
+          COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name
+        ${joins} ${where}
+        ORDER BY a.submitted_at DESC
+        ${paginateQuery(offset, limit)}
+      `),
+    ]);
 
-    const dataRes = await req2.query(`
-      SELECT
-        a.id, a.registration_number, a.year_of_study, a.academic_year,
-        a.status, a.submitted_at, a.roll_number, a.course_id,
-        s.full_name AS student_name, s.email AS student_email, s.phone,
-        COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name
-      ${joins} ${where}
-      ORDER BY a.submitted_at DESC
-      ${paginateQuery(offset, limit)}
-    `);
-
-    return res.json(paginatedResponse(dataRes.recordset, total, page, limit));
+    return res.json(paginatedResponse(dataRes.recordset, countRes.recordset[0].total, page, limit));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });
@@ -828,7 +839,9 @@ router.get('/:collegeId/fee-receipts', requirePerm('collect_fees'), async (req, 
         AND a.status NOT IN ('draft','submitted','under_review','correction_requested','correction_done',
                              'scrutiny_accepted','doc_verification_pending','rejected','cancelled')
     `;
-    const req2 = db.request().input('col', parseInt(req.params.collegeId));
+    const pool2 = await db;
+    const collegeId2 = parseInt(req.params.collegeId);
+    const extraInputs2 = [];
 
     if (status === 'paid') {
       where += ' AND a.fee_total_amount > 0 AND ISNULL(psum.total_paid, 0) >= a.fee_total_amount - 0.01';
@@ -837,43 +850,49 @@ router.get('/:collegeId/fee-receipts', requirePerm('collect_fees'), async (req, 
     }
     if (course_id) {
       where += ' AND a.course_id = @crs';
-      req2.input('crs', parseInt(course_id));
+      extraInputs2.push(r => r.input('crs', parseInt(course_id)));
     }
     if (year_of_study) {
       where += ' AND a.year_of_study = @yr';
-      req2.input('yr', parseInt(year_of_study));
+      extraInputs2.push(r => r.input('yr', parseInt(year_of_study)));
     }
     if (q) {
       where += ` AND (s.full_name LIKE @q OR s.phone LIKE @q OR a.registration_number LIKE @q OR a.roll_number LIKE @q)`;
-      req2.input('q', `%${q.trim()}%`);
+      extraInputs2.push(r => r.input('q', `%${q.trim()}%`));
+    }
+
+    function makeRequest2() {
+      const r = pool2.request().input('col', collegeId2);
+      extraInputs2.forEach(fn => fn(r));
+      return r;
     }
 
     const orderBy = `ORDER BY (CASE WHEN a.fee_total_amount > 0 AND ISNULL(psum.total_paid,0) >= a.fee_total_amount - 0.01 THEN 1 ELSE 0 END) ASC, a.confirmed_at DESC`;
 
-    const countRes = await req2.query(`SELECT COUNT(*) AS total ${joins} ${where}`);
-    const total    = countRes.recordset[0].total;
+    const [countRes2, dataRes] = await Promise.all([
+      makeRequest2().query(`SELECT COUNT(*) AS total ${joins} ${where}`),
+      makeRequest2().query(`
+        SELECT
+          a.id AS application_id,
+          a.registration_number,
+          a.year_of_study,
+          a.academic_year,
+          a.college_fee_paid,
+          a.status AS application_status,
+          a.roll_number,
+          a.fee_total_amount,
+          s.full_name  AS student_name,
+          s.phone      AS student_phone,
+          COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name,
+          ISNULL(psum.total_paid, 0) AS amount_paid,
+          psum.last_paid_at AS completed_at
+        ${joins} ${where}
+        ${orderBy}
+        ${paginateQuery(offset, limit)}
+      `),
+    ]);
 
-    const dataRes = await req2.query(`
-      SELECT
-        a.id AS application_id,
-        a.registration_number,
-        a.year_of_study,
-        a.academic_year,
-        a.college_fee_paid,
-        a.status AS application_status,
-        a.roll_number,
-        a.fee_total_amount,
-        s.full_name  AS student_name,
-        s.phone      AS student_phone,
-        COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name,
-        ISNULL(psum.total_paid, 0) AS amount_paid,
-        psum.last_paid_at AS completed_at
-      ${joins} ${where}
-      ${orderBy}
-      ${paginateQuery(offset, limit)}
-    `);
-
-    return res.json(paginatedResponse(dataRes.recordset, total, page, limit));
+    return res.json(paginatedResponse(dataRes.recordset, countRes2.recordset[0].total, page, limit));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });

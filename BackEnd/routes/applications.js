@@ -71,33 +71,41 @@ router.get('/', async (req, res) => {
     `;
 
     let where = 'WHERE a.student_id = @sid';
-    const req2 = db.request().input('sid', parseInt(student_id));
+    const pool = await db;
+    const sid  = parseInt(student_id);
+    const extraInputs = [];
 
     if (academic_year) {
       where += ' AND a.academic_year = @ay';
-      req2.input('ay', academic_year);
+      extraInputs.push(r => r.input('ay', academic_year));
     }
 
-    const countRes = await req2.query(`SELECT COUNT(*) AS total ${joins} ${where}`);
-    const total    = countRes.recordset[0].total;
+    function makeRequest() {
+      const r = pool.request().input('sid', sid);
+      extraInputs.forEach(fn => fn(r));
+      return r;
+    }
 
-    const dataRes = await req2.query(`
-      SELECT
-        a.id, a.registration_number, a.year_of_study, a.academic_year,
-        a.status, a.roll_number, a.submitted_at, a.created_at,
-        a.rejection_reason, a.cancellation_reason, a.correction_note,
-        a.application_fee_paid, a.college_fee_paid,
-        a.fee_total_amount, a.fee_pay_now_amount,
-        ISNULL(psum.amount_paid, 0) AS amount_paid,
-        c.id   AS college_id,   c.name  AS college_name,  c.city AS college_city,
-        a.course_id,    COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
-        COALESCE(c.application_fee, 0) AS application_fee, ap.total_seats, ap.filled_seats
-      ${joins} ${where}
-      ORDER BY a.created_at DESC
-      ${paginateQuery(offset, limit)}
-    `);
+    const [countRes, dataRes] = await Promise.all([
+      makeRequest().query(`SELECT COUNT(*) AS total ${joins} ${where}`),
+      makeRequest().query(`
+        SELECT
+          a.id, a.registration_number, a.year_of_study, a.academic_year,
+          a.status, a.roll_number, a.submitted_at, a.created_at,
+          a.rejection_reason, a.cancellation_reason, a.correction_note,
+          a.application_fee_paid, a.college_fee_paid,
+          a.fee_total_amount, a.fee_pay_now_amount,
+          ISNULL(psum.amount_paid, 0) AS amount_paid,
+          c.id   AS college_id,   c.name  AS college_name,  c.city AS college_city,
+          a.course_id,    COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
+          COALESCE(c.application_fee, 0) AS application_fee, ap.total_seats, ap.filled_seats
+        ${joins} ${where}
+        ORDER BY a.created_at DESC
+        ${paginateQuery(offset, limit)}
+      `),
+    ]);
 
-    return res.json(paginatedResponse(dataRes.recordset, total, page, limit));
+    return res.json(paginatedResponse(dataRes.recordset, countRes.recordset[0].total, page, limit));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });

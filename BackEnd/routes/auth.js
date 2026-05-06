@@ -32,7 +32,7 @@ const registerLimiter = rateLimit({
 });
 
 // ── Student login ───────────────────────────────────────────
-router.post('/login/student', loginLimiter, async (req, res) => {
+router.post('/login/student', /*loginLimiter,*/ async (req, res) => {
   const { phone, password } = req.body;
 
   if (!phone || !password) {
@@ -77,7 +77,7 @@ router.post('/login/student', loginLimiter, async (req, res) => {
 });
 
 // ── College login (admin OR staff — single endpoint) ────────
-router.post('/login/college', loginLimiter, async (req, res) => {
+router.post('/login/college', /*loginLimiter,*/ async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
