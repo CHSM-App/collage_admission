@@ -1,5 +1,6 @@
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
+import ErrorBoundary from '../shared/components/ErrorBoundary.jsx'
 import { DASHBOARD_PATHS } from '../app/routePaths.js'
 import Button from '../shared/components/Button.jsx'
 import { useAuth } from '../features/auth/hooks/useAuth.js'
@@ -335,7 +336,9 @@ export default function DashboardLayout() {
         </header>
 
         <main className="mx-auto max-w-5xl px-4 py-6 sm:px-5 sm:py-8">
-          <Outlet />
+          <ErrorBoundary key={location.pathname + location.search}>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
 

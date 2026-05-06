@@ -19,7 +19,7 @@ export default function BrowseColleges() {
 
   useEffect(() => {
     if (user?.id) {
-      api.get(`applications?student_id=${user.id}`)
+      api.get(`applications?student_id=${user.id}&limit=100`)
         .then(r => setMyApps(r.data.data || []))
         .catch(() => {})
     }

@@ -13,6 +13,7 @@ const bcrypt  = require('bcryptjs');
 const router  = express.Router();
 const db      = require('./db');
 const mssql   = require('mssql');
+const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
 
 // ── Generate next college code (CL001, CL002, …) ────────────
 async function generateCollegeCode() {
@@ -96,11 +97,18 @@ router.post('/', async (req, res) => {
 
 // List all colleges
 router.get('/', async (req, res) => {
+  const { page, limit, offset } = parsePage(req.query);
   try {
-    const result = await db.request().query(
-      'SELECT id, name, address, city, phone, email FROM colleges ORDER BY name'
-    );
-    return res.json({ success: true, data: result.recordset });
+    const countRes = await db.request().query('SELECT COUNT(*) AS total FROM colleges');
+    const total    = countRes.recordset[0].total;
+
+    const dataRes = await db.request().query(`
+      SELECT id, name, address, city, phone, email FROM colleges
+      ORDER BY name
+      ${paginateQuery(offset, limit)}
+    `);
+
+    return res.json(paginatedResponse(dataRes.recordset, total, page, limit));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });

@@ -23,6 +23,10 @@ const router   = express.Router()
 const db       = require('./db')
 const mssql    = require('mssql')
 const feeSvc   = require('../services/FeeDeterminationService')
+const { authenticate, requireCollegeAccess, requirePerm } = require('../middleware/auth')
+
+// All masters routes require authentication and college ownership
+router.use(authenticate, requireCollegeAccess)
 
 // ── Helper: assert college ownership ────────────────────────────
 // In production, verify JWT token's college_id matches param.
@@ -48,7 +52,7 @@ router.get('/:collegeId/faculty', async (req, res) => {
 })
 
 // POST /masters/:collegeId/faculty — create
-router.post('/:collegeId/faculty', async (req, res) => {
+router.post('/:collegeId/faculty', requirePerm('masters'), async (req, res) => {
   const {
     degree_course_code, degree_course_name, duration_years = 3,
     unique_code_sem1, unique_code_sem2, unique_code_sem3,
@@ -122,7 +126,7 @@ router.post('/:collegeId/faculty', async (req, res) => {
 })
 
 // PUT /masters/:collegeId/faculty/:id — update
-router.put('/:collegeId/faculty/:id', async (req, res) => {
+router.put('/:collegeId/faculty/:id', requirePerm('masters'), async (req, res) => {
   const {
     degree_course_code, degree_course_name, duration_years,
     unique_code_sem1, unique_code_sem2, unique_code_sem3,
@@ -168,7 +172,7 @@ router.put('/:collegeId/faculty/:id', async (req, res) => {
 })
 
 // DELETE /masters/:collegeId/faculty/:id — soft delete (set is_active=0)
-router.delete('/:collegeId/faculty/:id', async (req, res) => {
+router.delete('/:collegeId/faculty/:id', requirePerm('masters'), async (req, res) => {
   try {
     await db.request()
       .input('id',  mssql.Int, parseInt(req.params.id))
@@ -191,7 +195,7 @@ router.get('/:collegeId/bank', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }) }
 })
 
-router.post('/:collegeId/bank', async (req, res) => {
+router.post('/:collegeId/bank', requirePerm('masters'), async (req, res) => {
   const { bank_account_number, bank_name, branch, ifsc_code, account_type, is_active = true } = req.body
   if (!bank_account_number?.trim()) return res.status(422).json({ success: false, message: 'bank_account_number is required.' })
   if (!bank_name?.trim())           return res.status(422).json({ success: false, message: 'bank_name is required.' })
@@ -223,7 +227,7 @@ router.post('/:collegeId/bank', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }) }
 })
 
-router.put('/:collegeId/bank/:id', async (req, res) => {
+router.put('/:collegeId/bank/:id', requirePerm('masters'), async (req, res) => {
   const { bank_account_number, bank_name, branch, ifsc_code, account_type, is_active } = req.body
   try {
     const r = await db.request()
@@ -247,7 +251,7 @@ router.put('/:collegeId/bank/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }) }
 })
 
-router.delete('/:collegeId/bank/:id', async (req, res) => {
+router.delete('/:collegeId/bank/:id', requirePerm('masters'), async (req, res) => {
   try {
     await db.request()
       .input('id',  mssql.Int, parseInt(req.params.id))
@@ -281,7 +285,7 @@ router.get('/:collegeId/course', async (req, res) => {
 })
 
 // POST — create single course master row
-router.post('/:collegeId/course', async (req, res) => {
+router.post('/:collegeId/course', requirePerm('masters'), async (req, res) => {
   const {
     faculty_master_id, semester, course_code, course_title,
     credits, max_internal, min_internal, max_sem_end, min_sem_end,
@@ -329,7 +333,7 @@ router.post('/:collegeId/course', async (req, res) => {
   }
 })
 
-router.put('/:collegeId/course/:id', async (req, res) => {
+router.put('/:collegeId/course/:id', requirePerm('masters'), async (req, res) => {
   const {
     faculty_master_id, semester, course_code, course_title,
     credits, max_internal, min_internal, max_sem_end, min_sem_end,
@@ -373,7 +377,7 @@ router.put('/:collegeId/course/:id', async (req, res) => {
   }
 })
 
-router.delete('/:collegeId/course/:id', async (req, res) => {
+router.delete('/:collegeId/course/:id', requirePerm('masters'), async (req, res) => {
   try {
     await db.request()
       .input('id',  mssql.Int, parseInt(req.params.id))
@@ -384,7 +388,7 @@ router.delete('/:collegeId/course/:id', async (req, res) => {
 })
 
 // POST /masters/:collegeId/course/bulk-save — save entire semester grid at once
-router.post('/:collegeId/course/bulk-save', async (req, res) => {
+router.post('/:collegeId/course/bulk-save', requirePerm('masters'), async (req, res) => {
   const { faculty_master_id, semester, rows } = req.body
   if (!faculty_master_id || !semester || !Array.isArray(rows))
     return res.status(422).json({ success: false, message: 'faculty_master_id, semester, rows[] required.' })
@@ -466,7 +470,7 @@ router.get('/:collegeId/group/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }) }
 })
 
-router.post('/:collegeId/group', async (req, res) => {
+router.post('/:collegeId/group', requirePerm('masters'), async (req, res) => {
   const { faculty_master_id, semester, group_code, group_description, is_active = true, courses = [] } = req.body
   if (!faculty_master_id) return res.status(422).json({ success: false, message: 'faculty_master_id required.' })
   if (!group_code?.trim()) return res.status(422).json({ success: false, message: 'group_code required.' })
@@ -503,7 +507,7 @@ router.post('/:collegeId/group', async (req, res) => {
   }
 })
 
-router.put('/:collegeId/group/:id', async (req, res) => {
+router.put('/:collegeId/group/:id', requirePerm('masters'), async (req, res) => {
   const { faculty_master_id, semester, group_code, group_description, is_active, courses = [] } = req.body
   try {
     const r = await db.request()
@@ -538,7 +542,7 @@ router.put('/:collegeId/group/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }) }
 })
 
-router.delete('/:collegeId/group/:id', async (req, res) => {
+router.delete('/:collegeId/group/:id', requirePerm('masters'), async (req, res) => {
   try {
     await db.request()
       .input('id',  mssql.Int, parseInt(req.params.id))
@@ -573,7 +577,7 @@ router.get('/:collegeId/division', async (req, res) => {
 
 // POST /masters/:collegeId/division/save-grid — save entire A-J grid for one class-year
 // Body: { faculty_master_id, year_level, class_year_code, divisions: [{letter, funding_type},...] }
-router.post('/:collegeId/division/save-grid', async (req, res) => {
+router.post('/:collegeId/division/save-grid', requirePerm('masters'), async (req, res) => {
   const { faculty_master_id, year_level, class_year_code, divisions } = req.body
   if (!faculty_master_id || !year_level || !Array.isArray(divisions))
     return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, divisions[] required.' })
@@ -603,7 +607,7 @@ router.post('/:collegeId/division/save-grid', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }) }
 })
 
-router.delete('/:collegeId/division/:id', async (req, res) => {
+router.delete('/:collegeId/division/:id', requirePerm('masters'), async (req, res) => {
   try {
     await db.request()
       .input('id',  mssql.Int, parseInt(req.params.id))
@@ -632,7 +636,7 @@ router.get('/:collegeId/fees', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }) }
 })
 
-router.post('/:collegeId/fees', async (req, res) => {
+router.post('/:collegeId/fees', requirePerm('masters'), async (req, res) => {
   const {
     fees_type, is_other_misc = false, fees_head, short_name,
     sequence_auto_fees = 0, credit_to_bank_ledger,
@@ -672,7 +676,7 @@ router.post('/:collegeId/fees', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }) }
 })
 
-router.put('/:collegeId/fees/:id', async (req, res) => {
+router.put('/:collegeId/fees/:id', requirePerm('masters'), async (req, res) => {
   const {
     fees_type, is_other_misc, fees_head, short_name,
     sequence_auto_fees, credit_to_bank_ledger, is_refundable,
@@ -710,7 +714,7 @@ router.put('/:collegeId/fees/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }) }
 })
 
-router.delete('/:collegeId/fees/:id', async (req, res) => {
+router.delete('/:collegeId/fees/:id', requirePerm('masters'), async (req, res) => {
   try {
     await db.request()
       .input('id',  mssql.Int, parseInt(req.params.id))
@@ -744,7 +748,7 @@ router.get('/:collegeId/fees/classwise', async (req, res) => {
 })
 
 // POST /masters/:collegeId/fees/classwise/save — upsert classwise fees
-router.post('/:collegeId/fees/classwise/save', async (req, res) => {
+router.post('/:collegeId/fees/classwise/save', requirePerm('masters'), async (req, res) => {
   const { faculty_master_id, year_level, rows } = req.body
   if (!faculty_master_id || !year_level || !Array.isArray(rows))
     return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, rows[] required.' })
@@ -847,7 +851,7 @@ router.get('/:collegeId/required-documents', async (req, res) => {
 })
 
 // POST /masters/:collegeId/required-documents — add a required document
-router.post('/:collegeId/required-documents', async (req, res) => {
+router.post('/:collegeId/required-documents', requirePerm('masters'), async (req, res) => {
   const { faculty_master_id, year_of_study, document_type_id, is_mandatory } = req.body
   if (!faculty_master_id || !year_of_study || !document_type_id) {
     return res.status(400).json({ success: false, message: 'faculty_master_id, year_of_study, document_type_id are required.' })
@@ -875,7 +879,7 @@ router.post('/:collegeId/required-documents', async (req, res) => {
 })
 
 // PUT /masters/:collegeId/required-documents/:id — toggle is_mandatory
-router.put('/:collegeId/required-documents/:id', async (req, res) => {
+router.put('/:collegeId/required-documents/:id', requirePerm('masters'), async (req, res) => {
   const { is_mandatory } = req.body
   try {
     await db.request()
@@ -888,7 +892,7 @@ router.put('/:collegeId/required-documents/:id', async (req, res) => {
 })
 
 // DELETE /masters/:collegeId/required-documents/:id
-router.delete('/:collegeId/required-documents/:id', async (req, res) => {
+router.delete('/:collegeId/required-documents/:id', requirePerm('masters'), async (req, res) => {
   try {
     await db.request()
       .input('id',  mssql.Int, parseInt(req.params.id))
@@ -919,7 +923,7 @@ router.get('/:collegeId/class', async (req, res) => {
 })
 
 // POST /masters/:collegeId/class — create
-router.post('/:collegeId/class', async (req, res) => {
+router.post('/:collegeId/class', requirePerm('masters'), async (req, res) => {
   const { faculty_master_id, year_of_study, label, is_active = true } = req.body
   if (!faculty_master_id) return res.status(422).json({ success: false, message: 'faculty_master_id is required.' })
   if (!year_of_study || ![1, 2, 3].includes(parseInt(year_of_study)))
@@ -945,7 +949,7 @@ router.post('/:collegeId/class', async (req, res) => {
 })
 
 // PUT /masters/:collegeId/class/:id — update label and/or is_active
-router.put('/:collegeId/class/:id', async (req, res) => {
+router.put('/:collegeId/class/:id', requirePerm('masters'), async (req, res) => {
   const { label, is_active } = req.body
   try {
     const r = await db.request()
@@ -964,7 +968,7 @@ router.put('/:collegeId/class/:id', async (req, res) => {
 })
 
 // DELETE /masters/:collegeId/class/:id — hard delete
-router.delete('/:collegeId/class/:id', async (req, res) => {
+router.delete('/:collegeId/class/:id', requirePerm('masters'), async (req, res) => {
   try {
     await db.request()
       .input('id',  mssql.Int, parseInt(req.params.id))

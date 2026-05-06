@@ -45,7 +45,7 @@ export default function MyApplications() {
   const [viewAppId, setViewAppId]     = useState(null)  // id of app whose print view is open
 
   function fetchApps() {
-    api.get(`applications?student_id=${user.id}`)
+    api.get(`applications?student_id=${user.id}&limit=100`)
       .then(r => setApps(r.data.data || []))
       .catch(() => {})
       .finally(() => setLoading(false))

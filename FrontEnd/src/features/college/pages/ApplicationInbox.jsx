@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../../services/api.js'
+import Pagination from '../../../shared/components/Pagination.jsx'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
 
@@ -31,24 +32,37 @@ function useStatusCounts(apps) {
 export default function ApplicationInbox({ collegeId }) {
   const navigate = useNavigate()
 
-  const [apps, setApps]     = useState([])
-  const [loading, setLoading] = useState(true)
+  const [apps, setApps]         = useState([])
+  const [loading, setLoading]   = useState(true)
+  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 })
+  const [page, setPage]         = useState(1)
+  const LIMIT = 20
 
   // Filters
-  const [search, setSearch]           = useState('')
+  const [search, setSearch]             = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [filterCourse, setFilterCourse] = useState('')
   const [filterYear, setFilterYear]     = useState('')
 
-  function fetchApps() {
+  const fetchApps = useCallback(() => {
     setLoading(true)
-    api.get(`college-admin/${collegeId}/applications`)
-      .then(r => setApps(r.data.data || []))
+    const params = new URLSearchParams({ page, limit: LIMIT })
+    if (filterStatus) params.set('status', filterStatus)
+    if (filterCourse) params.set('course_id', filterCourse)
+    if (filterYear)   params.set('year_of_study', filterYear)
+    api.get(`college-admin/${collegeId}/applications?${params}`)
+      .then(r => {
+        setApps(r.data.data || [])
+        setPagination(r.data.pagination || { page: 1, totalPages: 1, total: 0 })
+      })
       .catch(() => setApps([]))
       .finally(() => setLoading(false))
-  }
+  }, [collegeId, page, filterStatus, filterCourse, filterYear])
 
-  useEffect(() => { fetchApps() }, [collegeId])
+  useEffect(() => { fetchApps() }, [fetchApps])
+
+  // Reset to page 1 whenever filters change
+  useEffect(() => { setPage(1) }, [filterStatus, filterCourse, filterYear])
 
   const statusCounts = useStatusCounts(apps)
 
@@ -63,27 +77,23 @@ export default function ApplicationInbox({ collegeId }) {
     return [...set].sort()
   }, [apps])
 
+  // Client-side search filter (only on the current page)
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
+    if (!q) return apps
     return apps.filter(a => {
-      if (filterStatus && a.status !== filterStatus) return false
-      if (filterCourse && String(a.course_id) !== String(filterCourse)) return false
-      if (filterYear   && String(a.year_of_study) !== String(filterYear)) return false
-      if (q) {
-        const haystack = [
-          a.student_name, a.student_email, a.phone,
-          a.registration_number, a.course_name, a.academic_year,
-        ].join(' ').toLowerCase()
-        if (!haystack.includes(q)) return false
-      }
-      return true
+      const haystack = [
+        a.student_name, a.student_email, a.phone,
+        a.registration_number, a.course_name, a.academic_year,
+      ].join(' ').toLowerCase()
+      return haystack.includes(q)
     })
-  }, [apps, search, filterStatus, filterCourse, filterYear])
+  }, [apps, search])
 
   const hasFilters = search || filterStatus || filterCourse || filterYear
 
   function clearFilters() {
-    setSearch(''); setFilterStatus(''); setFilterCourse(''); setFilterYear('')
+    setSearch(''); setFilterStatus(''); setFilterCourse(''); setFilterYear(''); setPage(1)
   }
 
   function openApp(appId) {
@@ -131,7 +141,7 @@ export default function ApplicationInbox({ collegeId }) {
           onChange={e => setFilterStatus(e.target.value)}
           className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-56"
         >
-          <option value="">All Statuses ({apps.length})</option>
+          <option value="">All Statuses ({pagination.total})</option>
           {ALL_STATUSES.map(s => (
             <option key={s.key} value={s.key}>{s.label} ({statusCounts[s.key] || 0})</option>
           ))}
@@ -174,9 +184,9 @@ export default function ApplicationInbox({ collegeId }) {
       {/* Result count */}
       {!loading && (
         <p className="text-xs text-slate-400">
-          {hasFilters
-            ? `${filtered.length} of ${apps.length} application${apps.length !== 1 ? 's' : ''}`
-            : `${apps.length} application${apps.length !== 1 ? 's' : ''}`
+          {search
+            ? `${filtered.length} match${filtered.length !== 1 ? 'es' : ''} on this page`
+            : `${pagination.total} application${pagination.total !== 1 ? 's' : ''} total`
           }
         </p>
       )}
@@ -187,6 +197,10 @@ export default function ApplicationInbox({ collegeId }) {
         <p className="text-slate-500">
           {hasFilters ? 'No applications match your filters.' : 'No applications found.'}
         </p>
+      )}
+
+      {!loading && filtered.length === 0 && apps.length > 0 && (
+        <p className="text-slate-500">No applications match your search on this page.</p>
       )}
 
       {!loading && filtered.length > 0 && (
@@ -200,6 +214,7 @@ export default function ApplicationInbox({ collegeId }) {
           </div>
 
           {filtered.map((app, i) => {
+
             const meta = STATUS_META[app.status] || { label: app.status, color: 'bg-slate-100 text-slate-600' }
             return (
               <button
@@ -231,6 +246,13 @@ export default function ApplicationInbox({ collegeId }) {
           })}
         </div>
       )}
+
+      <Pagination
+        page={pagination.page}
+        totalPages={pagination.totalPages}
+        total={pagination.total}
+        onPageChange={setPage}
+      />
     </section>
   )
 }

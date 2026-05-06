@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import api from '../../../services/api.js'
 import PaymentReceipts from '../../student/pages/PaymentReceipts.jsx'
 import { useRazorpay } from '../../../shared/hooks/useRazorpay.js'
+import Pagination from '../../../shared/components/Pagination.jsx'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
 
@@ -18,12 +19,16 @@ function fmtTime(str) {
   return d ? d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : ''
 }
 
+const LIMIT = 20
+
 export default function FeeReceipts({ collegeId }) {
-  const [rows, setRows]         = useState([])
-  const [courses, setCourses]   = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [error, setError]       = useState('')
-  const [selected, setSelected] = useState(null)   // row opened in modal
+  const [rows, setRows]               = useState([])
+  const [courses, setCourses]         = useState([])
+  const [loading, setLoading]         = useState(true)
+  const [error, setError]             = useState('')
+  const [selected, setSelected]       = useState(null)   // row opened in modal
+  const [pagination, setPagination]   = useState({ page: 1, totalPages: 1, total: 0 })
+  const [page, setPage]               = useState(1)
 
   // Filters
   const [status, setStatus]           = useState('')
@@ -31,6 +36,9 @@ export default function FeeReceipts({ collegeId }) {
   const [yearFilter, setYear]         = useState('')
   const [search, setSearch]           = useState('')
   const [searchInput, setSearchInput] = useState('')
+
+  // Reset to page 1 when filters change
+  useEffect(() => { setPage(1) }, [status, courseId, yearFilter, search])
 
   useEffect(() => {
     api.get(`masters/${collegeId}/faculty`)
@@ -41,16 +49,19 @@ export default function FeeReceipts({ collegeId }) {
   const fetchReceipts = useCallback(() => {
     setLoading(true)
     setError('')
-    const params = new URLSearchParams()
+    const params = new URLSearchParams({ page, limit: LIMIT })
     if (status)     params.set('status', status)
     if (courseId)   params.set('course_id', courseId)
     if (yearFilter) params.set('year_of_study', yearFilter)
     if (search)     params.set('q', search)
     api.get(`college-admin/${collegeId}/fee-receipts?${params}`)
-      .then(r => setRows(r.data.data || []))
+      .then(r => {
+        setRows(r.data.data || [])
+        setPagination(r.data.pagination || { page: 1, totalPages: 1, total: 0 })
+      })
       .catch(() => setError('Failed to load fee receipts.'))
       .finally(() => setLoading(false))
-  }, [collegeId, status, courseId, yearFilter, search])
+  }, [collegeId, page, status, courseId, yearFilter, search])
 
   useEffect(() => { fetchReceipts() }, [fetchReceipts])
 
@@ -61,7 +72,7 @@ export default function FeeReceipts({ collegeId }) {
 
   const paid    = rows.filter(r => Number(r.fee_total_amount) > 0 && Number(r.amount_paid) >= Number(r.fee_total_amount) - 0.01)
   const pending = rows.filter(r => !(Number(r.fee_total_amount) > 0 && Number(r.amount_paid) >= Number(r.fee_total_amount) - 0.01))
-  const summary = status === 'paid' ? paid : status === 'pending' ? pending : rows
+  const summary = rows
 
   function handleRowClick(row) {
     setSelected(row)
@@ -82,9 +93,9 @@ export default function FeeReceipts({ collegeId }) {
 
       {/* Summary counters */}
       <div className="grid grid-cols-3 gap-3">
-        <StatCard label="Total"   value={rows.length}    color="slate" />
-        <StatCard label="Paid"    value={paid.length}    color="emerald" />
-        <StatCard label="Pending" value={pending.length} color="amber" />
+        <StatCard label="Total"   value={pagination.total} color="slate" />
+        <StatCard label="Paid"    value={paid.length}      color="emerald" />
+        <StatCard label="Pending" value={pending.length}   color="amber" />
       </div>
 
       {/* Filters */}
@@ -221,6 +232,13 @@ export default function FeeReceipts({ collegeId }) {
           </div>
         </>
       )}
+
+      <Pagination
+        page={pagination.page}
+        totalPages={pagination.totalPages}
+        total={pagination.total}
+        onPageChange={setPage}
+      />
 
       {/* Student Fee Modal */}
       {selected && (

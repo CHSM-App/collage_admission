@@ -17,6 +17,10 @@ const express  = require('express');
 const router   = express.Router();
 const db       = require('./db');
 const mssql    = require('mssql');
+const { authenticate } = require('../middleware/auth');
+
+// All application form routes require authentication
+router.use(authenticate);
 
 async function logActivity(appId, action, actorRole, note = null) {
   try {

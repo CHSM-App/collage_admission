@@ -11,7 +11,7 @@ export default function AllReceipts() {
   const [activeId, setActiveId] = useState(null)
 
   useEffect(() => {
-    api.get(`applications?student_id=${user.id}`)
+    api.get(`applications?student_id=${user.id}&limit=100`)
       .then(r => {
         const all = r.data.data || []
         // Only show apps that have had at least one payment (fee paid flag)

@@ -13,6 +13,11 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('./db');
 const mssql   = require('mssql');
+const { authenticate } = require('../middleware/auth');
+const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
+
+// All student-facing application routes require authentication
+router.use(authenticate);
 
 async function logActivity(appId, action, actorRole, note = null) {
   try {
@@ -45,23 +50,14 @@ async function generateRegNumber(collegeId, courseId, year, academicYear) {
 // ── List applications for a student ────────────────────────
 router.get('/', async (req, res) => {
   const { student_id, academic_year } = req.query;
+  const { page, limit, offset } = parsePage(req.query);
 
   if (!student_id) {
     return res.status(400).json({ success: false, message: 'student_id is required.' });
   }
 
   try {
-    let query = `
-      SELECT
-        a.id, a.registration_number, a.year_of_study, a.academic_year,
-        a.status, a.roll_number, a.submitted_at, a.created_at,
-        a.rejection_reason, a.cancellation_reason, a.correction_note,
-        a.application_fee_paid, a.college_fee_paid,
-        a.fee_total_amount, a.fee_pay_now_amount,
-        ISNULL(psum.amount_paid, 0) AS amount_paid,
-        c.id   AS college_id,   c.name  AS college_name,  c.city AS college_city,
-        a.course_id,    COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
-        COALESCE(c.application_fee, 0) AS application_fee, ap.total_seats, ap.filled_seats
+    const joins = `
       FROM applications a
       JOIN colleges        c  ON c.id       = a.college_id
       LEFT JOIN faculty_master cr ON cr.code_no = a.course_id AND cr.college_id = a.college_id
@@ -72,19 +68,36 @@ router.get('/', async (req, res) => {
         WHERE payment_type = 'college_fee' AND status = 'success'
         GROUP BY application_id
       ) psum ON psum.application_id = a.id
-      WHERE a.student_id = @sid
     `;
 
+    let where = 'WHERE a.student_id = @sid';
     const req2 = db.request().input('sid', parseInt(student_id));
 
     if (academic_year) {
-      query += ' AND a.academic_year = @ay';
+      where += ' AND a.academic_year = @ay';
       req2.input('ay', academic_year);
     }
 
-    query += ' ORDER BY a.created_at DESC';
-    const result = await req2.query(query);
-    return res.json({ success: true, data: result.recordset });
+    const countRes = await req2.query(`SELECT COUNT(*) AS total ${joins} ${where}`);
+    const total    = countRes.recordset[0].total;
+
+    const dataRes = await req2.query(`
+      SELECT
+        a.id, a.registration_number, a.year_of_study, a.academic_year,
+        a.status, a.roll_number, a.submitted_at, a.created_at,
+        a.rejection_reason, a.cancellation_reason, a.correction_note,
+        a.application_fee_paid, a.college_fee_paid,
+        a.fee_total_amount, a.fee_pay_now_amount,
+        ISNULL(psum.amount_paid, 0) AS amount_paid,
+        c.id   AS college_id,   c.name  AS college_name,  c.city AS college_city,
+        a.course_id,    COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
+        COALESCE(c.application_fee, 0) AS application_fee, ap.total_seats, ap.filled_seats
+      ${joins} ${where}
+      ORDER BY a.created_at DESC
+      ${paginateQuery(offset, limit)}
+    `);
+
+    return res.json(paginatedResponse(dataRes.recordset, total, page, limit));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });
@@ -303,31 +316,38 @@ router.post('/:id/submit', async (req, res) => {
       app.college_id, app.course_id, app.year_of_study, app.academic_year
     );
 
-    // Record payment
-    await db.request()
-      .input('appId',  appId)
-      .input('ptype',  'application_fee')
-      .input('amount', app.application_fee)
-      .input('status', 'success')
-      .query(`
-        INSERT INTO payments (application_id, payment_type, amount, status, completed_at)
-        VALUES (@appId, @ptype, @amount, @status, GETDATE())
-      `);
+    const pool = await db;
+    const tx   = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input('appId',  mssql.Int,     appId)
+        .input('ptype',  mssql.NVarChar,'application_fee')
+        .input('amount', mssql.Decimal, app.application_fee)
+        .query(`
+          INSERT INTO payments (application_id, payment_type, amount, status, completed_at)
+          VALUES (@appId, @ptype, @amount, 'success', GETDATE())
+        `);
 
-    // Update application
-    await db.request()
-      .input('id',     appId)
-      .input('regNum', regNum)
-      .query(`
-        UPDATE applications
-        SET status = 'submitted',
-            registration_number = @regNum,
-            application_fee_paid = 1,
-            submitted_at = GETDATE(),
-            updated_at   = GETDATE(),
-            status_updated_at = GETDATE()
-        WHERE id = @id
-      `);
+      await tx.request()
+        .input('id',     mssql.Int,      appId)
+        .input('regNum', mssql.NVarChar, regNum)
+        .query(`
+          UPDATE applications
+          SET status = 'submitted',
+              registration_number = @regNum,
+              application_fee_paid = 1,
+              submitted_at = GETDATE(),
+              updated_at   = GETDATE(),
+              status_updated_at = GETDATE()
+          WHERE id = @id
+        `);
+
+      await tx.commit();
+    } catch (txErr) {
+      await tx.rollback();
+      throw txErr;
+    }
 
     await logActivity(appId, 'submitted', 'student', null);
 
@@ -385,28 +405,35 @@ router.post('/:id/pay-college-fee', async (req, res) => {
       amount = feeRes.recordset[0]?.total_fee || 0;
     }
 
-    // Record payment
-    await db.request()
-      .input('appId',  appId)
-      .input('ptype',  'college_fee')
-      .input('amount', amount)
-      .input('status', 'success')
-      .query(`
-        INSERT INTO payments (application_id, payment_type, amount, status, completed_at)
-        VALUES (@appId, @ptype, @amount, @status, GETDATE())
-      `);
+    const pool = await db;
+    const tx   = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input('appId',  mssql.Int,     appId)
+        .input('ptype',  mssql.NVarChar,'college_fee')
+        .input('amount', mssql.Decimal, amount)
+        .query(`
+          INSERT INTO payments (application_id, payment_type, amount, status, completed_at)
+          VALUES (@appId, @ptype, @amount, 'success', GETDATE())
+        `);
 
-    // Update application
-    await db.request()
-      .input('id', appId)
-      .query(`
-        UPDATE applications
-        SET status = 'fees_paid',
-            college_fee_paid = 1,
-            updated_at = GETDATE(),
-            status_updated_at = GETDATE()
-        WHERE id = @id
-      `);
+      await tx.request()
+        .input('id', mssql.Int, appId)
+        .query(`
+          UPDATE applications
+          SET status = 'fees_paid',
+              college_fee_paid = 1,
+              updated_at = GETDATE(),
+              status_updated_at = GETDATE()
+          WHERE id = @id
+        `);
+
+      await tx.commit();
+    } catch (txErr) {
+      await tx.rollback();
+      throw txErr;
+    }
 
     await logActivity(appId, 'fees_paid', 'student', null);
 
@@ -485,30 +512,34 @@ router.post('/:id/subjects', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Subject selection is only available after roll number assignment.' });
     }
 
-    // Delete previous selections
-    await db.request()
-      .input('appId', appId)
-      .query('DELETE FROM application_subjects WHERE application_id = @appId');
+    const pool = await db;
+    const tx   = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input('appId', mssql.Int, appId)
+        .query('DELETE FROM application_subjects WHERE application_id = @appId');
 
-    // Insert new selections
-    for (const subId of subject_ids) {
-      await db.request()
-        .input('appId', appId)
-        .input('subId', parseInt(subId))
+      for (const subId of subject_ids) {
+        await tx.request()
+          .input('appId', mssql.Int, appId)
+          .input('subId', mssql.Int, parseInt(subId))
+          .query(`INSERT INTO application_subjects (application_id, subject_id) VALUES (@appId, @subId)`);
+      }
+
+      await tx.request()
+        .input('id', mssql.Int, appId)
         .query(`
-          INSERT INTO application_subjects (application_id, subject_id)
-          VALUES (@appId, @subId)
+          UPDATE applications
+          SET status = 'enrolled', enrolled_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE()
+          WHERE id = @id
         `);
-    }
 
-    // Move to enrolled
-    await db.request()
-      .input('id', appId)
-      .query(`
-        UPDATE applications
-        SET status = 'enrolled', enrolled_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE()
-        WHERE id = @id
-      `);
+      await tx.commit();
+    } catch (txErr) {
+      await tx.rollback();
+      throw txErr;
+    }
 
     await logActivity(appId, 'enrolled', 'student', null);
 

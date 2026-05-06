@@ -44,8 +44,9 @@ const NAV_SECTIONS = [
 
 const ALL_NAV_ITEMS = NAV_SECTIONS.flatMap(s => s.items)
 
-const emptyPerms = () => Object.fromEntries(ALL_PERMISSIONS.map(p => [p.key, false]))
-const emptyNav   = () => Object.fromEntries(ALL_NAV_ITEMS.map(n => [n.key, true]))
+const emptyPerms   = () => Object.fromEntries(ALL_PERMISSIONS.map(p => [p.key, false]))
+const emptyNav     = () => Object.fromEntries(ALL_NAV_ITEMS.map(n => [n.key, true]))   // new role: all visible by default
+const emptyNavEdit = () => Object.fromEntries(ALL_NAV_ITEMS.map(n => [n.key, false]))  // edit role: only what DB says
 
 export default function RolesPanel({ college }) {
   const [roles,   setRoles]   = useState([])
@@ -90,7 +91,7 @@ export default function RolesPanel({ college }) {
 
   function openEditRole(role) {
     const perms = emptyPerms()
-    const nav   = emptyNav()
+    const nav   = emptyNavEdit()
     role.permissions.forEach(p => {
       if (p.permission.startsWith('nav:')) nav[p.permission.slice(4)] = !!p.can_write
       else perms[p.permission] = !!p.can_write

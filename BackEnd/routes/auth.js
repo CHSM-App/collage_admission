@@ -4,13 +4,35 @@
  * POST /auth/login/college
  */
 
-const express = require('express');
-const bcrypt  = require('bcryptjs');
-const router  = express.Router();
-const db      = require('./db');
+const express   = require('express');
+const bcrypt    = require('bcryptjs');
+const jwt       = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
+const router    = express.Router();
+const db        = require('./db');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_in_prod';
+
+// 10 attempts per 15 minutes per IP for login endpoints
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many login attempts. Please try again after 15 minutes.' },
+});
+
+// 5 registrations per hour per IP to prevent spam accounts
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many registration attempts. Please try again after an hour.' },
+});
 
 // ── Student login ───────────────────────────────────────────
-router.post('/login/student', async (req, res) => {
+router.post('/login/student', loginLimiter, async (req, res) => {
   const { phone, password } = req.body;
 
   if (!phone || !password) {
@@ -33,9 +55,12 @@ router.post('/login/student', async (req, res) => {
       return res.status(401).json({ message: 'Invalid phone number or password.' });
     }
 
+    const token = jwt.sign({ id: student.id, role: 'student' }, JWT_SECRET, { expiresIn: '7d' });
+
     return res.json({
       message: 'Login successful',
       role: 'student',
+      token,
       user: {
         id:       student.id,
         name:     student.full_name,
@@ -52,7 +77,7 @@ router.post('/login/student', async (req, res) => {
 });
 
 // ── College login (admin OR staff — single endpoint) ────────
-router.post('/login/college', async (req, res) => {
+router.post('/login/college', loginLimiter, async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
@@ -70,9 +95,12 @@ router.post('/login/college', async (req, res) => {
       const match   = await bcrypt.compare(password, college.admin_password_hash);
       if (!match) return res.status(401).json({ message: 'Invalid email or password.' });
 
+      const token = jwt.sign({ id: college.id, role: 'college', is_staff: false }, JWT_SECRET, { expiresIn: '7d' });
+
       return res.json({
         message: 'Login successful',
         role: 'college',
+        token,
         user: {
           id:           college.id,
           name:         college.name,
@@ -124,9 +152,16 @@ router.post('/login/college', async (req, res) => {
       }
     });
 
+    const token = jwt.sign(
+      { id: staff.college_id, role: 'college', is_staff: true, staff_id: staff.id, permissions, nav_visibility },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
     return res.json({
       message: 'Login successful',
       role: 'college',
+      token,
       user: {
         id:           staff.college_id,
         name:         staff.college_name,
@@ -147,7 +182,7 @@ router.post('/login/college', async (req, res) => {
 });
 
 // ── Admin login ─────────────────────────────────────────────
-router.post('/login/admin', async (req, res) => {
+router.post('/login/admin', loginLimiter, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ message: 'Email and password are required.' });
@@ -165,9 +200,11 @@ router.post('/login/admin', async (req, res) => {
     if (!match) {
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
+    const token = jwt.sign({ id: admin.id, role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
     return res.json({
       message: 'Login successful',
       role: 'admin',
+      token,
       user: { id: admin.id, name: admin.name, email: admin.email },
     });
   } catch (err) {
@@ -177,7 +214,7 @@ router.post('/login/admin', async (req, res) => {
 });
 
 // ── College staff (sub-user) login ──────────────────────────
-router.post('/login/college-user', async (req, res) => {
+router.post('/login/college-user', loginLimiter, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ message: 'Email and password are required.' });
@@ -227,9 +264,16 @@ router.post('/login/college-user', async (req, res) => {
       }
     });
 
+    const token = jwt.sign(
+      { id: user.college_id, role: 'college', is_staff: true, staff_id: user.id, permissions, nav_visibility },
+      JWT_SECRET,
+      { expiresIn: '7d' }
+    );
+
     return res.json({
       message: 'Login successful',
       role: 'college',
+      token,
       user: {
         id:           user.college_id,
         name:         user.college_name,
@@ -251,7 +295,7 @@ router.post('/login/college-user', async (req, res) => {
 });
 
 // ── Student registration ────────────────────────────────────
-router.post('/register/student', async (req, res) => {
+router.post('/register/student', registerLimiter, async (req, res) => {
   const { full_name, email, password, phone, dob, gender, address, city, category } = req.body;
 
   if (!full_name || !email || !password) {

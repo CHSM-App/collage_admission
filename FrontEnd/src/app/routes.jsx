@@ -10,6 +10,7 @@ import ApplyWizard          from '../features/student/pages/ApplyWizard.jsx'
 import CollegeApplyWizard   from '../features/college/pages/CollegeApplyWizard.jsx'
 import DashboardLayout  from '../layouts/DashboardLayout.jsx'
 import ProtectedRoute   from '../shared/components/ProtectedRoute.jsx'
+import ErrorBoundary    from '../shared/components/ErrorBoundary.jsx'
 import { getDashboardPath, LOGIN_PATHS } from './routePaths.js'
 import { useAuthContext } from '../context/AuthContext.jsx'
 
@@ -36,12 +37,20 @@ export default function AppRoutes() {
 
       {/* Multi-step application wizard — full-screen, no sidebar */}
       <Route element={<ProtectedRoute allowedRoles={['student']} />}>
-        <Route path="/apply/:applicationId" element={<ApplyWizard />} />
+        <Route path="/apply/:applicationId" element={
+          <ErrorBoundary>
+            <ApplyWizard />
+          </ErrorBoundary>
+        } />
       </Route>
 
       {/* College-side application wizard — full-screen, no sidebar */}
       <Route element={<ProtectedRoute allowedRoles={['college']} />}>
-        <Route path="/college/apply/:applicationId" element={<CollegeApplyWizard />} />
+        <Route path="/college/apply/:applicationId" element={
+          <ErrorBoundary>
+            <CollegeApplyWizard />
+          </ErrorBoundary>
+        } />
       </Route>
 
       {/* Dashboards */}

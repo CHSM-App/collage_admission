@@ -8,6 +8,10 @@
 const express = require('express');
 const router  = express.Router();
 const db      = require('./db');
+const { authenticate } = require('../middleware/auth');
+
+// All notification routes require authentication
+router.use(authenticate);
 
 // Map each application status to a notification message + action link
 function buildNotifications(apps) {

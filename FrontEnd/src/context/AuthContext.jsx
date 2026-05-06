@@ -23,13 +23,6 @@ function readStoredAuth() {
 
 function persistAuth(authState) {
   localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(authState))
-
-  // JWT persistence is disabled for now.
-  // if (authState.token) {
-  //   localStorage.setItem('authToken', authState.token)
-  // } else {
-  //   localStorage.removeItem('authToken')
-  // }
 }
 
 export function AuthProvider({ children }) {
@@ -50,7 +43,6 @@ export function AuthProvider({ children }) {
   const logout = () => {
     setAuthState(emptyAuthState)
     localStorage.removeItem(AUTH_STORAGE_KEY)
-    // localStorage.removeItem('authToken')
   }
 
   const value = useMemo(

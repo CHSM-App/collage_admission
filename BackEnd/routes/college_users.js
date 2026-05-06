@@ -23,6 +23,8 @@ const bcrypt  = require('bcryptjs');
 const router  = express.Router();
 const db      = require('./db');
 const mssql   = require('mssql');
+const { authenticate, requireAdmin } = require('../middleware/auth');
+const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
 
 const ALL_PERMISSIONS = [
   'submit_application',
@@ -41,7 +43,9 @@ const NAV_ITEMS = [
   'inbox',
   'add-application',
   'rollnumbers',
+  'fee-receipts',
   'master-faculty',
+  'master-class',
   'master-bank',
   'master-course',
   'master-group',
@@ -51,7 +55,7 @@ const NAV_ITEMS = [
 ];
 
 // ── PUT /admin/colleges/:id ──────────────────────────────────
-router.put('/colleges/:id', async (req, res) => {
+router.put('/colleges/:id', authenticate, requireAdmin, async (req, res) => {
   const { application_fee } = req.body;
   const id = parseInt(req.params.id);
   if (application_fee === undefined || application_fee === null || application_fee === '') {
@@ -74,16 +78,22 @@ router.put('/colleges/:id', async (req, res) => {
 });
 
 // ── GET /admin/colleges ──────────────────────────────────────
-router.get('/colleges', async (req, res) => {
+router.get('/colleges', authenticate, requireAdmin, async (req, res) => {
+  const { page, limit, offset } = parsePage(req.query);
   try {
-    const result = await db.request().query(`
+    const countRes = await db.request().query('SELECT COUNT(*) AS total FROM colleges');
+    const total    = countRes.recordset[0].total;
+
+    const dataRes = await db.request().query(`
       SELECT c.id, c.name, c.city, c.email, c.college_code, c.application_fee,
              (SELECT COUNT(*) FROM college_users cu WHERE cu.college_id = c.id AND cu.is_active = 1) AS active_users,
              (SELECT COUNT(*) FROM college_roles cr WHERE cr.college_id = c.id) AS roles_count
       FROM colleges c
       ORDER BY c.name
+      ${paginateQuery(offset, limit)}
     `);
-    return res.json({ success: true, data: result.recordset });
+
+    return res.json(paginatedResponse(dataRes.recordset, total, page, limit));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });
@@ -91,7 +101,7 @@ router.get('/colleges', async (req, res) => {
 });
 
 // ── GET /admin/colleges/:collegeId/roles ─────────────────────
-router.get('/colleges/:collegeId/roles', async (req, res) => {
+router.get('/colleges/:collegeId/roles', authenticate, requireAdmin, async (req, res) => {
   const collegeId = parseInt(req.params.collegeId);
   try {
     const rolesRes = await db.request()
@@ -128,7 +138,7 @@ router.get('/colleges/:collegeId/roles', async (req, res) => {
 
 // ── POST /admin/colleges/:collegeId/roles ────────────────────
 // body: { role_name, permissions: { submit_application: true, ... }, nav_visibility: { inbox: true, ... } }
-router.post('/colleges/:collegeId/roles', async (req, res) => {
+router.post('/colleges/:collegeId/roles', authenticate, requireAdmin, async (req, res) => {
   const collegeId = parseInt(req.params.collegeId);
   const { role_name, permissions = {}, nav_visibility = {} } = req.body;
 
@@ -160,7 +170,7 @@ router.post('/colleges/:collegeId/roles', async (req, res) => {
 
     // Insert nav visibility
     for (const key of NAV_ITEMS) {
-      const visible = nav_visibility[key] !== false ? 1 : 0;
+      const visible = nav_visibility[key] === true ? 1 : 0;
       await db.request()
         .input('rid',   mssql.Int,      roleId)
         .input('perm',  mssql.NVarChar, `nav:${key}`)
@@ -179,7 +189,7 @@ router.post('/colleges/:collegeId/roles', async (req, res) => {
 });
 
 // ── PUT /admin/colleges/:collegeId/roles/:roleId ─────────────
-router.put('/colleges/:collegeId/roles/:roleId', async (req, res) => {
+router.put('/colleges/:collegeId/roles/:roleId', authenticate, requireAdmin, async (req, res) => {
   const roleId = parseInt(req.params.roleId);
   const { role_name, permissions = {}, nav_visibility = {} } = req.body;
 
@@ -209,7 +219,7 @@ router.put('/colleges/:collegeId/roles/:roleId', async (req, res) => {
 
     // Upsert nav visibility
     for (const key of NAV_ITEMS) {
-      const visible = nav_visibility[key] !== false ? 1 : 0;
+      const visible = nav_visibility[key] === true ? 1 : 0;
       await db.request()
         .input('rid',   mssql.Int,      roleId)
         .input('perm',  mssql.NVarChar, `nav:${key}`)
@@ -231,7 +241,7 @@ router.put('/colleges/:collegeId/roles/:roleId', async (req, res) => {
 });
 
 // ── DELETE /admin/colleges/:collegeId/roles/:roleId ──────────
-router.delete('/colleges/:collegeId/roles/:roleId', async (req, res) => {
+router.delete('/colleges/:collegeId/roles/:roleId', authenticate, requireAdmin, async (req, res) => {
   const roleId = parseInt(req.params.roleId);
   try {
     const hasUsers = await db.request()
@@ -254,10 +264,16 @@ router.delete('/colleges/:collegeId/roles/:roleId', async (req, res) => {
 });
 
 // ── GET /admin/colleges/:collegeId/users ─────────────────────
-router.get('/colleges/:collegeId/users', async (req, res) => {
+router.get('/colleges/:collegeId/users', authenticate, requireAdmin, async (req, res) => {
   const collegeId = parseInt(req.params.collegeId);
+  const { page, limit, offset } = parsePage(req.query);
   try {
-    const result = await db.request()
+    const countRes = await db.request()
+      .input('cid', mssql.Int, collegeId)
+      .query('SELECT COUNT(*) AS total FROM college_users WHERE college_id = @cid');
+    const total = countRes.recordset[0].total;
+
+    const dataRes = await db.request()
       .input('cid', mssql.Int, collegeId)
       .query(`
         SELECT u.id, u.full_name, u.email, u.is_active, u.created_at,
@@ -266,8 +282,10 @@ router.get('/colleges/:collegeId/users', async (req, res) => {
         JOIN college_roles r ON r.id = u.role_id
         WHERE u.college_id = @cid
         ORDER BY u.full_name
+        ${paginateQuery(offset, limit)}
       `);
-    return res.json({ success: true, data: result.recordset });
+
+    return res.json(paginatedResponse(dataRes.recordset, total, page, limit));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });
@@ -276,7 +294,7 @@ router.get('/colleges/:collegeId/users', async (req, res) => {
 
 // ── POST /admin/colleges/:collegeId/users ────────────────────
 // body: { full_name, email, password, role_id }
-router.post('/colleges/:collegeId/users', async (req, res) => {
+router.post('/colleges/:collegeId/users', authenticate, requireAdmin, async (req, res) => {
   const collegeId = parseInt(req.params.collegeId);
   const { full_name, email, password, role_id } = req.body;
 
@@ -309,7 +327,7 @@ router.post('/colleges/:collegeId/users', async (req, res) => {
 });
 
 // ── PUT /admin/colleges/:collegeId/users/:userId ─────────────
-router.put('/colleges/:collegeId/users/:userId', async (req, res) => {
+router.put('/colleges/:collegeId/users/:userId', authenticate, requireAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId);
   const { full_name, email, password, role_id, is_active } = req.body;
   try {
@@ -345,7 +363,7 @@ router.put('/colleges/:collegeId/users/:userId', async (req, res) => {
 });
 
 // ── DELETE /admin/colleges/:collegeId/users/:userId ──────────
-router.delete('/colleges/:collegeId/users/:userId', async (req, res) => {
+router.delete('/colleges/:collegeId/users/:userId', authenticate, requireAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId);
   try {
     await db.request()

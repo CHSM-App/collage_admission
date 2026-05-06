@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import api from '../../../services/api.js'
+import Pagination from '../../../shared/components/Pagination.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import RolesPanel      from './RolesPanel.jsx'
 import FacultyMaster   from '../../college/pages/masters/FacultyMaster.jsx'
@@ -21,21 +22,26 @@ const TABS = [
   { key: 'bank',       label: 'Bank' },
 ]
 
+const LIMIT = 20
+
 export default function CollegeList() {
-  const [colleges,  setColleges]  = useState([])
-  const [loading,   setLoading]   = useState(true)
-  const [selected,  setSelected]  = useState(null)
-  const [tab,       setTab]       = useState('roles')
-  const [feeEdit,   setFeeEdit]   = useState(false)
-  const [feeVal,    setFeeVal]    = useState('')
-  const [feeSaving, setFeeSaving] = useState(false)
-  const [feeMsg,    setFeeMsg]    = useState('')
+  const [colleges,    setColleges]    = useState([])
+  const [loading,     setLoading]     = useState(true)
+  const [selected,    setSelected]    = useState(null)
+  const [tab,         setTab]         = useState('roles')
+  const [feeEdit,     setFeeEdit]     = useState(false)
+  const [feeVal,      setFeeVal]      = useState('')
+  const [feeSaving,   setFeeSaving]   = useState(false)
+  const [feeMsg,      setFeeMsg]      = useState('')
+  const [pagination,  setPagination]  = useState({ page: 1, totalPages: 1, total: 0 })
+  const [page,        setPage]        = useState(1)
 
   function fetchColleges() {
-    api.get('admin/colleges')
+    api.get(`admin/colleges?page=${page}&limit=${LIMIT}`)
       .then(r => {
         const list = r.data.data || []
         setColleges(list)
+        setPagination(r.data.pagination || { page: 1, totalPages: 1, total: 0 })
         // Keep selected in sync
         if (selected) {
           const updated = list.find(c => c.id === selected.id)
@@ -46,7 +52,7 @@ export default function CollegeList() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { fetchColleges() }, [])
+  useEffect(() => { fetchColleges() }, [page])
 
   function selectCollege(c) { setSelected(c); setTab('roles'); setFeeEdit(false); setFeeMsg('') }
   function goBack()          { setSelected(null) }
@@ -159,7 +165,7 @@ export default function CollegeList() {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-slate-500">{colleges.length} college{colleges.length !== 1 ? 's' : ''} registered.</p>
+      <p className="text-sm text-slate-500">{pagination.total} college{pagination.total !== 1 ? 's' : ''} registered.</p>
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
@@ -204,6 +210,12 @@ export default function CollegeList() {
           </tbody>
         </table>
       </div>
+      <Pagination
+        page={pagination.page}
+        totalPages={pagination.totalPages}
+        total={pagination.total}
+        onPageChange={setPage}
+      />
     </div>
   )
 }

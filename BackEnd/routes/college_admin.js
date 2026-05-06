@@ -23,6 +23,11 @@ const express = require('express');
 const router  = express.Router({ mergeParams: true });
 const db      = require('./db');
 const mssqlShared = require('mssql');
+const { authenticate, requireCollegeAccess, requirePerm } = require('../middleware/auth');
+const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
+
+// All routes in this file require authentication and college ownership
+router.use(authenticate, requireCollegeAccess);
 
 // ── Activity log helper ─────────────────────────────────────
 async function logActivity(appId, action, actorRole, note = null) {
@@ -79,7 +84,7 @@ router.get('/:collegeId/admission-periods', async (req, res) => {
   }
 });
 
-router.post('/:collegeId/admission-periods', async (req, res) => {
+router.post('/:collegeId/admission-periods', requirePerm('masters'), async (req, res) => {
   const { course_id, year_of_study, academic_year, start_date, end_date, total_seats } = req.body;
 
   if (!course_id || !year_of_study || !academic_year || !start_date || !end_date || !total_seats) {
@@ -109,7 +114,7 @@ router.post('/:collegeId/admission-periods', async (req, res) => {
   }
 });
 
-router.put('/:collegeId/admission-periods/:periodId', async (req, res) => {
+router.put('/:collegeId/admission-periods/:periodId', requirePerm('masters'), async (req, res) => {
   const { start_date, end_date, total_seats, is_active, is_disabled } = req.body;
 
   try {
@@ -140,7 +145,7 @@ router.put('/:collegeId/admission-periods/:periodId', async (req, res) => {
   }
 });
 
-router.delete('/:collegeId/admission-periods/:periodId', async (req, res) => {
+router.delete('/:collegeId/admission-periods/:periodId', requirePerm('masters'), async (req, res) => {
   const periodId  = parseInt(req.params.periodId);
   const collegeId = parseInt(req.params.collegeId);
   try {
@@ -189,56 +194,62 @@ router.get('/:collegeId/students/search', async (req, res) => {
 
 // ── Application Inbox ───────────────────────────────────────
 
-router.get('/:collegeId/applications', async (req, res) => {
+router.get('/:collegeId/applications', requirePerm('review_application'), async (req, res) => {
   const { status, course_id, year_of_study } = req.query;
+  const { page, limit, offset } = parsePage(req.query);
 
   try {
-    let query = `
+    let where = `WHERE a.college_id = @col AND a.status <> 'draft'`;
+    const req2 = db.request().input('col', parseInt(req.params.collegeId));
+
+    if (status) {
+      const statuses = status.split(',').map(s => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        where += ' AND a.status = @status';
+        req2.input('status', statuses[0]);
+      } else {
+        const placeholders = statuses.map((_, i) => `@s${i}`).join(',');
+        where += ` AND a.status IN (${placeholders})`;
+        statuses.forEach((s, i) => req2.input(`s${i}`, s));
+      }
+    }
+    if (course_id) {
+      where += ' AND a.course_id = @crs';
+      req2.input('crs', parseInt(course_id));
+    }
+    if (year_of_study) {
+      where += ' AND a.year_of_study = @yr';
+      req2.input('yr', parseInt(year_of_study));
+    }
+
+    const joins = `
+      FROM applications a
+      JOIN students       s  ON s.id  = a.student_id
+      LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+    `;
+
+    const countRes = await req2.query(`SELECT COUNT(*) AS total ${joins} ${where}`);
+    const total    = countRes.recordset[0].total;
+
+    const dataRes = await req2.query(`
       SELECT
         a.id, a.registration_number, a.year_of_study, a.academic_year,
         a.status, a.submitted_at, a.roll_number, a.course_id,
         s.full_name AS student_name, s.email AS student_email, s.phone,
         COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name
-      FROM applications a
-      JOIN students       s  ON s.id  = a.student_id
-      LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
-      WHERE a.college_id = @col AND a.status <> 'draft'
-    `;
+      ${joins} ${where}
+      ORDER BY a.submitted_at DESC
+      ${paginateQuery(offset, limit)}
+    `);
 
-    const req2 = db.request().input('col', parseInt(req.params.collegeId));
-
-    if (status) {
-      // Support comma-separated values e.g. status=approved,document_verification,confirmed
-      const statuses = status.split(',').map(s => s.trim()).filter(Boolean);
-      if (statuses.length === 1) {
-        query += ' AND a.status = @status';
-        req2.input('status', statuses[0]);
-      } else {
-        const placeholders = statuses.map((_, i) => `@s${i}`).join(',');
-        query += ` AND a.status IN (${placeholders})`;
-        statuses.forEach((s, i) => req2.input(`s${i}`, s));
-      }
-    }
-    if (course_id) {
-      query += ' AND a.course_id = @crs';
-      req2.input('crs', parseInt(course_id));
-    }
-    if (year_of_study) {
-      query += ' AND a.year_of_study = @yr';
-      req2.input('yr', parseInt(year_of_study));
-    }
-
-    query += ' ORDER BY a.submitted_at DESC';
-
-    const result = await req2.query(query);
-    return res.json({ success: true, data: result.recordset });
+    return res.json(paginatedResponse(dataRes.recordset, total, page, limit));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
 
-router.get('/:collegeId/applications/:appId', async (req, res) => {
+router.get('/:collegeId/applications/:appId', requirePerm('review_application'), async (req, res) => {
   try {
     const result = await db.request()
       .input('id',  parseInt(req.params.appId))
@@ -311,7 +322,7 @@ router.get('/:collegeId/applications/:appId', async (req, res) => {
 });
 
 // ── Request Correction (submitted/under_review → correction_requested) ──────
-router.post('/:collegeId/applications/:appId/request-correction', async (req, res) => {
+router.post('/:collegeId/applications/:appId/request-correction', requirePerm('review_application'), async (req, res) => {
   const { note } = req.body;
   if (!note || !note.trim()) {
     return res.status(400).json({ success: false, message: 'A correction note is required.' });
@@ -349,7 +360,7 @@ router.post('/:collegeId/applications/:appId/request-correction', async (req, re
 
 // ── Accept Application (submitted/correction_done → doc_verified) ────────────
 // College accepts the application. Student is notified to visit for doc check.
-router.post('/:collegeId/applications/:appId/approve', async (req, res) => {
+router.post('/:collegeId/applications/:appId/approve', requirePerm('review_application'), async (req, res) => {
   try {
     const appRes = await db.request()
       .input('id',  parseInt(req.params.appId))
@@ -363,19 +374,28 @@ router.post('/:collegeId/applications/:appId/approve', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Application must be under review to accept.' });
     }
 
-    // Hold a seat in the admission period
-    await db.request()
-      .input('pid', appRes.recordset[0].admission_period_id)
-      .query('UPDATE admission_periods SET filled_seats = filled_seats + 1 WHERE id = @pid AND filled_seats < total_seats');
+    const pool1 = await db;
+    const tx1   = pool1.transaction();
+    await tx1.begin();
+    try {
+      await tx1.request()
+        .input('pid', mssqlShared.Int, appRes.recordset[0].admission_period_id)
+        .query('UPDATE admission_periods SET filled_seats = filled_seats + 1 WHERE id = @pid AND filled_seats < total_seats');
 
-    await db.request()
-      .input('id', parseInt(req.params.appId))
-      .query(`
-        UPDATE applications
-        SET status = 'doc_verified', approved_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(),
-            correction_note = NULL
-        WHERE id = @id
-      `);
+      await tx1.request()
+        .input('id', mssqlShared.Int, parseInt(req.params.appId))
+        .query(`
+          UPDATE applications
+          SET status = 'doc_verified', approved_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(),
+              correction_note = NULL
+          WHERE id = @id
+        `);
+
+      await tx1.commit();
+    } catch (txErr) {
+      await tx1.rollback();
+      throw txErr;
+    }
 
     await logActivity(req.params.appId, 'accepted', 'college', null);
 
@@ -387,7 +407,7 @@ router.post('/:collegeId/applications/:appId/approve', async (req, res) => {
 });
 
 // ── Reject ──────────────────────────────────────────────────
-router.post('/:collegeId/applications/:appId/reject', async (req, res) => {
+router.post('/:collegeId/applications/:appId/reject', requirePerm('review_application'), async (req, res) => {
   const { reason } = req.body;
 
   try {
@@ -424,7 +444,7 @@ router.post('/:collegeId/applications/:appId/reject', async (req, res) => {
 // ── Confirm after doc visit: set fees and move to confirmed ──────────────────
 // Student visited college. College verifies docs, sets fees, confirms admission.
 // Status: doc_verified → confirmed
-router.post('/:collegeId/applications/:appId/confirm', async (req, res) => {
+router.post('/:collegeId/applications/:appId/confirm', requirePerm('review_application'), async (req, res) => {
   const { fee_total_amount, fee_pay_now_amount, document_ids_verified } = req.body;
 
   const total  = parseFloat(fee_total_amount);
@@ -453,30 +473,40 @@ router.post('/:collegeId/applications/:appId/confirm', async (req, res) => {
       return res.status(400).json({ success: false, message: 'Application must be in doc_verified status to confirm.' });
     }
 
-    // Mark documents as physically verified
-    if (Array.isArray(document_ids_verified) && document_ids_verified.length > 0) {
-      for (const docId of document_ids_verified) {
-        await db.request()
-          .input('docId', parseInt(docId))
-          .input('appId', parseInt(req.params.appId))
-          .query(`
-            UPDATE application_documents
-            SET is_verified = 1, verified_at = GETDATE()
-            WHERE id = @docId AND application_id = @appId
-          `);
+    const pool2 = await db;
+    const tx2   = pool2.transaction();
+    await tx2.begin();
+    try {
+      // Mark documents as physically verified
+      if (Array.isArray(document_ids_verified) && document_ids_verified.length > 0) {
+        for (const docId of document_ids_verified) {
+          await tx2.request()
+            .input('docId', mssqlShared.Int, parseInt(docId))
+            .input('appId', mssqlShared.Int, parseInt(req.params.appId))
+            .query(`
+              UPDATE application_documents
+              SET is_verified = 1, verified_at = GETDATE()
+              WHERE id = @docId AND application_id = @appId
+            `);
+        }
       }
-    }
 
-    await db.request()
-      .input('id',    mssqlShared.Int,     parseInt(req.params.appId))
-      .input('total', mssqlShared.Decimal, total)
-      .input('now',   mssqlShared.Decimal, payNow)
-      .query(`
-        UPDATE applications
-        SET status = 'confirmed', confirmed_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(),
-            fee_total_amount = @total, fee_pay_now_amount = @now
-        WHERE id = @id
-      `);
+      await tx2.request()
+        .input('id',    mssqlShared.Int,     parseInt(req.params.appId))
+        .input('total', mssqlShared.Decimal, total)
+        .input('now',   mssqlShared.Decimal, payNow)
+        .query(`
+          UPDATE applications
+          SET status = 'confirmed', confirmed_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(),
+              fee_total_amount = @total, fee_pay_now_amount = @now
+          WHERE id = @id
+        `);
+
+      await tx2.commit();
+    } catch (txErr) {
+      await tx2.rollback();
+      throw txErr;
+    }
 
     await logActivity(req.params.appId, 'confirmed', 'college', `Total fee: ₹${total}, Pay now: ₹${payNow}`);
 
@@ -488,7 +518,7 @@ router.post('/:collegeId/applications/:appId/confirm', async (req, res) => {
 });
 
 // ── Set fee amounts (college enters total fee and amount due now) ─────────────
-router.post('/:collegeId/applications/:appId/set-fee', async (req, res) => {
+router.post('/:collegeId/applications/:appId/set-fee', requirePerm('review_application'), async (req, res) => {
   const { fee_total_amount, fee_pay_now_amount } = req.body;
 
   const total  = parseFloat(fee_total_amount);
@@ -535,7 +565,7 @@ router.post('/:collegeId/applications/:appId/set-fee', async (req, res) => {
 });
 
 // ── Cancel (held seat freed) ─────────────────────────────────
-router.post('/:collegeId/applications/:appId/cancel', async (req, res) => {
+router.post('/:collegeId/applications/:appId/cancel', requirePerm('review_application'), async (req, res) => {
   const { reason } = req.body;
 
   try {
@@ -550,21 +580,31 @@ router.post('/:collegeId/applications/:appId/cancel', async (req, res) => {
 
     const { status, admission_period_id } = appRes.recordset[0];
 
-    // Free the seat if one was held (doc_verified or later)
-    if (['doc_verified', 'scrutiny_accepted', 'doc_verification_pending', 'confirmed'].includes(status)) {
-      await db.request()
-        .input('pid', admission_period_id)
-        .query('UPDATE admission_periods SET filled_seats = filled_seats - 1 WHERE id = @pid AND filled_seats > 0');
-    }
+    const pool3 = await db;
+    const tx3   = pool3.transaction();
+    await tx3.begin();
+    try {
+      // Free the seat if one was held (doc_verified or later)
+      if (['doc_verified', 'scrutiny_accepted', 'doc_verification_pending', 'confirmed'].includes(status)) {
+        await tx3.request()
+          .input('pid', mssqlShared.Int, admission_period_id)
+          .query('UPDATE admission_periods SET filled_seats = filled_seats - 1 WHERE id = @pid AND filled_seats > 0');
+      }
 
-    await db.request()
-      .input('id',     parseInt(req.params.appId))
-      .input('reason', reason || null)
-      .query(`
-        UPDATE applications
-        SET status = 'cancelled', cancellation_reason = @reason, updated_at = GETDATE(), status_updated_at = GETDATE()
-        WHERE id = @id
-      `);
+      await tx3.request()
+        .input('id',     mssqlShared.Int,     parseInt(req.params.appId))
+        .input('reason', mssqlShared.NVarChar, reason || null)
+        .query(`
+          UPDATE applications
+          SET status = 'cancelled', cancellation_reason = @reason, updated_at = GETDATE(), status_updated_at = GETDATE()
+          WHERE id = @id
+        `);
+
+      await tx3.commit();
+    } catch (txErr) {
+      await tx3.rollback();
+      throw txErr;
+    }
 
     await logActivity(req.params.appId, 'cancelled', 'college', reason || null);
 
@@ -578,7 +618,7 @@ router.post('/:collegeId/applications/:appId/cancel', async (req, res) => {
 // ── Record offline (cash) college fee payment ────────────────
 // POST /:collegeId/applications/:appId/record-cash-payment
 // body: { amount, note? }
-router.post('/:collegeId/applications/:appId/record-cash-payment', async (req, res) => {
+router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('collect_fees'), async (req, res) => {
   const { amount, note } = req.body;
   const amt = parseFloat(amount);
 
@@ -628,34 +668,41 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', async (req, r
       return res.status(400).json({ success: false, message: `Amount (₹${amt}) exceeds remaining balance (₹${remaining}).` });
     }
 
-    // Record payment
-    await db.request()
-      .input('appId',  mssqlShared.Int,      appId)
-      .input('amount', mssqlShared.Decimal,   amt)
-      .input('note',   mssqlShared.NVarChar,  note || null)
-      .query(`
-        INSERT INTO payments (application_id, payment_type, amount, status,
-          razorpay_order_id, razorpay_payment_id, completed_at)
-        VALUES (@appId, 'college_fee', @amount, 'success',
-          CONCAT('CASH-', CAST(@appId AS NVARCHAR), '-', CAST(CHECKSUM(NEWID()) AS NVARCHAR)),
-          CONCAT('CASH-', FORMAT(GETDATE(),'yyyyMMddHHmmss')),
-          GETDATE())
-      `);
-
     const newTotalPaid = alreadyPaid + amt;
     const newRemaining = Math.max(0, totalFee - newTotalPaid);
-    // Admission confirmed once first instalment (pay_now threshold) is met
     const firstPaid    = payNowThreshold > 0 && newTotalPaid >= payNowThreshold - 0.01;
     const fullyPaid    = totalFee > 0 && newTotalPaid >= totalFee - 0.01;
 
-    if (firstPaid) {
-      await db.request()
-        .input('id', mssqlShared.Int, appId)
+    const pool = await db;
+    const tx   = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input('appId',  mssqlShared.Int,      appId)
+        .input('amount', mssqlShared.Decimal,   amt)
         .query(`
-          UPDATE applications
-          SET status = 'fees_paid', college_fee_paid = 1, updated_at = GETDATE(), status_updated_at = GETDATE()
-          WHERE id = @id
+          INSERT INTO payments (application_id, payment_type, amount, status,
+            razorpay_order_id, razorpay_payment_id, completed_at)
+          VALUES (@appId, 'college_fee', @amount, 'success',
+            CONCAT('CASH-', CAST(@appId AS NVARCHAR), '-', CAST(CHECKSUM(NEWID()) AS NVARCHAR)),
+            CONCAT('CASH-', FORMAT(GETDATE(),'yyyyMMddHHmmss')),
+            GETDATE())
         `);
+
+      if (firstPaid) {
+        await tx.request()
+          .input('id', mssqlShared.Int, appId)
+          .query(`
+            UPDATE applications
+            SET status = 'fees_paid', college_fee_paid = 1, updated_at = GETDATE(), status_updated_at = GETDATE()
+            WHERE id = @id
+          `);
+      }
+
+      await tx.commit();
+    } catch (txErr) {
+      await tx.rollback();
+      throw txErr;
     }
 
     const noteText = note ? ` — ${note}` : '';
@@ -681,7 +728,7 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', async (req, r
 });
 
 // ── Generate roll numbers (batch) ───────────────────────────
-router.post('/:collegeId/roll-numbers/generate', async (req, res) => {
+router.post('/:collegeId/roll-numbers/generate', requirePerm('assign_subjects'), async (req, res) => {
   const { course_id, year_of_study, academic_year } = req.body;
 
   if (!course_id || !year_of_study || !academic_year) {
@@ -722,16 +769,25 @@ router.post('/:collegeId/roll-numbers/generate', async (req, res) => {
       return res.json({ success: true, message: 'No pending applications for roll number assignment.', assigned: 0 });
     }
 
-    for (const app of pending.recordset) {
-      await db.request()
-        .input('id',   app.id)
-        .input('roll', String(nextRoll))
-        .query(`
-          UPDATE applications
-          SET roll_number = @roll, status = 'roll_assigned', updated_at = GETDATE()
-          WHERE id = @id
-        `);
-      nextRoll++;
+    const pool4 = await db;
+    const tx4   = pool4.transaction();
+    await tx4.begin();
+    try {
+      for (const app of pending.recordset) {
+        await tx4.request()
+          .input('id',   mssqlShared.Int,     app.id)
+          .input('roll', mssqlShared.NVarChar, String(nextRoll))
+          .query(`
+            UPDATE applications
+            SET roll_number = @roll, status = 'roll_assigned', updated_at = GETDATE()
+            WHERE id = @id
+          `);
+        nextRoll++;
+      }
+      await tx4.commit();
+    } catch (txErr) {
+      await tx4.rollback();
+      throw txErr;
     }
 
     return res.json({
@@ -748,10 +804,56 @@ router.post('/:collegeId/roll-numbers/generate', async (req, res) => {
 
 // ── College Fee Receipts ─────────────────────────────────────
 // GET /:collegeId/fee-receipts?status=paid|pending&course_id=&year_of_study=&q=
-router.get('/:collegeId/fee-receipts', async (req, res) => {
+router.get('/:collegeId/fee-receipts', requirePerm('collect_fees'), async (req, res) => {
   const { status, course_id, year_of_study, q } = req.query;
+  const { page, limit, offset } = parsePage(req.query);
+
   try {
-    let query = `
+    const joins = `
+      FROM applications a
+      JOIN students s ON s.id = a.student_id
+      LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+      LEFT JOIN (
+        SELECT application_id,
+               SUM(amount) AS total_paid,
+               MAX(completed_at) AS last_paid_at
+        FROM payments
+        WHERE payment_type = 'college_fee' AND status = 'success'
+        GROUP BY application_id
+      ) psum ON psum.application_id = a.id
+    `;
+
+    let where = `
+      WHERE a.college_id = @col
+        AND a.status NOT IN ('draft','submitted','under_review','correction_requested','correction_done',
+                             'scrutiny_accepted','doc_verification_pending','rejected','cancelled')
+    `;
+    const req2 = db.request().input('col', parseInt(req.params.collegeId));
+
+    if (status === 'paid') {
+      where += ' AND a.fee_total_amount > 0 AND ISNULL(psum.total_paid, 0) >= a.fee_total_amount - 0.01';
+    } else if (status === 'pending') {
+      where += ' AND (a.fee_total_amount IS NULL OR a.fee_total_amount = 0 OR ISNULL(psum.total_paid, 0) < a.fee_total_amount - 0.01)';
+    }
+    if (course_id) {
+      where += ' AND a.course_id = @crs';
+      req2.input('crs', parseInt(course_id));
+    }
+    if (year_of_study) {
+      where += ' AND a.year_of_study = @yr';
+      req2.input('yr', parseInt(year_of_study));
+    }
+    if (q) {
+      where += ` AND (s.full_name LIKE @q OR s.phone LIKE @q OR a.registration_number LIKE @q OR a.roll_number LIKE @q)`;
+      req2.input('q', `%${q.trim()}%`);
+    }
+
+    const orderBy = `ORDER BY (CASE WHEN a.fee_total_amount > 0 AND ISNULL(psum.total_paid,0) >= a.fee_total_amount - 0.01 THEN 1 ELSE 0 END) ASC, a.confirmed_at DESC`;
+
+    const countRes = await req2.query(`SELECT COUNT(*) AS total ${joins} ${where}`);
+    const total    = countRes.recordset[0].total;
+
+    const dataRes = await req2.query(`
       SELECT
         a.id AS application_id,
         a.registration_number,
@@ -766,47 +868,12 @@ router.get('/:collegeId/fee-receipts', async (req, res) => {
         COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name,
         ISNULL(psum.total_paid, 0) AS amount_paid,
         psum.last_paid_at AS completed_at
-      FROM applications a
-      JOIN students s ON s.id = a.student_id
-      LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
-      LEFT JOIN (
-        SELECT application_id,
-               SUM(amount) AS total_paid,
-               MAX(completed_at) AS last_paid_at
-        FROM payments
-        WHERE payment_type = 'college_fee' AND status = 'success'
-        GROUP BY application_id
-      ) psum ON psum.application_id = a.id
-      WHERE a.college_id = @col
-        AND a.status NOT IN ('draft','submitted','under_review','correction_requested','correction_done',
-                             'scrutiny_accepted','doc_verification_pending','rejected','cancelled')
-    `;
-    const req2 = db.request().input('col', parseInt(req.params.collegeId));
+      ${joins} ${where}
+      ${orderBy}
+      ${paginateQuery(offset, limit)}
+    `);
 
-    if (status === 'paid') {
-      // Fully paid = nothing remaining (paid >= total)
-      query += ' AND a.fee_total_amount > 0 AND ISNULL(psum.total_paid, 0) >= a.fee_total_amount - 0.01';
-    } else if (status === 'pending') {
-      // Pending = still has a remaining balance
-      query += ' AND (a.fee_total_amount IS NULL OR a.fee_total_amount = 0 OR ISNULL(psum.total_paid, 0) < a.fee_total_amount - 0.01)';
-    }
-    if (course_id) {
-      query += ' AND a.course_id = @crs';
-      req2.input('crs', parseInt(course_id));
-    }
-    if (year_of_study) {
-      query += ' AND a.year_of_study = @yr';
-      req2.input('yr', parseInt(year_of_study));
-    }
-    if (q) {
-      query += ` AND (s.full_name LIKE @q OR s.phone LIKE @q OR a.registration_number LIKE @q OR a.roll_number LIKE @q)`;
-      req2.input('q', `%${q.trim()}%`);
-    }
-
-    query += ' ORDER BY (CASE WHEN a.fee_total_amount > 0 AND ISNULL(psum.total_paid,0) >= a.fee_total_amount - 0.01 THEN 1 ELSE 0 END) ASC, a.confirmed_at DESC';
-
-    const result = await req2.query(query);
-    return res.json({ success: true, data: result.recordset });
+    return res.json(paginatedResponse(dataRes.recordset, total, page, limit));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });

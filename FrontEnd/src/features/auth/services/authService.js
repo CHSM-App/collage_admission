@@ -9,7 +9,7 @@ const loginEndpoints = {
 function normalizeAuthResponse(responseData, fallbackRole) {
   return {
     user:  responseData?.user  || { email: responseData?.email },
-    token: null,
+    token: responseData?.token || null,
     role:  responseData?.role  || fallbackRole,
   }
 }

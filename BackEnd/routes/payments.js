@@ -20,6 +20,10 @@ const router   = express.Router();
 const db       = require('./db');
 const mssql    = require('mssql');
 const feeSvc   = require('../services/FeeDeterminationService');
+const { authenticate } = require('../middleware/auth');
+
+// All payment routes require authentication
+router.use(authenticate);
 
 async function logActivity(appId, action, actorRole, note = null) {
   try {
@@ -37,14 +41,14 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
-// ── Helper: generate registration number ────────────────────
-async function generateRegNumber(collegeId, courseId, year, academicYear) {
+// ── Helper: generate registration number (must pass a tx request to be race-safe) ─
+async function generateRegNumber(collegeId, courseId, year, academicYear, requestObj) {
   const prefix = `${academicYear.replace('-', '')}-${String(courseId).padStart(2, '0')}-${year}`;
-  const result = await db.request()
-    .input('prefix', `${prefix}-%`)
+  const result = await requestObj
+    .input('regPrefix', mssql.NVarChar, `${prefix}-%`)
     .query(`
       SELECT COUNT(*) AS cnt FROM applications
-      WHERE registration_number LIKE @prefix AND registration_number IS NOT NULL
+      WHERE registration_number LIKE @regPrefix AND registration_number IS NOT NULL
     `);
   const seq = (result.recordset[0].cnt || 0) + 1;
   return `${prefix}-${String(seq).padStart(4, '0')}`;
@@ -438,29 +442,67 @@ router.post('/verify', async (req, res) => {
 
     // ── application_fee ──────────────────────────────────────
     if (payment_type === 'application_fee') {
-      const regNum = await generateRegNumber(app.college_id, app.course_id, app.year_of_study, app.academic_year);
+      const pool = await db;
+      const tx   = pool.transaction();
+      await tx.begin();
+      let regNum;
+      let alreadyProcessed = false;
+      try {
+        // Idempotency: if this payment_id was already recorded, return success immediately
+        const dupCheck = await tx.request()
+          .input('payId', mssql.NVarChar, razorpay_payment_id)
+          .query(`SELECT id FROM payments WHERE razorpay_payment_id = @payId`);
+        if (dupCheck.recordset.length > 0) {
+          alreadyProcessed = true;
+          await tx.rollback();
+        } else {
+          // Generate reg number inside the transaction (race-safe)
+          regNum = await generateRegNumber(
+            app.college_id, app.course_id, app.year_of_study, app.academic_year,
+            tx.request()
+          );
 
-      await db.request()
-        .input('appId',   mssql.Int,      appId)
-        .input('ptype',   mssql.NVarChar, 'application_fee')
-        .input('amount',  mssql.Decimal,  app.application_fee)
-        .input('orderId', mssql.NVarChar, razorpay_order_id)
-        .input('payId',   mssql.NVarChar, razorpay_payment_id)
-        .query(`
-          INSERT INTO payments (application_id, payment_type, amount, status,
-            razorpay_order_id, razorpay_payment_id, completed_at)
-          VALUES (@appId, @ptype, @amount, 'success', @orderId, @payId, GETDATE())
-        `);
+          await tx.request()
+            .input('appId',   mssql.Int,      appId)
+            .input('ptype',   mssql.NVarChar, 'application_fee')
+            .input('amount',  mssql.Decimal,  app.application_fee)
+            .input('orderId', mssql.NVarChar, razorpay_order_id)
+            .input('payId',   mssql.NVarChar, razorpay_payment_id)
+            .query(`
+              INSERT INTO payments (application_id, payment_type, amount, status,
+                razorpay_order_id, razorpay_payment_id, completed_at)
+              VALUES (@appId, @ptype, @amount, 'success', @orderId, @payId, GETDATE())
+            `);
 
-      await db.request()
-        .input('id',     mssql.Int,      appId)
-        .input('regNum', mssql.NVarChar, regNum)
-        .query(`
-          UPDATE applications
-          SET status = 'submitted', registration_number = @regNum,
-              application_fee_paid = 1, submitted_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE()
-          WHERE id = @id
-        `);
+          // WHERE status = 'draft' makes this a no-op if somehow called twice
+          await tx.request()
+            .input('id',     mssql.Int,      appId)
+            .input('regNum', mssql.NVarChar, regNum)
+            .query(`
+              UPDATE applications
+              SET status = 'submitted', registration_number = @regNum,
+                  application_fee_paid = 1, submitted_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE()
+              WHERE id = @id AND status = 'draft'
+            `);
+
+          await tx.commit();
+        }
+      } catch (txErr) {
+        await tx.rollback();
+        throw txErr;
+      }
+
+      if (alreadyProcessed) {
+        // Return the already-assigned registration number
+        const existingApp = await db.request()
+          .input('id', mssql.Int, appId)
+          .query(`SELECT registration_number FROM applications WHERE id = @id`);
+        return res.json({
+          success: true,
+          message: 'Application fee paid. Application submitted.',
+          data: { registration_number: existingApp.recordset[0]?.registration_number },
+        });
+      }
 
       await logActivity(appId, 'submitted', 'student', null);
 
@@ -476,47 +518,72 @@ router.post('/verify', async (req, res) => {
       const rzpOrder = await razorpay.orders.fetch(razorpay_order_id);
       const amount   = rzpOrder.amount / 100;  // paise → rupees
 
-      await db.request()
-        .input('appId',   mssql.Int,      appId)
-        .input('ptype',   mssql.NVarChar, 'college_fee')
-        .input('amount',  mssql.Decimal,  amount)
-        .input('orderId', mssql.NVarChar, razorpay_order_id)
-        .input('payId',   mssql.NVarChar, razorpay_payment_id)
-        .query(`
-          INSERT INTO payments (application_id, payment_type, amount, status,
-            razorpay_order_id, razorpay_payment_id, completed_at)
-          VALUES (@appId, @ptype, @amount, 'success', @orderId, @payId, GETDATE())
-        `);
-
-      // Check payment thresholds
+      // Check payment thresholds before opening transaction
       const feeInfo = await getCollegeFeTotal(app);
-      const totalFee   = feeInfo?.source === 'manual'
+      const totalFee        = feeInfo?.source === 'manual'
         ? (feeInfo?.total_fee ?? 0)
         : (feeInfo?.student_payable ?? feeInfo?.total_fee ?? 0);
-      // fee_pay_now_amount is the first-instalment threshold set by the college
       const payNowThreshold = app.fee_pay_now_amount ? parseFloat(app.fee_pay_now_amount) : totalFee;
 
-      const paidRes = await db.request()
-        .input('appId', mssql.Int, appId)
-        .query(`
-          SELECT ISNULL(SUM(amount), 0) AS total_paid FROM payments
-          WHERE application_id = @appId
-            AND payment_type = 'college_fee'
-            AND status = 'success'
-        `);
-      const totalPaid  = parseFloat(paidRes.recordset[0].total_paid) || 0;
-      // Admission is confirmed once first instalment (pay_now) is met
-      const firstPaid  = payNowThreshold > 0 && totalPaid >= payNowThreshold - 0.01;
-      const fullyPaid  = totalFee > 0 && totalPaid >= totalFee - 0.01;
+      const pool = await db;
+      const tx   = pool.transaction();
+      await tx.begin();
 
-      if (firstPaid) {
-        await db.request()
-          .input('id', mssql.Int, appId)
-          .query(`
-            UPDATE applications
-            SET status = 'fees_paid', college_fee_paid = 1, updated_at = GETDATE(), status_updated_at = GETDATE()
-            WHERE id = @id
-          `);
+      let totalPaid, firstPaid, fullyPaid;
+      let collegeFeeAlreadyProcessed = false;
+      try {
+        // Idempotency: if already recorded, return success (Razorpay may retry verify)
+        const dupCheck = await tx.request()
+          .input('payId', mssql.NVarChar, razorpay_payment_id)
+          .query(`SELECT id FROM payments WHERE razorpay_payment_id = @payId`);
+        if (dupCheck.recordset.length > 0) {
+          collegeFeeAlreadyProcessed = true;
+          await tx.rollback();
+        } else {
+          await tx.request()
+            .input('appId',   mssql.Int,      appId)
+            .input('ptype',   mssql.NVarChar, 'college_fee')
+            .input('amount',  mssql.Decimal,  amount)
+            .input('orderId', mssql.NVarChar, razorpay_order_id)
+            .input('payId',   mssql.NVarChar, razorpay_payment_id)
+            .query(`
+              INSERT INTO payments (application_id, payment_type, amount, status,
+                razorpay_order_id, razorpay_payment_id, completed_at)
+              VALUES (@appId, @ptype, @amount, 'success', @orderId, @payId, GETDATE())
+            `);
+
+          // Sum total paid within the transaction so the count is consistent
+          const paidRes = await tx.request()
+            .input('appId', mssql.Int, appId)
+            .query(`
+              SELECT ISNULL(SUM(amount), 0) AS total_paid FROM payments
+              WHERE application_id = @appId
+                AND payment_type = 'college_fee'
+                AND status = 'success'
+            `);
+          totalPaid = parseFloat(paidRes.recordset[0].total_paid) || 0;
+          firstPaid = payNowThreshold > 0 && totalPaid >= payNowThreshold - 0.01;
+          fullyPaid = totalFee > 0 && totalPaid >= totalFee - 0.01;
+
+          if (firstPaid) {
+            await tx.request()
+              .input('id', mssql.Int, appId)
+              .query(`
+                UPDATE applications
+                SET status = 'fees_paid', college_fee_paid = 1, updated_at = GETDATE(), status_updated_at = GETDATE()
+                WHERE id = @id AND status != 'fees_paid'
+              `);
+          }
+
+          await tx.commit();
+        }
+      } catch (txErr) {
+        await tx.rollback();
+        throw txErr;
+      }
+
+      if (collegeFeeAlreadyProcessed) {
+        return res.json({ success: true, message: 'Payment already recorded.' });
       }
 
       if (fullyPaid)      await logActivity(appId, 'fees_paid',           'student', `₹${totalPaid.toLocaleString('en-IN')} paid (full)`);

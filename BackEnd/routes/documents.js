@@ -16,6 +16,10 @@ const fs      = require('fs')
 const router  = express.Router()
 const db      = require('./db')
 const mssql   = require('mssql')
+const { authenticate } = require('../middleware/auth')
+
+// All document routes require authentication
+router.use(authenticate)
 
 // ── Upload storage ───────────────────────────────────────────
 const UPLOAD_ROOT = path.join(__dirname, '..', 'public', 'uploads', 'students')
