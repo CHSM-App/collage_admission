@@ -8,7 +8,7 @@ import http from 'k6/http'
 import { check, sleep } from 'k6'
 
 // ── Config ────────────────────────────────────────────────────
-const BASE = 'http://localhost:8000'
+const BASE = 'https://collageserver.vengurlatech.com'
 
 // Fill these in before running — use a real student account
 const STUDENT_PHONE    = '9404931342'

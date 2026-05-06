@@ -12,7 +12,7 @@
 import http  from 'k6/http'
 import { check, sleep } from 'k6'
 
-const BASE             = 'http://localhost:8000'
+const BASE             = 'https://collageserver.vengurlatech.com'
 const COLLEGE_EMAIL    = 'admin@testcollege.com'
 const COLLEGE_PASSWORD = 'password123'
 const COLLEGE_ID       = 1

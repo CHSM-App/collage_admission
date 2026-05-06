@@ -7,7 +7,7 @@
 import http  from 'k6/http'
 import { check } from 'k6'
 
-const BASE = 'http://localhost:8000'
+const BASE = 'https://collageserver.vengurlatech.com'
 
 export const options = {
   vus:      1,

@@ -14,7 +14,7 @@ import { check, group, sleep } from 'k6'
 import { Rate, Trend } from 'k6/metrics'
 
 // ── Config ────────────────────────────────────────────────────
-const BASE = 'http://localhost:8000'
+const BASE = 'https://collageserver.vengurlatech.com'
 
 const STUDENT_PHONE    = '9404931342'
 const STUDENT_PASSWORD = '1234567'
@@ -51,6 +51,11 @@ function json(token) {
   return { headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } }
 }
 
+function logFail(r, label) {
+  if (r.status === 0) console.log(`DROP [${label}]: ${r.error}`)
+  else if (r.status >= 400) console.log(`FAIL [${label}]: HTTP ${r.status} — ${r.body?.slice(0, 150)}`)
+}
+
 function loginStudent() {
   const r = http.post(
     `${BASE}/auth/login/student`,
@@ -58,6 +63,7 @@ function loginStudent() {
     { headers: { 'Content-Type': 'application/json' } }
   )
   loginErrors.add(r.status !== 200)
+  if (r.status !== 200) console.log(`student login failed: HTTP ${r.status} — ${r.body?.slice(0, 200)}`)
   check(r, { 'student login 200': r => r.status === 200 })
   return r.status === 200 ? JSON.parse(r.body) : null
 }
@@ -68,6 +74,8 @@ function loginCollege() {
     JSON.stringify({ email: COLLEGE_EMAIL, password: COLLEGE_PASSWORD }),
     { headers: { 'Content-Type': 'application/json' } }
   )
+  if (r.status === 0) console.log(`NETWORK DROP: POST /auth/login/college — ${r.error}`)
+  else if (r.status !== 200) console.log(`college login failed: HTTP ${r.status}`)
   check(r, { 'college login 200': r => r.status === 200 })
   return r.status === 200 ? JSON.parse(r.body) : null
 }
@@ -94,6 +102,7 @@ function studentFlow() {
     // Browse colleges (public)
     group('Public: college list', () => {
       const r = http.get(`${BASE}/colleges?page=1&limit=20`)
+      logFail(r, 'colleges')
       check(r, { 'colleges 200': r => r.status === 200 })
     })
     sleep(0.3)
@@ -101,6 +110,7 @@ function studentFlow() {
     // My applications
     group('My applications', () => {
       const r = http.get(`${BASE}/applications?student_id=${studentId}&limit=20`, json(token))
+      logFail(r, 'my-apps')
       check(r, { 'my-apps 200': r => r.status === 200 })
     })
     sleep(0.5)
@@ -108,6 +118,7 @@ function studentFlow() {
     // Fee status check
     group('College fee status', () => {
       const r = http.get(`${BASE}/payments/college-fee-status/${APPLICATION_ID}`, json(token))
+      logFail(r, 'fee-status')
       check(r, { 'fee-status 200 or 404': r => r.status === 200 || r.status === 404 })
     })
     sleep(1)
@@ -130,6 +141,7 @@ function collegeFlow() {
         json(token)
       )
       inboxDuration.add(Date.now() - start)
+      logFail(r, 'inbox')
       check(r, { 'inbox 200': r => r.status === 200 })
     })
     sleep(0.5)
@@ -140,6 +152,7 @@ function collegeFlow() {
         `${BASE}/college-admin/${COLLEGE_ID}/fee-receipts?page=1&limit=20`,
         json(token)
       )
+      logFail(r, 'fee-receipts')
       check(r, { 'fee-receipts 200': r => r.status === 200 })
     })
     sleep(0.5)
@@ -150,6 +163,7 @@ function collegeFlow() {
         `${BASE}/college-admin/${COLLEGE_ID}/applications/${APPLICATION_ID}`,
         json(token)
       )
+      logFail(r, 'app-detail')
       check(r, { 'app-detail 200 or 404': r => r.status === 200 || r.status === 404 })
     })
     sleep(1)
