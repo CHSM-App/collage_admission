@@ -32,7 +32,7 @@ const registerLimiter = rateLimit({
 });
 
 // ── Student login ───────────────────────────────────────────
-router.post('/login/student', /*loginLimiter,*/ async (req, res) => {
+router.post('/login/student', loginLimiter, async (req, res) => {
   const { phone, password } = req.body;
 
   if (!phone || !password) {
@@ -77,7 +77,7 @@ router.post('/login/student', /*loginLimiter,*/ async (req, res) => {
 });
 
 // ── College login (admin OR staff — single endpoint) ────────
-router.post('/login/college', /*loginLimiter,*/ async (req, res) => {
+router.post('/login/college', loginLimiter, async (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
@@ -305,10 +305,15 @@ router.post('/register/student', registerLimiter, async (req, res) => {
   try {
     const exists = await db.request()
       .input('email', email)
-      .query('SELECT id FROM students WHERE email = @email');
+      .input('phone', phone ? phone.trim() : null)
+      .query('SELECT id, email, phone FROM students WHERE email = @email OR (phone IS NOT NULL AND phone = @phone)');
 
     if (exists.recordset.length > 0) {
-      return res.status(409).json({ message: 'An account with this email already exists.' });
+      const dup = exists.recordset[0];
+      if (dup.email === email) {
+        return res.status(409).json({ message: 'An account with this email already exists.' });
+      }
+      return res.status(409).json({ message: 'An account with this phone number already exists.' });
     }
 
     const hash = await bcrypt.hash(password, 10);

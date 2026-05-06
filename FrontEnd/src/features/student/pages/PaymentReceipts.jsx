@@ -247,22 +247,65 @@ function ReceiptSheet({ app, pmt }) {
   }
 
   async function handleShare() {
-    const text = [
-      `Payment Receipt — ${receiptNo}`,
-      `College: ${app.college_name}`,
-      `Student: ${studentName}`,
-      `Purpose: ${fullLabel}`,
-      `Amount: ₹${Number(pmt.amount).toLocaleString('en-IN')}`,
-      `Date: ${fmtDate(pmt.completed_at)} ${fmtTime(pmt.completed_at)}`,
-      `Transaction ID: ${pmt.razorpay_payment_id || '—'}`,
-      `Reg No: ${app.registration_number || '—'}`,
-    ].join('\n')
+    const filename = `${receiptNo}.pdf`
 
-    if (navigator.share) {
-      try { await navigator.share({ title: `Receipt ${receiptNo}`, text }) } catch {}
-    } else {
-      await navigator.clipboard.writeText(text)
-      alert('Receipt details copied to clipboard.')
+    // Generate PDF from the receipt HTML
+    async function buildPdfBlob() {
+      const { default: jsPDF } = await import('jspdf')
+      const { default: html2canvas } = await import('html2canvas')
+
+      // Render HTML into a hidden iframe so styles apply cleanly
+      const iframe = document.createElement('iframe')
+      iframe.style.cssText = 'position:fixed;left:-9999px;top:0;width:860px;height:1200px;border:none;'
+      document.body.appendChild(iframe)
+      iframe.contentDocument.open()
+      iframe.contentDocument.write(buildHTML())
+      iframe.contentDocument.close()
+
+      await new Promise(r => setTimeout(r, 800)) // let fonts/images render
+
+      const canvas = await html2canvas(iframe.contentDocument.body, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        windowWidth: 860,
+      })
+      document.body.removeChild(iframe)
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.92)
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+      const pageW = pdf.internal.pageSize.getWidth()
+      const pageH = pdf.internal.pageSize.getHeight()
+      const imgH = (canvas.height * pageW) / canvas.width
+      let y = 0
+      while (y < imgH) {
+        if (y > 0) pdf.addPage()
+        pdf.addImage(imgData, 'JPEG', 0, -y, pageW, imgH)
+        y += pageH
+      }
+      return pdf.output('blob')
+    }
+
+    try {
+      const blob = await buildPdfBlob()
+      const file = new File([blob], filename, { type: 'application/pdf' })
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ title: `Receipt ${receiptNo}`, files: [file] })
+      } else {
+        // Fallback: trigger download
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        a.click()
+        URL.revokeObjectURL(url)
+      }
+    } catch (err) {
+      if (err.name !== 'AbortError') {
+        console.error('Share failed:', err)
+        alert('Could not share. Use Print / Save PDF instead.')
+      }
     }
   }
 
@@ -286,7 +329,7 @@ function ReceiptSheet({ app, pmt }) {
           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
             <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
           </svg>
-          Share
+          Share PDF
         </button>
       </div>
 
