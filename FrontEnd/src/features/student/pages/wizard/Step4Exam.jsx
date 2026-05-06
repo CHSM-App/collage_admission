@@ -38,7 +38,7 @@ export default function Step4Exam({ data, errors, globalError, saving, onChange,
       setLocalError('Year of passing cannot be in the future.'); return
     }
     setLocalError('')
-    const collegeName = data.board_or_college_name?.trim() || (!isFY ? data.college_name : '')
+    const collegeName = data.board_or_college_name?.trim() || ''
     if (!collegeName) { setLocalError('College / Board name is required.'); return }
     onNext({
       board_or_college_name:     collegeName,
@@ -70,13 +70,13 @@ export default function Step4Exam({ data, errors, globalError, saving, onChange,
         {/* Board / College */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <FormField
-            label={isFY ? 'Board Name' : 'College Name'}
+            label={isFY ? 'Board Name' : 'Previous College Name'}
             name="board_or_college_name"
-            value={data.board_or_college_name || (!isFY ? data.college_name : '')}
+            value={data.board_or_college_name || ''}
             onChange={onChange}
             error={e.board_or_college_name}
             required
-            placeholder={isFY ? 'Maharashtra State Board' : 'College name'}
+            placeholder={isFY ? 'Maharashtra State Board' : 'Name of college where you completed the previous year'}
           />
           <FormField
             label={isFY ? 'School Name' : 'College Address'}

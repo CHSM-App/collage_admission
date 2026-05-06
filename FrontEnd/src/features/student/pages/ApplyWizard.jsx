@@ -161,11 +161,11 @@ export default function ApplyWizard() {
         )
         const requiredDocs = rdRes.data.data || []
 
-        // Build subjects from existing exam
-        // For SY/TY with no saved exam yet, pre-fill college name
-        const defaultCollegeName = app.year_of_study > 1 ? (app.college_name || '') : ''
+        // Build subjects from existing exam.
+        // Leave previous-exam college name blank so transfer/migrated students
+        // can enter the institution where they actually completed the prior year.
         const examData = previous_exam ? {
-          board_or_college_name:      previous_exam.board_or_college_name || defaultCollegeName,
+          board_or_college_name:      previous_exam.board_or_college_name || '',
           school_or_college_address:  previous_exam.school_or_college_address || '',
           seat_number:                previous_exam.seat_number || '',
           prn_or_seat:                previous_exam.prn_or_seat || '',
@@ -180,7 +180,7 @@ export default function ApplyWizard() {
                 marks_max:      s.marks_max,
               }))
             : [{ subject_name: '', marks_obtained: '', marks_max: '' }],
-        } : { board_or_college_name: defaultCollegeName }
+        } : { board_or_college_name: '' }
 
         dispatch({
           type: 'SET_DATA',
