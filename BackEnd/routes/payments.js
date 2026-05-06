@@ -280,6 +280,7 @@ router.get('/receipts/:applicationId', async (req, res) => {
 // ── POST /payments/create-order ──────────────────────────────
 router.post('/create-order', async (req, res) => {
   const { application_id, payment_type, amount: customAmount } = req.body;
+  // `customAmount` is optional — if provided, used as the Razorpay order amount (must be ≤ remaining)
 
   if (!application_id || !payment_type) {
     return res.status(400).json({ success: false, message: 'application_id and payment_type are required.' });
@@ -323,7 +324,8 @@ router.post('/create-order', async (req, res) => {
       if (!['confirmed', 'fees_paid'].includes(app.status)) {
         return res.status(400).json({ success: false, message: 'Application must be confirmed to pay college fee.' });
       }
-      if (!app.fee_pay_now_amount || parseFloat(app.fee_pay_now_amount) <= 0) {
+      if ((!app.fee_total_amount || parseFloat(app.fee_total_amount) <= 0) &&
+          (!app.fee_pay_now_amount || parseFloat(app.fee_pay_now_amount) <= 0)) {
         return res.status(400).json({ success: false, message: 'The college has not set a fee amount yet. Please contact the college.' });
       }
       // Check how much has already been paid
@@ -333,8 +335,24 @@ router.post('/create-order', async (req, res) => {
       const totalPaid2 = parseFloat(paidRes2.recordset[0].total_paid) || 0;
       const totalFee   = parseFloat(app.fee_total_amount) || 0;
       const remaining2 = Math.max(0, totalFee - totalPaid2);
-      // First payment: use college-set instalment; subsequent: use remaining balance
-      amount = totalPaid2 > 0 ? remaining2 : parseFloat(app.fee_pay_now_amount);
+      if (remaining2 <= 0) {
+        return res.status(400).json({ success: false, message: 'No outstanding balance to pay.' });
+      }
+      // If caller provides a custom amount, use it (must not exceed remaining)
+      if (customAmount && parseFloat(customAmount) > 0) {
+        const reqAmt = parseFloat(customAmount);
+        if (reqAmt > remaining2 + 0.01) {
+          return res.status(400).json({ success: false, message: `Amount ₹${reqAmt} exceeds remaining balance ₹${remaining2}.` });
+        }
+        amount = reqAmt;
+      } else {
+        // Default: first payment uses college-set instalment (fee_pay_now_amount),
+        // or full fee if no instalment set; subsequent payments use remaining balance
+        const payNowDefault = app.fee_pay_now_amount
+          ? parseFloat(app.fee_pay_now_amount)
+          : parseFloat(app.fee_total_amount);
+        amount = totalPaid2 > 0 ? remaining2 : payNowDefault;
+      }
       if (!amount || amount <= 0) {
         return res.status(400).json({ success: false, message: 'No outstanding balance to pay.' });
       }
@@ -470,11 +488,14 @@ router.post('/verify', async (req, res) => {
           VALUES (@appId, @ptype, @amount, 'success', @orderId, @payId, GETDATE())
         `);
 
-      // Check if fully paid now
+      // Check payment thresholds
       const feeInfo = await getCollegeFeTotal(app);
-      const totalFee = feeInfo?.source === 'manual'
+      const totalFee   = feeInfo?.source === 'manual'
         ? (feeInfo?.total_fee ?? 0)
         : (feeInfo?.student_payable ?? feeInfo?.total_fee ?? 0);
+      // fee_pay_now_amount is the first-instalment threshold set by the college
+      const payNowThreshold = app.fee_pay_now_amount ? parseFloat(app.fee_pay_now_amount) : totalFee;
+
       const paidRes = await db.request()
         .input('appId', mssql.Int, appId)
         .query(`
@@ -483,10 +504,12 @@ router.post('/verify', async (req, res) => {
             AND payment_type = 'college_fee'
             AND status = 'success'
         `);
-      const totalPaid = parseFloat(paidRes.recordset[0].total_paid) || 0;
-      const allPaid   = totalFee > 0 && totalPaid >= totalFee - 0.01;
+      const totalPaid  = parseFloat(paidRes.recordset[0].total_paid) || 0;
+      // Admission is confirmed once first instalment (pay_now) is met
+      const firstPaid  = payNowThreshold > 0 && totalPaid >= payNowThreshold - 0.01;
+      const fullyPaid  = totalFee > 0 && totalPaid >= totalFee - 0.01;
 
-      if (allPaid) {
+      if (firstPaid) {
         await db.request()
           .input('id', mssql.Int, appId)
           .query(`
@@ -496,13 +519,16 @@ router.post('/verify', async (req, res) => {
           `);
       }
 
-      if (allPaid) await logActivity(appId, 'fees_paid', 'student', `₹${totalPaid.toLocaleString('en-IN')} paid`);
-      else         await logActivity(appId, 'fee_instalment_paid', 'student', `₹${amount.toLocaleString('en-IN')} paid, ₹${(totalFee - totalPaid).toLocaleString('en-IN')} remaining`);
+      if (fullyPaid)      await logActivity(appId, 'fees_paid',           'student', `₹${totalPaid.toLocaleString('en-IN')} paid (full)`);
+      else if (firstPaid) await logActivity(appId, 'fees_paid',           'student', `₹${totalPaid.toLocaleString('en-IN')} paid, ₹${(totalFee - totalPaid).toLocaleString('en-IN')} remaining`);
+      else                await logActivity(appId, 'fee_instalment_paid', 'student', `₹${amount.toLocaleString('en-IN')} paid, ₹${(totalFee - totalPaid).toLocaleString('en-IN')} remaining`);
 
       return res.json({
         success: true,
-        message: allPaid ? 'College fee fully paid!' : `₹${amount.toLocaleString('en-IN')} paid. ₹${(totalFee - totalPaid).toLocaleString('en-IN')} remaining.`,
-        data: { all_paid: allPaid, total_paid: totalPaid, remaining: Math.max(0, totalFee - totalPaid) },
+        message: fullyPaid  ? 'College fee fully paid!' :
+                 firstPaid  ? `₹${amount.toLocaleString('en-IN')} paid. Admission confirmed! ₹${(totalFee - totalPaid).toLocaleString('en-IN')} remaining.` :
+                              `₹${amount.toLocaleString('en-IN')} paid. ₹${(totalFee - totalPaid).toLocaleString('en-IN')} remaining.`,
+        data: { all_paid: firstPaid, fully_paid: fullyPaid, total_paid: totalPaid, remaining: Math.max(0, totalFee - totalPaid) },
       });
 
     }

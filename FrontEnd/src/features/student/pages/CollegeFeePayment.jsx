@@ -65,7 +65,7 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
             setPaidMsg(verifyRes.data.message)
             setShowReceipts(true)
             fetchStatus()
-            if (verifyRes.data.data?.all_paid) setTimeout(onDone, 2000)
+            if (verifyRes.data.data?.all_paid) setTimeout(onDone, 1500)
           } catch (err) {
             setPayError(err?.response?.data?.message || 'Payment verification failed.')
           } finally { setPaying(false) }
@@ -92,8 +92,11 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
 
   if (!feeStatus) return null
 
-  const fs     = feeStatus
-  const allPaid = fs.college_fee_paid || fs.remaining <= 0
+  const fs         = feeStatus
+  // Admission confirmed = first instalment paid (college_fee_paid=1) OR remaining=0
+  const admitted   = fs.college_fee_paid || fs.remaining <= 0
+  // Fully paid = nothing remaining
+  const fullyPaid  = fs.remaining <= 0
 
   return (
     <div className="rounded-xl border border-emerald-200 bg-white overflow-hidden">
@@ -103,8 +106,10 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
           <p className="font-bold text-emerald-900">College Fee Payment</p>
           <p className="text-sm text-emerald-700 mt-0.5">{application.college_name} · {application.course_name}</p>
         </div>
-        {allPaid
+        {fullyPaid
           ? <span className="rounded-full bg-emerald-600 text-white text-xs font-bold px-3 py-1">Fully Paid</span>
+          : admitted
+          ? <span className="rounded-full bg-teal-100 text-teal-700 text-xs font-bold px-3 py-1">Admission Confirmed</span>
           : <span className="rounded-full bg-amber-100 text-amber-700 text-xs font-bold px-3 py-1">Payment Pending</span>
         }
       </div>
@@ -117,32 +122,37 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
           </div>
         ) : (
           <>
-            <div className={`grid gap-2 sm:gap-3 text-sm ${fs.remaining > 0 && fs.remaining < fs.total_fee - 0.01 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
+            <div className={`grid gap-2 sm:gap-3 text-sm ${fs.remaining > 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
               <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-center">
                 <p className="text-xs text-slate-400">Total Fee</p>
                 <p className="font-bold text-slate-950 mt-0.5">₹{Number(fs.total_fee).toLocaleString('en-IN')}</p>
               </div>
-              {fs.remaining > 0 && fs.remaining < fs.total_fee - 0.01 && (
-                <div className="rounded-lg bg-blue-50 border border-blue-100 p-3 text-center">
-                  <p className="text-xs text-slate-400">Due Now</p>
-                  <p className="font-bold text-blue-700 mt-0.5">₹{Number(fs.remaining).toLocaleString('en-IN')}</p>
+              {fs.remaining > 0 && (
+                <div className="rounded-lg bg-amber-50 border border-amber-100 p-3 text-center">
+                  <p className="text-xs text-slate-400">Remaining</p>
+                  <p className="font-bold text-amber-700 mt-0.5">₹{Number(fs.remaining).toLocaleString('en-IN')}</p>
                 </div>
               )}
               <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-center">
                 <p className="text-xs text-slate-400">Paid</p>
                 <p className="font-bold text-emerald-700 mt-0.5">₹{Number(fs.total_paid).toLocaleString('en-IN')}</p>
               </div>
-              <div className={`rounded-lg border p-3 text-center ${fs.remaining > 0 ? 'bg-amber-50 border-amber-100' : 'bg-slate-50 border-slate-100'}`}>
-                <p className="text-xs text-slate-400">Remaining</p>
-                <p className={`font-bold mt-0.5 ${fs.remaining > 0 ? 'text-amber-700' : 'text-slate-400'}`}>
-                  ₹{Number(fs.remaining).toLocaleString('en-IN')}
+              <div className={`rounded-lg border p-3 text-center ${admitted ? 'bg-teal-50 border-teal-100' : 'bg-slate-50 border-slate-100'}`}>
+                <p className="text-xs text-slate-400">Admission</p>
+                <p className={`font-bold mt-0.5 text-sm ${admitted ? 'text-teal-700' : 'text-slate-400'}`}>
+                  {admitted ? 'Confirmed' : 'Pending'}
                 </p>
               </div>
             </div>
             {fs.fee_pay_now_amount && fs.fee_pay_now_amount < fs.total_fee - 0.01 && fs.total_paid <= 0 && (
               <p className="text-xs text-slate-500">
-                Your total fee is ₹{Number(fs.total_fee).toLocaleString('en-IN')}. The college requires you to pay ₹{Number(fs.fee_pay_now_amount).toLocaleString('en-IN')} now; the remaining ₹{Number(fs.total_fee - fs.fee_pay_now_amount).toLocaleString('en-IN')} can be paid later.
+                Your total fee is ₹{Number(fs.total_fee).toLocaleString('en-IN')}. Pay ₹{Number(fs.fee_pay_now_amount).toLocaleString('en-IN')} now to confirm admission; the remaining ₹{Number(fs.total_fee - fs.fee_pay_now_amount).toLocaleString('en-IN')} can be paid later.
               </p>
+            )}
+            {admitted && fs.remaining > 0 && (
+              <div className="rounded-lg bg-teal-50 border border-teal-200 px-4 py-2.5 text-sm text-teal-800">
+                Your admission is confirmed. ₹{Number(fs.remaining).toLocaleString('en-IN')} remaining balance can be paid below.
+              </div>
             )}
           </>
         )}
@@ -162,10 +172,10 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
         )}
 
         {/* ── Payment ── */}
-        {!allPaid && fs.total_fee > 0 && (
+        {!fullyPaid && fs.total_fee > 0 && (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
             <div>
-              <p className="text-xs text-slate-500">Amount due now</p>
+              <p className="text-xs text-slate-500">{admitted ? 'Remaining balance' : 'Amount due now'}</p>
               <p className="text-xl font-bold text-slate-950">
                 ₹{Number(fs.total_paid > 0 ? fs.remaining : (fs.fee_pay_now_amount || fs.remaining)).toLocaleString('en-IN')}
               </p>
@@ -175,13 +185,13 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
               loading={paying}
               disabled={paying || scriptError}
             >
-              Pay Now
+              {admitted ? 'Pay Remaining' : 'Pay Now'}
             </Button>
           </div>
         )}
 
-        {/* Already fully paid */}
-        {allPaid && (
+        {/* Fully paid */}
+        {fullyPaid && (
           <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800">
             All fees have been paid. Your application will be processed for roll number assignment.
           </div>

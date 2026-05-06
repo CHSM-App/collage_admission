@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import api from '../../../services/api.js'
 import PaymentReceipts from '../../student/pages/PaymentReceipts.jsx'
+import { useRazorpay } from '../../../shared/hooks/useRazorpay.js'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
 
@@ -58,8 +59,8 @@ export default function FeeReceipts({ collegeId }) {
     return () => clearTimeout(t)
   }, [searchInput])
 
-  const paid    = rows.filter(r => r.college_fee_paid)
-  const pending = rows.filter(r => !r.college_fee_paid)
+  const paid    = rows.filter(r => Number(r.fee_total_amount) > 0 && Number(r.amount_paid) >= Number(r.fee_total_amount) - 0.01)
+  const pending = rows.filter(r => !(Number(r.fee_total_amount) > 0 && Number(r.amount_paid) >= Number(r.fee_total_amount) - 0.01))
   const summary = status === 'paid' ? paid : status === 'pending' ? pending : rows
 
   function handleRowClick(row) {
@@ -130,21 +131,21 @@ export default function FeeReceipts({ collegeId }) {
       ) : (
         <>
           {/* Desktop table */}
-          <div className="hidden sm:block overflow-x-auto rounded-xl border border-slate-100">
+          <div className="hidden sm:block overflow-x-auto rounded-lg border-2 border-slate-400">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
                 <tr>
-                  <th className="px-4 py-3 text-left">Student</th>
-                  <th className="px-4 py-3 text-left">Course / Year</th>
-                  <th className="px-4 py-3 text-left">Reg. No.</th>
-                  <th className="px-4 py-3 text-right">Total Fee</th>
-                  <th className="px-4 py-3 text-right">Paid</th>
-                  <th className="px-4 py-3 text-right">Remaining</th>
-                  <th className="px-4 py-3 text-center">Status</th>
-                  <th className="px-4 py-3 text-left">Last Paid</th>
+                  <th className="px-4 py-2.5 text-left">Student</th>
+                  <th className="px-4 py-2.5 text-left">Course / Year</th>
+                  <th className="px-4 py-2.5 text-left">Reg. No.</th>
+                  <th className="px-4 py-2.5 text-right">Total Fee</th>
+                  <th className="px-4 py-2.5 text-right">Paid</th>
+                  <th className="px-4 py-2.5 text-right">Remaining</th>
+                  <th className="px-4 py-2.5 text-center">Status</th>
+                  <th className="px-4 py-2.5 text-left">Last Paid</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50">
+              <tbody className="divide-y-2 divide-slate-300">
                 {summary.map(r => {
                   const total     = r.fee_total_amount != null ? Number(r.fee_total_amount) : null
                   const paidAmt   = Number(r.amount_paid) || 0
@@ -153,7 +154,7 @@ export default function FeeReceipts({ collegeId }) {
                     <tr
                       key={r.application_id}
                       onClick={() => handleRowClick(r)}
-                      className="hover:bg-blue-50 cursor-pointer transition"
+                      className="hover:bg-blue-50 cursor-pointer transition border-b-2 border-slate-300 last:border-b-0"
                     >
                       <td className="px-4 py-3">
                         <p className="font-medium text-slate-800">{r.student_name}</p>
@@ -174,7 +175,7 @@ export default function FeeReceipts({ collegeId }) {
                         {remaining != null && remaining > 0 ? `₹${remaining.toLocaleString('en-IN')}` : '—'}
                       </td>
                       <td className="px-4 py-3 text-center">
-                        <StatusBadge paid={!!r.college_fee_paid} />
+                        <StatusBadge remaining={remaining} total={total} paidAmt={paidAmt} />
                       </td>
                       <td className="px-4 py-3 text-slate-500 text-xs">
                         {r.completed_at ? fmtDate(r.completed_at) : '—'}
@@ -203,7 +204,7 @@ export default function FeeReceipts({ collegeId }) {
                       <p className="font-semibold text-slate-800">{r.student_name}</p>
                       <p className="text-xs text-slate-400">{r.student_phone || '—'}</p>
                     </div>
-                    <StatusBadge paid={!!r.college_fee_paid} />
+                    <StatusBadge remaining={remaining} total={total} paidAmt={paidAmt} />
                   </div>
                   <p className="text-sm text-slate-600">{r.course_name} · {YEAR_LABEL[r.year_of_study]}</p>
                   <div className="flex items-center justify-between text-xs text-slate-400">
@@ -245,16 +246,19 @@ function CollegeFeeModal({ row, collegeId, onClose }) {
   )
 }
 
-// ── Fee panel (fee status + cash payment + receipts) ─────────
+// ── Fee panel (fee status + cash/online payment + receipts) ──
 function CollegeFeePanel({ row, collegeId, onClose }) {
-  const [feeStatus, setFeeStatus]     = useState(null)
-  const [loading, setLoading]         = useState(true)
-  const [error, setError]             = useState('')
-  const [amount, setAmount]           = useState('')
-  const [note, setNote]               = useState('')
-  const [saving, setSaving]           = useState(false)
-  const [saveMsg, setSaveMsg]         = useState('')
-  const [saveErr, setSaveErr]         = useState('')
+  const { openCheckout, scriptError } = useRazorpay()
+
+  const [feeStatus, setFeeStatus]       = useState(null)
+  const [loading, setLoading]           = useState(true)
+  const [error, setError]               = useState('')
+  const [payMode, setPayMode]           = useState(null)   // null | 'cash' | 'online'
+  const [amount, setAmount]             = useState('')
+  const [note, setNote]                 = useState('')
+  const [saving, setSaving]             = useState(false)
+  const [saveMsg, setSaveMsg]           = useState('')
+  const [saveErr, setSaveErr]           = useState('')
   const [showReceipts, setShowReceipts] = useState(false)
 
   function fetchStatus() {
@@ -267,21 +271,20 @@ function CollegeFeePanel({ row, collegeId, onClose }) {
 
   useEffect(() => { fetchStatus() }, [row.application_id])
 
-  async function handleRecord(e) {
+  // ── Cash payment ─────────────────────────────────────────
+  async function handleCash(e) {
     e.preventDefault()
     const amt = parseFloat(amount)
     if (!amt || amt <= 0) { setSaveErr('Enter a valid amount.'); return }
-    setSaveErr('')
-    setSaveMsg('')
-    setSaving(true)
+    setSaveErr(''); setSaveMsg(''); setSaving(true)
     try {
       const res = await api.post(
         `college-admin/${collegeId}/applications/${row.application_id}/record-cash-payment`,
         { amount: amt, note: note.trim() || undefined }
       )
       setSaveMsg(res.data.message)
-      setAmount('')
-      setNote('')
+      setAmount(''); setNote('')
+      setPayMode(null)
       setShowReceipts(true)
       fetchStatus()
     } catch (err) {
@@ -289,8 +292,55 @@ function CollegeFeePanel({ row, collegeId, onClose }) {
     } finally { setSaving(false) }
   }
 
+  // ── Online payment (Razorpay) ─────────────────────────────
+  async function handleOnline(e) {
+    e.preventDefault()
+    const amt = parseFloat(amount)
+    if (!amt || amt <= 0) { setSaveErr('Enter a valid amount.'); return }
+    setSaveErr(''); setSaveMsg(''); setSaving(true)
+    try {
+      const orderRes = await api.post('payments/create-order', {
+        application_id: row.application_id,
+        payment_type:   'college_fee',
+        amount:         amt,
+      })
+      const orderData = orderRes.data.data
+      setSaving(false)
+
+      openCheckout({
+        orderData,
+        onSuccess: async (rzpResponse) => {
+          setSaving(true)
+          try {
+            const verifyRes = await api.post('payments/verify', {
+              application_id:      row.application_id,
+              payment_type:        'college_fee',
+              razorpay_order_id:   rzpResponse.razorpay_order_id,
+              razorpay_payment_id: rzpResponse.razorpay_payment_id,
+              razorpay_signature:  rzpResponse.razorpay_signature,
+            })
+            setSaveMsg(verifyRes.data.message)
+            setPayMode(null)
+            setShowReceipts(true)
+            fetchStatus()
+          } catch (err) {
+            setSaveErr(err?.response?.data?.message || 'Payment verification failed.')
+          } finally { setSaving(false) }
+        },
+        onFailure: (err) => {
+          setSaving(false)
+          if (err.message !== 'Payment cancelled by user.') setSaveErr(err.message)
+        },
+      })
+    } catch (err) {
+      setSaveErr(err?.response?.data?.message || 'Could not initiate payment.')
+      setSaving(false)
+    }
+  }
+
   const fs      = feeStatus
-  const allPaid = fs?.college_fee_paid || (fs && fs.remaining <= 0)
+  const allPaid = fs && fs.total_fee > 0 && fs.remaining <= 0
+  const amtDue  = fs ? (fs.total_paid > 0 ? fs.remaining : (fs.fee_pay_now_amount || fs.remaining)) : 0
 
   return (
     <div>
@@ -334,40 +384,91 @@ function CollegeFeePanel({ row, collegeId, onClose }) {
               </div>
             </div>
 
-            {/* Already paid notice */}
+            {saveMsg && (
+              <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800 font-medium">
+                {saveMsg}
+              </div>
+            )}
+            {saveErr && (
+              <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{saveErr}</div>
+            )}
+
+            {/* Already paid */}
             {allPaid && (
               <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800 font-medium">
                 All fees have been paid in full.
               </div>
             )}
 
-            {/* Cash payment form */}
-            {!allPaid && fs.total_fee > 0 && (
-              <form onSubmit={handleRecord} className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-4 space-y-3">
-                <p className="text-sm font-semibold text-slate-700">Record Cash / Offline Payment</p>
+            {/* No fee set */}
+            {!allPaid && fs.total_fee === 0 && (
+              <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+                Fee amount not set yet. Set fees from the application detail page first.
+              </div>
+            )}
 
+            {/* Payment mode chooser */}
+            {!allPaid && fs.total_fee > 0 && !payMode && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Collect Payment</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => { setPayMode('cash'); setSaveErr(''); setSaveMsg(''); setAmount(String(amtDue)) }}
+                    className="flex flex-col items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-4 py-4 hover:border-slate-400 hover:bg-slate-50 transition"
+                  >
+                    <span className="text-2xl">💵</span>
+                    <span className="text-sm font-semibold text-slate-800">Cash / Offline</span>
+                    <span className="text-xs text-slate-400 text-center">Record a cash or offline payment received at the counter</span>
+                  </button>
+                  <button
+                    onClick={() => { setPayMode('online'); setSaveErr(''); setSaveMsg(''); setAmount(String(amtDue)) }}
+                    disabled={!!scriptError}
+                    className="flex flex-col items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-4 py-4 hover:border-blue-400 hover:bg-blue-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <span className="text-2xl">💳</span>
+                    <span className="text-sm font-semibold text-slate-800">Online (Razorpay)</span>
+                    <span className="text-xs text-slate-400 text-center">Student pays via UPI, card, or netbanking now</span>
+                  </button>
+                </div>
+                {scriptError && (
+                  <p className="text-xs text-amber-600">Payment gateway could not be loaded. Online payments unavailable.</p>
+                )}
+              </div>
+            )}
+
+            {/* Cash form */}
+            {!allPaid && payMode === 'cash' && (
+              <form onSubmit={handleCash} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-slate-700">Record Cash / Offline Payment</p>
+                  <button type="button" onClick={() => { setPayMode(null); setSaveErr('') }}
+                    className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
+                </div>
                 <div className="flex gap-3 items-end">
                   <div className="flex-1">
-                    <label className="text-xs text-slate-500 mb-1 block">Amount (₹)</label>
+                    <label className="text-xs text-slate-500 mb-1 block">
+                      Amount (₹)
+                      {fs.total_paid <= 0 && <span className="ml-1 text-slate-400">(first instalment — fixed)</span>}
+                    </label>
                     <input
-                      type="text"
-                      inputMode="numeric"
+                      type="text" inputMode="numeric"
                       value={amount}
                       onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                      readOnly={fs.total_paid <= 0}
                       placeholder={`Max ₹${Number(fs.remaining).toLocaleString('en-IN')}`}
-                      className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                      className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 ${
+                        fs.total_paid <= 0 ? 'bg-slate-100 border-slate-200 text-slate-600 cursor-not-allowed' : 'border-slate-200'
+                      }`}
                       required
                     />
                   </div>
                   <button
-                    type="submit"
-                    disabled={saving}
+                    type="submit" disabled={saving}
                     className="shrink-0 rounded-lg bg-slate-900 text-white text-sm font-semibold px-4 py-2 hover:bg-slate-700 disabled:opacity-50 transition"
                   >
                     {saving ? 'Saving…' : 'Record'}
                   </button>
                 </div>
-
                 <div>
                   <label className="text-xs text-slate-500 mb-1 block">Note (optional)</label>
                   <input
@@ -378,20 +479,45 @@ function CollegeFeePanel({ row, collegeId, onClose }) {
                     className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
                   />
                 </div>
-
-                {saveErr && <p className="text-sm text-red-600">{saveErr}</p>}
-                {saveMsg && <p className="text-sm text-emerald-700 font-medium">{saveMsg}</p>}
               </form>
             )}
 
-            {/* No fee set yet */}
-            {fs.total_fee === 0 && (
-              <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
-                Fee amount not set for this application yet. Set fees from the application detail page.
-              </div>
+            {/* Online payment */}
+            {!allPaid && payMode === 'online' && (
+              <form onSubmit={handleOnline} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-blue-800">Online Payment via Razorpay</p>
+                  <button type="button" onClick={() => { setPayMode(null); setSaveErr(''); setAmount('') }}
+                    className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
+                </div>
+                <div className="flex gap-3 items-end">
+                  <div className="flex-1">
+                    <label className="text-xs text-blue-700 mb-1 block">
+                      Amount (₹)
+                      {fs.total_paid <= 0 && <span className="ml-1 text-blue-400">(first instalment — fixed)</span>}
+                    </label>
+                    <input
+                      type="text" inputMode="numeric"
+                      value={amount}
+                      onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                      readOnly={fs.total_paid <= 0}
+                      placeholder={`Max ₹${Number(fs.remaining).toLocaleString('en-IN')}`}
+                      className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${
+                        fs.total_paid <= 0 ? 'bg-blue-100 border-blue-200 text-blue-700 cursor-not-allowed' : 'border-blue-200 bg-white'
+                      }`}
+                      required
+                    />
+                  </div>
+                  <button type="submit" disabled={saving}
+                    className="shrink-0 rounded-lg bg-blue-600 text-white text-sm font-semibold px-4 py-2 hover:bg-blue-700 disabled:opacity-50 transition">
+                    {saving ? 'Processing…' : 'Open Razorpay'}
+                  </button>
+                </div>
+                <p className="text-xs text-blue-600">Razorpay checkout will open for UPI, card, or netbanking payment.</p>
+              </form>
             )}
 
-            {/* Transactions list from paid_records */}
+            {/* Transactions list */}
             {fs.paid_records?.length > 0 && (
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Transactions</p>
@@ -456,8 +582,10 @@ function StatCard({ label, value, color }) {
   )
 }
 
-function StatusBadge({ paid }) {
-  return paid
-    ? <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">Paid</span>
-    : <span className="rounded-full bg-amber-100  px-2.5 py-0.5 text-xs font-semibold text-amber-700">Pending</span>
+function StatusBadge({ remaining, total, paidAmt }) {
+  const fullyPaid = total > 0 && remaining <= 0
+  const partial   = paidAmt > 0 && remaining > 0
+  if (fullyPaid) return <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">Paid</span>
+  if (partial)   return <span className="rounded-full bg-blue-100   px-2.5 py-0.5 text-xs font-semibold text-blue-700">Partial</span>
+  return               <span className="rounded-full bg-red-100    px-2.5 py-0.5 text-xs font-semibold text-red-600">Pending</span>
 }

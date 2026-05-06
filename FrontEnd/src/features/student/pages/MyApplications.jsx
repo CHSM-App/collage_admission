@@ -17,7 +17,7 @@ const STATUS_META = {
   correction_done:      { label: 'Under Review',        color: 'bg-blue-100 text-blue-700' },
   doc_verified:         { label: 'Application Approved',color: 'bg-teal-100 text-teal-700' },
   confirmed:            { label: 'Fees Pending',        color: 'bg-amber-100 text-amber-700' },
-  fees_paid:            { label: 'Confirmed',           color: 'bg-emerald-100 text-emerald-700' },
+  fees_paid:            { label: 'Admission Confirmed',  color: 'bg-emerald-100 text-emerald-700' },
   roll_assigned:        { label: 'Roll Assigned',       color: 'bg-violet-100 text-violet-700' },
   enrolled:             { label: 'Enrolled',            color: 'bg-green-100 text-green-800' },
   rejected:             { label: 'Rejected',            color: 'bg-red-100 text-red-700' },
@@ -30,7 +30,7 @@ const SECTIONS = [
   { key: 'correction', label: 'Correction Required', statuses: ['correction_requested'] },
   { key: 'approved',   label: 'Approved',            statuses: ['doc_verified'] },
   { key: 'fees',       label: 'Fees Pending',        statuses: ['confirmed'] },
-  { key: 'confirmed',  label: 'Confirmed',           statuses: ['fees_paid', 'roll_assigned', 'enrolled'] },
+  { key: 'confirmed',  label: 'Admission Confirmed',  statuses: ['fees_paid', 'roll_assigned', 'enrolled'] },
 ]
 
 export default function MyApplications() {
@@ -230,22 +230,53 @@ export default function MyApplications() {
                 </div>
               )}
 
-              {app.status === 'fees_paid' && (
-                <div className="mt-3 rounded-md bg-emerald-50 border border-emerald-100 px-3 py-2 space-y-2">
-                  <p className="text-sm text-emerald-800 font-medium">
-                    Admission confirmed! Fee payment received.
-                    {app.fee_total_amount && parseFloat(app.fee_total_amount) > parseFloat(app.fee_pay_now_amount || 0) && (
-                      <span> If you have a remaining balance, you can pay it below.</span>
+              {app.status === 'fees_paid' && (() => {
+                const total    = parseFloat(app.fee_total_amount)  || 0
+                const payNow   = parseFloat(app.fee_pay_now_amount) || total
+                const paid     = parseFloat(app.amount_paid)       || 0
+                // remaining = total minus what's actually been paid
+                const remaining = total > 0 ? Math.max(0, total - paid) : 0
+                // has more to pay if total > payNow threshold (instalment scenario)
+                // or if actual paid amount is less than total
+                const hasMore  = total > 0 && (total > payNow + 0.01 || remaining > 0.01)
+                return (
+                  <div className="mt-3 rounded-md bg-emerald-50 border border-emerald-200 px-3 py-3 space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="inline-flex items-center gap-1 text-sm font-semibold text-emerald-800">
+                        <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                        Admission Confirmed!
+                      </span>
+                      {hasMore && remaining > 0.01 && (
+                        <span className="rounded-full bg-amber-100 text-amber-700 text-xs font-semibold px-2.5 py-0.5">
+                          ₹{remaining.toLocaleString('en-IN')} balance due
+                        </span>
+                      )}
+                    </div>
+                    {hasMore && (
+                      <p className="text-xs text-slate-500">
+                        {remaining > 0.01
+                          ? `You have paid ₹${paid.toLocaleString('en-IN')} of ₹${total.toLocaleString('en-IN')} total. Please pay the remaining ₹${remaining.toLocaleString('en-IN')}.`
+                          : `Total fee: ₹${total.toLocaleString('en-IN')}. You may pay any outstanding balance below.`
+                        }
+                      </p>
                     )}
-                  </p>
-                  <button
-                    onClick={() => setFeePayApp(app)}
-                    className="rounded-md bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700"
-                  >
-                    View / Pay Remaining Fee
-                  </button>
-                </div>
-              )}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={() => setFeePayApp(app)}
+                        className={`rounded-md px-4 py-1.5 text-sm font-semibold text-white transition ${
+                          hasMore && remaining > 0.01
+                            ? 'bg-amber-600 hover:bg-amber-700'
+                            : 'bg-emerald-600 hover:bg-emerald-700'
+                        }`}
+                      >
+                        {hasMore && remaining > 0.01 ? 'Pay Remaining Fee' : 'View Fee & Receipts'}
+                      </button>
+                    </div>
+                  </div>
+                )
+              })()}
 
               {app.status === 'roll_assigned' && (
                 <div className="mt-3 rounded-md bg-violet-50 border border-violet-100 px-3 py-2">

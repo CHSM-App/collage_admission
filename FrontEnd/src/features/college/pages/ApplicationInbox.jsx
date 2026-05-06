@@ -11,7 +11,7 @@ const STATUS_META = {
   correction_done:          { label: 'Correction Review',        color: 'bg-sky-100 text-sky-700' },
   doc_verified:             { label: 'Student Awaited',          color: 'bg-teal-100 text-teal-700' },
   confirmed:                { label: 'Fees Pending',             color: 'bg-amber-100 text-amber-700' },
-  fees_paid:                { label: 'Confirmed',                color: 'bg-emerald-100 text-emerald-700' },
+  fees_paid:                { label: 'Admission Confirmed',      color: 'bg-emerald-100 text-emerald-700' },
   roll_assigned:            { label: 'Roll Assigned',            color: 'bg-violet-100 text-violet-700' },
   enrolled:                 { label: 'Enrolled',                 color: 'bg-green-100 text-green-800' },
   rejected:                 { label: 'Rejected',                 color: 'bg-red-100 text-red-700' },
@@ -190,8 +190,8 @@ export default function ApplicationInbox({ collegeId }) {
       )}
 
       {!loading && filtered.length > 0 && (
-        <div className="rounded-lg border border-slate-200 overflow-hidden">
-          <div className="hidden sm:grid grid-cols-[1fr_1fr_10rem_12rem_6rem] bg-slate-50 border-b border-slate-200 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <div className="rounded-lg border-2 border-slate-400 overflow-hidden">
+          <div className="hidden sm:grid grid-cols-[1fr_1fr_10rem_12rem_6rem] bg-slate-100 border-b-2 border-slate-400 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-600">
             <span>Student</span>
             <span>Course / Year</span>
             <span>Reg No.</span>
@@ -206,10 +206,10 @@ export default function ApplicationInbox({ collegeId }) {
                 key={app.id}
                 onClick={() => openApp(app.id)}
                 className={`w-full text-left grid sm:grid-cols-[1fr_1fr_10rem_12rem_6rem] px-4 py-2.5 hover:bg-blue-50 transition items-center ${
-                  i !== 0 ? 'border-t border-slate-100' : ''
+                  i !== 0 ? 'border-t-2 border-slate-300' : ''
                 }`}
               >
-                <div className="min-w-0 pr-3">
+                <div className="min-w-0 pr-3">      
                   <p className="font-medium text-sm text-slate-900 truncate">{app.student_name}</p>
                   <p className="text-xs text-slate-400 truncate">{app.student_email} · {app.phone}</p>
                 </div>

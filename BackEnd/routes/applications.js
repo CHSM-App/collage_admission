@@ -58,6 +58,7 @@ router.get('/', async (req, res) => {
         a.rejection_reason, a.cancellation_reason, a.correction_note,
         a.application_fee_paid, a.college_fee_paid,
         a.fee_total_amount, a.fee_pay_now_amount,
+        ISNULL(psum.amount_paid, 0) AS amount_paid,
         c.id   AS college_id,   c.name  AS college_name,  c.city AS college_city,
         a.course_id,    COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
         COALESCE(c.application_fee, 0) AS application_fee, ap.total_seats, ap.filled_seats
@@ -65,6 +66,12 @@ router.get('/', async (req, res) => {
       JOIN colleges        c  ON c.id       = a.college_id
       LEFT JOIN faculty_master cr ON cr.code_no = a.course_id AND cr.college_id = a.college_id
       JOIN admission_periods ap ON ap.id    = a.admission_period_id
+      LEFT JOIN (
+        SELECT application_id, SUM(amount) AS amount_paid
+        FROM payments
+        WHERE payment_type = 'college_fee' AND status = 'success'
+        GROUP BY application_id
+      ) psum ON psum.application_id = a.id
       WHERE a.student_id = @sid
     `;
 

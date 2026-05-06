@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '../../../services/api.js'
 import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
+import { useRazorpay } from '../../../shared/hooks/useRazorpay.js'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000/').replace(/\/$/, '')
 
@@ -279,6 +280,15 @@ export default function ApplicationDetail({ collegeId, appId }) {
           initialPayNow={d.fee_pay_now_amount}
           readonly={d.status === 'fees_paid'}
           onSaved={fetchApp}
+        />
+      )}
+
+      {/* ── Collect Fee (cash or online) ── */}
+      {['confirmed', 'fees_paid'].includes(d.status) && canFees && d.fee_total_amount && parseFloat(d.fee_total_amount) > 0 && (
+        <CollegePayPanel
+          collegeId={collegeId}
+          appId={appId}
+          onPaid={fetchApp}
         />
       )}
 
@@ -668,6 +678,241 @@ function FeeAmountPanel({ collegeId, appId, initialTotal, initialPayNow, readonl
 
         {!locked && (
           <Button onClick={handleSave} loading={saving}>Save Fee Amounts</Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Collect fee: cash or Razorpay ────────────────────────────
+function CollegePayPanel({ collegeId, appId, onPaid }) {
+  const { openCheckout, scriptError } = useRazorpay()
+
+  const [feeStatus, setFeeStatus]   = useState(null)
+  const [loadingFS, setLoadingFS]   = useState(true)
+  const [payMode, setPayMode]       = useState(null)   // null | 'cash' | 'online'
+  const [amount, setAmount]         = useState('')
+  const [note, setNote]             = useState('')
+  const [saving, setSaving]         = useState(false)
+  const [msg, setMsg]               = useState('')
+  const [err, setErr]               = useState('')
+
+  function fetchFS() {
+    setLoadingFS(true)
+    api.get(`payments/college-fee-status/${appId}`)
+      .then(r => setFeeStatus(r.data.data))
+      .catch(() => {})
+      .finally(() => setLoadingFS(false))
+  }
+  useEffect(() => { fetchFS() }, [appId])
+
+  async function handleCash(e) {
+    e.preventDefault()
+    const amt = parseFloat(amount)
+    if (!amt || amt <= 0) { setErr('Enter a valid amount.'); return }
+    setErr(''); setMsg(''); setSaving(true)
+    try {
+      const res = await api.post(
+        `college-admin/${collegeId}/applications/${appId}/record-cash-payment`,
+        { amount: amt, note: note.trim() || undefined }
+      )
+      setMsg(res.data.message)
+      setAmount(''); setNote(''); setPayMode(null)
+      fetchFS(); onPaid?.()
+    } catch (e) {
+      setErr(e?.response?.data?.message || 'Failed to record payment.')
+    } finally { setSaving(false) }
+  }
+
+  async function handleOnline(e) {
+    e.preventDefault()
+    const amt = parseFloat(amount)
+    if (!amt || amt <= 0) { setErr('Enter a valid amount.'); return }
+    setErr(''); setMsg(''); setSaving(true)
+    try {
+      const orderRes = await api.post('payments/create-order', {
+        application_id: appId,
+        payment_type:   'college_fee',
+        amount:         amt,
+      })
+      const orderData = orderRes.data.data
+      setSaving(false)
+      openCheckout({
+        orderData,
+        onSuccess: async (rzpResponse) => {
+          setSaving(true)
+          try {
+            const verifyRes = await api.post('payments/verify', {
+              application_id:      appId,
+              payment_type:        'college_fee',
+              razorpay_order_id:   rzpResponse.razorpay_order_id,
+              razorpay_payment_id: rzpResponse.razorpay_payment_id,
+              razorpay_signature:  rzpResponse.razorpay_signature,
+            })
+            setMsg(verifyRes.data.message)
+            setPayMode(null)
+            fetchFS(); onPaid?.()
+          } catch (e) {
+            setErr(e?.response?.data?.message || 'Payment verification failed.')
+          } finally { setSaving(false) }
+        },
+        onFailure: (e) => {
+          setSaving(false)
+          if (e.message !== 'Payment cancelled by user.') setErr(e.message)
+        },
+      })
+    } catch (e) {
+      setErr(e?.response?.data?.message || 'Could not initiate payment.')
+      setSaving(false)
+    }
+  }
+
+  if (loadingFS || !feeStatus) return null
+  const fs      = feeStatus
+  const allPaid = fs.college_fee_paid || fs.remaining <= 0
+  const amtDue  = fs.total_paid > 0 ? fs.remaining : (fs.fee_pay_now_amount || fs.remaining)
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+        <div>
+          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Collect Fee Payment</p>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {allPaid ? 'All fees have been collected.' : `₹${Number(fs.remaining).toLocaleString('en-IN')} remaining`}
+          </p>
+        </div>
+        {allPaid
+          ? <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">Fully Paid</span>
+          : <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">Pending</span>
+        }
+      </div>
+
+      <div className="px-4 py-4 space-y-4">
+        {/* Summary */}
+        <div className="grid grid-cols-3 gap-2 text-sm">
+          <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-center">
+            <p className="text-xs text-slate-400">Total Fee</p>
+            <p className="font-bold text-slate-950 mt-0.5">₹{Number(fs.total_fee).toLocaleString('en-IN')}</p>
+          </div>
+          <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-center">
+            <p className="text-xs text-slate-400">Paid</p>
+            <p className="font-bold text-emerald-700 mt-0.5">₹{Number(fs.total_paid).toLocaleString('en-IN')}</p>
+          </div>
+          <div className={`rounded-lg border p-3 text-center ${fs.remaining > 0 ? 'bg-amber-50 border-amber-100' : 'bg-slate-50 border-slate-100'}`}>
+            <p className="text-xs text-slate-400">Remaining</p>
+            <p className={`font-bold mt-0.5 ${fs.remaining > 0 ? 'text-amber-700' : 'text-slate-400'}`}>
+              ₹{Number(fs.remaining).toLocaleString('en-IN')}
+            </p>
+          </div>
+        </div>
+
+        {/* Transactions */}
+        {fs.paid_records?.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Transactions</p>
+            {fs.paid_records.map((p, i) => (
+              <div key={p.id} className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm">
+                <div className="flex items-center gap-2">
+                  <span className="h-5 w-5 rounded-full bg-emerald-100 flex items-center justify-center text-xs font-bold text-emerald-700 shrink-0">{i+1}</span>
+                  <div>
+                    <p className="font-medium text-slate-700">{p.razorpay_payment_id?.startsWith('CASH-') ? 'Cash / Offline' : 'Online (Razorpay)'}</p>
+                    <p className="text-xs text-slate-400">{new Date(p.completed_at?.replace(' ','T')).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</p>
+                  </div>
+                </div>
+                <span className="font-bold text-emerald-700">₹{Number(p.amount).toLocaleString('en-IN')}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {msg && <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800 font-medium">{msg}</div>}
+        {err && <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{err}</div>}
+
+        {/* Mode chooser */}
+        {!allPaid && !payMode && (
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              onClick={() => { setPayMode('cash'); setErr(''); setMsg('') }}
+              className="flex flex-col items-center gap-1.5 rounded-xl border-2 border-slate-200 bg-white px-3 py-3 hover:border-slate-400 hover:bg-slate-50 transition"
+            >
+              <span className="text-xl">💵</span>
+              <span className="text-sm font-semibold text-slate-800">Cash / Offline</span>
+              <span className="text-xs text-slate-400">Record payment received at counter</span>
+            </button>
+            <button
+              onClick={() => { setPayMode('online'); setErr(''); setMsg('') }}
+              disabled={!!scriptError}
+              className="flex flex-col items-center gap-1.5 rounded-xl border-2 border-slate-200 bg-white px-3 py-3 hover:border-blue-400 hover:bg-blue-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <span className="text-xl">💳</span>
+              <span className="text-sm font-semibold text-slate-800">Online (Razorpay)</span>
+              <span className="text-xs text-slate-400">Pay via UPI, card, or netbanking</span>
+            </button>
+          </div>
+        )}
+
+        {/* Cash form */}
+        {!allPaid && payMode === 'cash' && (
+          <form onSubmit={handleCash} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-slate-700">Record Cash Payment</p>
+              <button type="button" onClick={() => { setPayMode(null); setErr('') }}
+                className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
+            </div>
+            <div className="flex gap-3 items-end">
+              <div className="flex-1">
+                <label className="text-xs text-slate-500 mb-1 block">Amount (₹)</label>
+                <input
+                  type="text" inputMode="numeric"
+                  value={amount}
+                  onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                  placeholder={`Max ₹${Number(fs.remaining).toLocaleString('en-IN')}`}
+                  className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  required
+                />
+              </div>
+              <button type="submit" disabled={saving}
+                className="shrink-0 rounded-lg bg-slate-900 text-white text-sm font-semibold px-4 py-2 hover:bg-slate-700 disabled:opacity-50 transition">
+                {saving ? 'Saving…' : 'Record'}
+              </button>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 mb-1 block">Note (optional)</label>
+              <input type="text" value={note} onChange={e => setNote(e.target.value)}
+                placeholder="e.g. Cash received at counter"
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+              />
+            </div>
+          </form>
+        )}
+
+        {/* Online */}
+        {!allPaid && payMode === 'online' && (
+          <form onSubmit={handleOnline} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-sm font-semibold text-blue-800">Online Payment via Razorpay</p>
+              <button type="button" onClick={() => { setPayMode(null); setErr(''); setAmount('') }}
+                className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
+            </div>
+            <div className="flex gap-3 items-end">
+              <div className="flex-1">
+                <label className="text-xs text-blue-700 mb-1 block">Amount (₹)</label>
+                <input
+                  type="text" inputMode="numeric"
+                  value={amount}
+                  onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                  placeholder={`Max ₹${Number(fs.remaining).toLocaleString('en-IN')}`}
+                  className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  required
+                />
+              </div>
+              <button type="submit" disabled={saving}
+                className="shrink-0 rounded-lg bg-blue-600 text-white text-sm font-semibold px-4 py-2 hover:bg-blue-700 disabled:opacity-50 transition">
+                {saving ? 'Processing…' : 'Open Razorpay'}
+              </button>
+            </div>
+            <p className="text-xs text-blue-600">Razorpay checkout will open for UPI, card, or netbanking payment.</p>
+          </form>
         )}
       </div>
     </div>

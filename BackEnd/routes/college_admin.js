@@ -594,7 +594,7 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', async (req, r
       .input('id',  mssqlShared.Int, appId)
       .input('col', mssqlShared.Int, collegeId)
       .query(`
-        SELECT id, status, fee_total_amount
+        SELECT id, status, fee_total_amount, fee_pay_now_amount
         FROM applications
         WHERE id = @id AND college_id = @col
       `);
@@ -607,7 +607,8 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', async (req, r
       return res.status(400).json({ success: false, message: 'Application must be in confirmed or fees_paid status.' });
     }
 
-    const totalFee = parseFloat(app.fee_total_amount) || 0;
+    const totalFee        = parseFloat(app.fee_total_amount)    || 0;
+    const payNowThreshold = parseFloat(app.fee_pay_now_amount) || totalFee;
 
     // Check already paid
     const paidRes = await db.request()
@@ -642,9 +643,12 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', async (req, r
       `);
 
     const newTotalPaid = alreadyPaid + amt;
-    const allPaid      = totalFee > 0 && newTotalPaid >= totalFee - 0.01;
+    const newRemaining = Math.max(0, totalFee - newTotalPaid);
+    // Admission confirmed once first instalment (pay_now threshold) is met
+    const firstPaid    = payNowThreshold > 0 && newTotalPaid >= payNowThreshold - 0.01;
+    const fullyPaid    = totalFee > 0 && newTotalPaid >= totalFee - 0.01;
 
-    if (allPaid) {
+    if (firstPaid) {
       await db.request()
         .input('id', mssqlShared.Int, appId)
         .query(`
@@ -655,17 +659,20 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', async (req, r
     }
 
     const noteText = note ? ` — ${note}` : '';
-    if (allPaid) {
-      await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${amt.toLocaleString('en-IN')} (full)${noteText}`);
+    if (fullyPaid) {
+      await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${newTotalPaid.toLocaleString('en-IN')} (full)${noteText}`);
+    } else if (firstPaid) {
+      await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${newTotalPaid.toLocaleString('en-IN')} paid, ₹${newRemaining.toLocaleString('en-IN')} remaining${noteText}`);
     } else {
-      const newRemaining = totalFee - newTotalPaid;
       await logActivity(appId, 'fee_instalment_paid', 'college', `Cash: ₹${amt.toLocaleString('en-IN')}, ₹${newRemaining.toLocaleString('en-IN')} remaining${noteText}`);
     }
 
     return res.json({
-      success:    true,
-      message:    allPaid ? 'Fee fully paid!' : `₹${amt.toLocaleString('en-IN')} recorded. ₹${(totalFee - newTotalPaid).toLocaleString('en-IN')} remaining.`,
-      data: { all_paid: allPaid, total_paid: newTotalPaid, remaining: Math.max(0, totalFee - newTotalPaid) },
+      success: true,
+      message: fullyPaid  ? 'Fee fully paid!' :
+               firstPaid  ? `₹${amt.toLocaleString('en-IN')} recorded. Admission confirmed! ₹${newRemaining.toLocaleString('en-IN')} remaining.` :
+                            `₹${amt.toLocaleString('en-IN')} recorded. ₹${newRemaining.toLocaleString('en-IN')} remaining.`,
+      data: { all_paid: firstPaid, fully_paid: fullyPaid, total_paid: newTotalPaid, remaining: newRemaining },
     });
   } catch (err) {
     console.error(err);
@@ -777,9 +784,11 @@ router.get('/:collegeId/fee-receipts', async (req, res) => {
     const req2 = db.request().input('col', parseInt(req.params.collegeId));
 
     if (status === 'paid') {
-      query += ' AND a.college_fee_paid = 1';
+      // Fully paid = nothing remaining (paid >= total)
+      query += ' AND a.fee_total_amount > 0 AND ISNULL(psum.total_paid, 0) >= a.fee_total_amount - 0.01';
     } else if (status === 'pending') {
-      query += ' AND a.college_fee_paid = 0';
+      // Pending = still has a remaining balance
+      query += ' AND (a.fee_total_amount IS NULL OR a.fee_total_amount = 0 OR ISNULL(psum.total_paid, 0) < a.fee_total_amount - 0.01)';
     }
     if (course_id) {
       query += ' AND a.course_id = @crs';
@@ -794,7 +803,7 @@ router.get('/:collegeId/fee-receipts', async (req, res) => {
       req2.input('q', `%${q.trim()}%`);
     }
 
-    query += ' ORDER BY a.college_fee_paid ASC, a.confirmed_at DESC';
+    query += ' ORDER BY (CASE WHEN a.fee_total_amount > 0 AND ISNULL(psum.total_paid,0) >= a.fee_total_amount - 0.01 THEN 1 ELSE 0 END) ASC, a.confirmed_at DESC';
 
     const result = await req2.query(query);
     return res.json({ success: true, data: result.recordset });
