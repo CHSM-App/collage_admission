@@ -22,19 +22,28 @@ function authenticate(req, res, next) {
 function requirePerm(perm) {
   return (req, res, next) => {
     const u = req.user;
-    if (!u || u.role !== 'college') {
+    if (!u) return res.status(401).json({ success: false, message: 'Authentication required.' });
+    // Super-admin passes all permission checks
+    if (u.role === 'admin') return next();
+    if (u.role !== 'college') {
       return res.status(403).json({ success: false, message: 'Access denied.' });
     }
-    if (!u.is_staff) return next(); // main admin always allowed
+    if (!u.is_staff) return next(); // main college admin always allowed
     if (u.permissions && u.permissions[perm] === true) return next();
     return res.status(403).json({ success: false, message: `Permission denied: ${perm}` });
   };
 }
 
-// Require the caller is a college (admin or staff) and their college_id matches the :collegeId param
+// Require the caller is a college (admin or staff) and their college_id matches the :collegeId param.
+// Super-admins (role === 'admin') can access any college's data.
 function requireCollegeAccess(req, res, next) {
   const u = req.user;
-  if (!u || u.role !== 'college') {
+  if (!u) {
+    return res.status(401).json({ success: false, message: 'Authentication required.' });
+  }
+  // Super-admin can access any college
+  if (u.role === 'admin') return next();
+  if (u.role !== 'college') {
     return res.status(403).json({ success: false, message: 'Access denied.' });
   }
   const paramCollegeId = parseInt(req.params.collegeId);
