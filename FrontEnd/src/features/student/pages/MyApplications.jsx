@@ -273,6 +273,12 @@ export default function MyApplications() {
                       >
                         {hasMore && remaining > 0.01 ? 'Pay Remaining Fee' : 'View Fee & Receipts'}
                       </button>
+                      <button
+                        onClick={() => setSelectSubjectsApp(app)}
+                        className="rounded-md bg-violet-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-violet-700 transition"
+                      >
+                        Select Subjects
+                      </button>
                     </div>
                   </div>
                 )
@@ -293,8 +299,14 @@ export default function MyApplications() {
               )}
 
               {app.status === 'enrolled' && (
-                <div className="mt-3 rounded-md bg-green-50 border border-green-100 px-3 py-2 text-sm text-green-800">
-                  Enrollment complete. Welcome to {app.college_name}!
+                <div className="mt-3 rounded-md bg-green-50 border border-green-100 px-3 py-3 space-y-2 text-sm text-green-800">
+                  <p className="font-medium">Enrollment complete. Welcome to {app.college_name}!</p>
+                  <button
+                    onClick={() => setSelectSubjectsApp(app)}
+                    className="rounded-md bg-green-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-green-700"
+                  >
+                    View / Update Subjects
+                  </button>
                 </div>
               )}
 

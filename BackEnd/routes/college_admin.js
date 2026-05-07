@@ -298,25 +298,33 @@ router.get('/:collegeId/applications/:appId', requirePerm('review_application'),
     const examRes = await db.request()
       .input('appId', parseInt(req.params.appId))
       .query(`
-        SELECT ape.*,
-               (SELECT apes.subject_name, apes.marks_obtained, apes.marks_max
-                FROM application_previous_exam_subjects apes
-                WHERE apes.application_previous_exam_id = ape.id
-                FOR JSON PATH) AS subjects_json
+        SELECT
+          ape.id, ape.exam_type,
+          ape.board_or_college_name   AS institute,
+          ape.school_or_college_address AS board,
+          ape.month_year_passing      AS month_year,
+          ape.seat_number             AS seat_no,
+          ape.total_marks_obtained    AS marks_obtained,
+          ape.total_marks_max         AS marks_max,
+          ape.percentage,
+          ape.class_grade,
+          ape.remark
         FROM application_previous_exam ape
         WHERE ape.application_id = @appId
+        ORDER BY ape.id
       `);
 
-    const exam = examRes.recordset[0] || null;
-    if (exam && exam.subjects_json) {
-      try { exam.subjects = JSON.parse(exam.subjects_json); } catch { exam.subjects = []; }
-      delete exam.subjects_json;
+    const exams = {};
+    for (const row of examRes.recordset) {
+      exams[row.exam_type || 'SSC'] = row;
     }
+    const exam = examRes.recordset[0] || null;
 
     const activityRes = await db.request()
       .input('appId', parseInt(req.params.appId))
       .query(`
-        SELECT id, action, actor_role, note, created_at
+        SELECT id, action, actor_role, note,
+               REPLACE(CONVERT(NVARCHAR(19), created_at, 120), ' ', 'T') AS created_at
         FROM application_activity_log
         WHERE application_id = @appId
         ORDER BY created_at ASC
@@ -324,7 +332,7 @@ router.get('/:collegeId/applications/:appId', requirePerm('review_application'),
 
     return res.json({
       success: true,
-      data: { ...result.recordset[0], documents: docs.recordset, exam, activity: activityRes.recordset },
+      data: { ...result.recordset[0], documents: docs.recordset, exam, exams, activity: activityRes.recordset },
     });
   } catch (err) {
     console.error(err);
@@ -456,7 +464,7 @@ router.post('/:collegeId/applications/:appId/reject', requirePerm('review_applic
 // Student visited college. College verifies docs, sets fees, confirms admission.
 // Status: doc_verified → confirmed
 router.post('/:collegeId/applications/:appId/confirm', requirePerm('review_application'), async (req, res) => {
-  const { fee_total_amount, fee_pay_now_amount, document_ids_verified } = req.body;
+  const { fee_total_amount, fee_pay_now_amount, division, document_ids_verified } = req.body;
 
   const total  = parseFloat(fee_total_amount);
   const payNow = parseFloat(fee_pay_now_amount);
@@ -506,10 +514,12 @@ router.post('/:collegeId/applications/:appId/confirm', requirePerm('review_appli
         .input('id',    mssqlShared.Int,     parseInt(req.params.appId))
         .input('total', mssqlShared.Decimal, total)
         .input('now',   mssqlShared.Decimal, payNow)
+        .input('div',   mssqlShared.Char,    division || null)
         .query(`
           UPDATE applications
           SET status = 'confirmed', confirmed_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(),
-              fee_total_amount = @total, fee_pay_now_amount = @now
+              fee_total_amount = @total, fee_pay_now_amount = @now,
+              app_division = COALESCE(@div, app_division)
           WHERE id = @id
         `);
 
@@ -740,14 +750,14 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
 
 // ── Generate roll numbers (batch) ───────────────────────────
 router.post('/:collegeId/roll-numbers/generate', requirePerm('assign_subjects'), async (req, res) => {
-  const { course_id, year_of_study, academic_year } = req.body;
+  const { course_id } = req.body;
 
-  if (!course_id || !year_of_study || !academic_year) {
-    return res.status(400).json({ success: false, message: 'course_id, year_of_study, academic_year are required.' });
+  if (!course_id) {
+    return res.status(400).json({ success: false, message: 'course_id is required.' });
   }
 
   try {
-    // Find highest existing roll number for this college/course
+    // Find highest existing roll number for this college + course (across all years/batches)
     const maxRes = await db.request()
       .input('col', parseInt(req.params.collegeId))
       .input('crs', parseInt(course_id))
@@ -761,19 +771,17 @@ router.post('/:collegeId/roll-numbers/generate', requirePerm('assign_subjects'),
 
     let nextRoll = (maxRes.recordset[0].max_roll || 0) + 1;
 
-    // Get all fees_paid applications without a roll number, sorted by registration_number
+    // Get ALL fees_paid applications without a roll number for this college + course,
+    // ordered by when fee was paid (first-come first-served, across all years/batches)
     const pending = await db.request()
       .input('col', parseInt(req.params.collegeId))
       .input('crs', parseInt(course_id))
-      .input('yr',  parseInt(year_of_study))
-      .input('ay',  academic_year)
       .query(`
         SELECT id FROM applications
         WHERE college_id = @col AND course_id = @crs
-          AND year_of_study = @yr AND academic_year = @ay
           AND status = 'fees_paid'
           AND roll_number IS NULL
-        ORDER BY registration_number
+        ORDER BY status_updated_at ASC
       `);
 
     if (pending.recordset.length === 0) {

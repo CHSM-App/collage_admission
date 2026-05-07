@@ -24,13 +24,13 @@ function parseLocalDate(str) {
 function fmtDate(str) {
   const d = parseLocalDate(str)
   if (!d) return '—'
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })
 }
 
 function fmtTime(str) {
   const d = parseLocalDate(str)
   if (!d) return ''
-  return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
+  return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' })
 }
 
 export default function PaymentReceipts({ applicationId, onClose }) {

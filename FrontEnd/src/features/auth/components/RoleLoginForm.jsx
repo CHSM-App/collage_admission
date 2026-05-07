@@ -49,7 +49,6 @@ export default function RoleLoginForm({ role }) {
   }, [activeRole, isAuthenticated, navigate])
 
   const handleChange = (event) => {
-    clearError()
     let value = event.target.value
     if (event.target.name === 'phone') value = value.replace(/\D/g, '').slice(0, 10)
     setFormData((currentFormData) => ({

@@ -10,6 +10,9 @@
  * POST   /api/applications/:id/form-documents         — upload/link a document
  * DELETE /api/applications/:id/form-documents/:docTypeId — unlink a document
  * POST   /api/applications/:id/declaration            — accept declaration → ready for payment
+ * GET    /api/subject-lookup                          — ?college_id=&course_id=&semester=&code=
+ * GET    /api/applications/:id/subject-selections     — get subject selections grouped by semester
+ * POST   /api/applications/:id/subject-selections     — save selections for a semester
  * GET    /api/required-documents                      — ?college_id=&course_id=&year=
  */
 
@@ -370,24 +373,62 @@ router.get('/applications/:id/form', async (req, res) => {
 
     const app = appRes.recordset[0];
 
-    // Previous exam
+    // Previous exams (multiple rows keyed by exam_type)
+    const examQuery = `
+      SELECT
+        e.id, e.exam_type,
+        e.board_or_college_name   AS institute,
+        e.school_or_college_address AS board,
+        e.month_year_passing      AS month_year,
+        e.seat_number             AS seat_no,
+        e.total_marks_obtained    AS marks_obtained,
+        e.total_marks_max         AS marks_max,
+        e.percentage,
+        e.class_grade,
+        e.remark,
+        (SELECT s.id, s.subject_name, s.marks_obtained, s.marks_max
+         FROM application_previous_exam_subjects s
+         WHERE s.application_previous_exam_id = e.id
+         FOR JSON PATH) AS subjects_json
+      FROM application_previous_exam e
+      WHERE e.application_id = @appId
+    `;
     const examRes = await db.request()
       .input('appId', mssql.Int, parseInt(req.params.id))
-      .query(`
-        SELECT e.*,
-          (SELECT s.id, s.subject_name, s.marks_obtained, s.marks_max
-           FROM application_previous_exam_subjects s
-           WHERE s.application_previous_exam_id = e.id
-           FOR JSON PATH) AS subjects_json
-        FROM application_previous_exam e
-        WHERE e.application_id = @appId
-      `);
+      .query(examQuery);
 
-    const exam = examRes.recordset[0] || null;
-    if (exam && exam.subjects_json) {
-      exam.subjects = JSON.parse(exam.subjects_json);
-      delete exam.subjects_json;
+    const exams = {};
+    for (const row of examRes.recordset) {
+      if (row.subjects_json) { row.subjects = JSON.parse(row.subjects_json); delete row.subjects_json; }
+      exams[row.exam_type || 'SSC'] = row;
     }
+
+    // If this draft has no exam rows yet, pre-fill from the student's last application
+    if (Object.keys(exams).length === 0) {
+      const prevExamRes = await db.request()
+        .input('sid',   mssql.Int, app.student_id)
+        .input('appId', mssql.Int, parseInt(req.params.id))
+        .query(`
+          SELECT TOP 1 a.id FROM applications a
+          WHERE a.student_id = @sid AND a.id != @appId
+            AND EXISTS (SELECT 1 FROM application_previous_exam e WHERE e.application_id = a.id)
+          ORDER BY a.id DESC
+        `);
+      if (prevExamRes.recordset.length > 0) {
+        const prevAppId = prevExamRes.recordset[0].id;
+        const prevRows = await db.request()
+          .input('appId', mssql.Int, prevAppId)
+          .query(examQuery);
+        for (const row of prevRows.recordset) {
+          if (row.subjects_json) { row.subjects = JSON.parse(row.subjects_json); delete row.subjects_json; }
+          exams[row.exam_type || 'SSC'] = row;
+        }
+      }
+    }
+
+    // Legacy: if only one row without exam_type, keep backward compat
+    const exam = examRes.recordset[0] || null;
+    if (exam && exam.subjects_json) { exam.subjects = JSON.parse(exam.subjects_json); delete exam.subjects_json; }
 
     // Linked documents
     const docsRes = await db.request()
@@ -405,7 +446,7 @@ router.get('/applications/:id/form', async (req, res) => {
 
     return res.json({
       success: true,
-      data: { application: app, previous_exam: exam, documents: docsRes.recordset },
+      data: { application: app, previous_exam: exam, previous_exams: exams, documents: docsRes.recordset },
     });
   } catch (err) {
     console.error(err);
@@ -596,7 +637,7 @@ router.patch('/applications/:id/other-details', async (req, res) => {
   if (!annual_income)   errors.annual_income   = 'Annual family income is required.';
   if (!aadhaar)         errors.aadhaar         = 'Aadhaar number is required.';
   else if (!validateAadhaar(aadhaar)) errors.aadhaar = 'Aadhaar must be exactly 12 digits.';
-  if (!abc_id)          errors.abc_id          = 'ABC ID is required.';
+  if (app.year_of_study > 1 && !abc_id) errors.abc_id = 'ABC ID is required for SY/TY students.';
   if (app.year_of_study > 1 && !prn) errors.prn = 'PRN is required for SY/TY students.';
 
   // Bank: if any one provided, account + IFSC become required
@@ -670,102 +711,84 @@ router.patch('/applications/:id/other-details', async (req, res) => {
 });
 
 // ── PATCH /api/applications/:id/previous-exam (Step 4) ──────
+// Body: { exams: { SSC: {...}, HSC: {...}, FY_SEM1: {...}, FY_SEM2: {...}, ... } }
+// Each exam row: { institute, board, month_year, seat_no, marks_obtained, marks_max, percentage, class_grade, remark }
 router.patch('/applications/:id/previous-exam', async (req, res) => {
   const appId = parseInt(req.params.id);
   const app = await assertDraft(appId, res);
   if (!app) return;
 
-  const {
-    board_or_college_name, school_or_college_address, seat_number, prn_or_seat,
-    year_of_passing, total_marks_obtained, total_marks_max, result,
-    subjects, // array: [{ subject_name, marks_obtained, marks_max }]
-  } = req.body;
+  const { exams } = req.body; // keyed by exam_type
 
-  // For SY/TY, fall back to the college name stored on the application
-  const effectiveCollegeName = board_or_college_name?.toString().trim()
-    || (app.year_of_study > 1 ? await getCollegeName(appId) : null);
-
-  const errors = {};
-  if (!effectiveCollegeName) errors.board_or_college_name = 'Board / college name is required.';
-  if (!year_of_passing)        errors.year_of_passing       = 'Year of passing is required.';
-  if (!seat_number && !prn_or_seat) errors.seat_number      = 'Seat number is required.';
-  if (total_marks_obtained === '' || total_marks_obtained == null) errors.total_marks_obtained = 'Total marks obtained is required.';
-  if (!total_marks_max)        errors.total_marks_max       = 'Total maximum marks is required.';
-  if (app.year_of_study > 1 && !result) errors.result      = 'Result is required for SY/TY.';
-  if (!Array.isArray(subjects) || subjects.length === 0) {
-    errors.subjects = 'At least one subject with marks is required.';
+  if (!exams || typeof exams !== 'object') {
+    return res.status(422).json({ success: false, message: 'exams object is required.' });
   }
 
+  const yearOfStudy = app.year_of_study;
+
+  // Mandatory exam types per year
+  const mandatory = {
+    1: ['SSC', 'HSC'],
+    2: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2'],
+    3: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2'],
+  }[yearOfStudy] || ['SSC', 'HSC'];
+
+  const REQUIRED_EXAM_FIELDS = ['institute', 'board', 'month_year', 'seat_no', 'marks_obtained', 'marks_max', 'percentage', 'class_grade'];
+  const errors = {};
+  for (const type of mandatory) {
+    const row = exams[type];
+    if (!row) { errors[type] = `${type} details are required.`; continue; }
+    for (const field of REQUIRED_EXAM_FIELDS) {
+      if (!String(row[field] || '').trim()) {
+        errors[`${type}_${field}`] = `${type}: ${field} is required.`;
+      }
+    }
+  }
   if (Object.keys(errors).length) {
     return res.status(422).json({ success: false, errors });
   }
 
   try {
-    // Upsert exam record
-    const existing = await db.request()
-      .input('appId', mssql.Int, appId)
-      .query('SELECT id FROM application_previous_exam WHERE application_id = @appId');
-
-    let examId;
-    if (existing.recordset.length > 0) {
-      examId = existing.recordset[0].id;
-      await db.request()
-        .input('id',    mssql.Int,      examId)
-        .input('bcn',   mssql.NVarChar, effectiveCollegeName)
-        .input('addr',  mssql.NVarChar, school_or_college_address || null)
-        .input('seat',  mssql.NVarChar, seat_number    || null)
-        .input('prn',   mssql.NVarChar, prn_or_seat    || null)
-        .input('yop',   mssql.Int,      parseInt(year_of_passing))
-        .input('tmo',   mssql.Decimal,  parseFloat(total_marks_obtained))
-        .input('tmx',   mssql.Decimal,  parseFloat(total_marks_max))
-        .input('res',   mssql.NVarChar, result || null)
-        .query(`
-          UPDATE application_previous_exam SET
-            board_or_college_name=@bcn, school_or_college_address=@addr,
-            seat_number=@seat, prn_or_seat=@prn, year_of_passing=@yop,
-            total_marks_obtained=@tmo, total_marks_max=@tmx, result=@res,
-            updated_at=GETDATE()
-          WHERE id=@id
-        `);
-    } else {
-      const ins = await db.request()
+    // Upsert each provided exam row
+    for (const [examType, row] of Object.entries(exams)) {
+      if (!row) continue;
+      const existing = await db.request()
         .input('appId', mssql.Int,      appId)
-        .input('bcn',   mssql.NVarChar, effectiveCollegeName)
-        .input('addr',  mssql.NVarChar, school_or_college_address || null)
-        .input('seat',  mssql.NVarChar, seat_number    || null)
-        .input('prn',   mssql.NVarChar, prn_or_seat    || null)
-        .input('yop',   mssql.Int,      parseInt(year_of_passing))
-        .input('tmo',   mssql.Decimal,  parseFloat(total_marks_obtained))
-        .input('tmx',   mssql.Decimal,  parseFloat(total_marks_max))
-        .input('res',   mssql.NVarChar, result || null)
-        .query(`
-          INSERT INTO application_previous_exam
-            (application_id, board_or_college_name, school_or_college_address,
-             seat_number, prn_or_seat, year_of_passing, total_marks_obtained,
-             total_marks_max, result)
-          OUTPUT INSERTED.id
-          VALUES (@appId,@bcn,@addr,@seat,@prn,@yop,@tmo,@tmx,@res)
-        `);
-      examId = ins.recordset[0].id;
-    }
+        .input('type',  mssql.NVarChar, examType)
+        .query('SELECT id FROM application_previous_exam WHERE application_id=@appId AND exam_type=@type');
 
-    // Replace subjects
-    await db.request()
-      .input('examId', mssql.Int, examId)
-      .query('DELETE FROM application_previous_exam_subjects WHERE application_previous_exam_id = @examId');
+      const inputs = (r) => r
+        .input('inst', mssql.NVarChar, row.institute?.trim()          || null)
+        .input('brd',  mssql.NVarChar, row.board?.trim()              || null)
+        .input('my',   mssql.NVarChar, row.month_year?.trim()         || null)
+        .input('seat', mssql.NVarChar, row.seat_no?.trim()            || null)
+        .input('tmo',  mssql.Decimal,  parseFloat(row.marks_obtained) || null)
+        .input('tmx',  mssql.Decimal,  parseFloat(row.marks_max)      || null)
+        .input('pct',  mssql.Decimal,  parseFloat(row.percentage)     || null)
+        .input('cls',  mssql.NVarChar, row.class_grade?.trim()        || null)
+        .input('rem',  mssql.NVarChar, row.remark?.trim()             || null)
 
-    for (const sub of subjects) {
-      if (!sub.subject_name) continue;
-      await db.request()
-        .input('examId', mssql.Int,      examId)
-        .input('sname',  mssql.NVarChar, sub.subject_name)
-        .input('mo',     mssql.Decimal,  parseFloat(sub.marks_obtained) || 0)
-        .input('mm',     mssql.Decimal,  parseFloat(sub.marks_max)      || 0)
-        .query(`
-          INSERT INTO application_previous_exam_subjects
-            (application_previous_exam_id, subject_name, marks_obtained, marks_max)
-          VALUES (@examId, @sname, @mo, @mm)
-        `);
+      if (existing.recordset.length > 0) {
+        await inputs(db.request().input('id', mssql.Int, existing.recordset[0].id))
+          .query(`
+            UPDATE application_previous_exam SET
+              board_or_college_name=@inst, school_or_college_address=@brd,
+              seat_number=@seat, month_year_passing=@my,
+              total_marks_obtained=@tmo, total_marks_max=@tmx,
+              percentage=@pct, class_grade=@cls, remark=@rem,
+              updated_at=GETDATE()
+            WHERE id=@id
+          `);
+      } else {
+        await inputs(db.request().input('appId', mssql.Int, appId).input('type', mssql.NVarChar, examType))
+          .query(`
+            INSERT INTO application_previous_exam
+              (application_id, exam_type, board_or_college_name, school_or_college_address,
+               seat_number, month_year_passing, total_marks_obtained, total_marks_max,
+               percentage, class_grade, remark)
+            VALUES (@appId,@type,@inst,@brd,@seat,@my,@tmo,@tmx,@pct,@cls,@rem)
+          `);
+      }
     }
 
     await db.request()
@@ -1008,6 +1031,188 @@ router.post('/applications/:id/resubmit', async (req, res) => {
     await logActivity(appId, 'correction_resubmitted', 'student', null);
 
     return res.json({ success: true, message: 'Application resubmitted successfully.' });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── GET /api/subjects-list ───────────────────────────────────
+// List all active subjects for a college + course + semester
+// ?college_id=&course_id=&semester=
+router.get('/subjects-list', async (req, res) => {
+  const { college_id, course_id, semester } = req.query;
+  if (!college_id || !course_id || !semester) {
+    return res.status(400).json({ success: false, message: 'college_id, course_id, and semester are required.' });
+  }
+  try {
+    const result = await db.request()
+      .input('collegeId', mssql.Int, parseInt(college_id))
+      .input('courseId',  mssql.Int, parseInt(course_id))
+      .input('semester',  mssql.Int, parseInt(semester))
+      .query(`
+        SELECT course_code, course_title, subject_type, display_order
+        FROM course_master
+        WHERE college_id = @collegeId
+          AND faculty_master_id = @courseId
+          AND semester = @semester
+          AND is_active = 1
+        ORDER BY display_order, course_code
+      `);
+    return res.json({ success: true, data: result.recordset });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── GET /api/subject-lookup ─────────────────────────────────
+// Lookup a subject by code for a college + course + semester
+// ?college_id=&course_id=&semester=&code=
+router.get('/subject-lookup', async (req, res) => {
+  const { college_id, course_id, semester, code } = req.query;
+  if (!college_id || !course_id || !semester || !code) {
+    return res.status(400).json({ success: false, message: 'college_id, course_id, semester, and code are required.' });
+  }
+  try {
+    const result = await db.request()
+      .input('collegeId',  mssql.Int,      parseInt(college_id))
+      .input('courseId',   mssql.Int,      parseInt(course_id))
+      .input('semester',   mssql.Int,      parseInt(semester))
+      .input('code',       mssql.NVarChar, code.trim().toUpperCase())
+      .query(`
+        SELECT course_code, course_title
+        FROM course_master
+        WHERE college_id = @collegeId
+          AND faculty_master_id = @courseId
+          AND semester = @semester
+          AND UPPER(course_code) = @code
+          AND is_active = 1
+      `);
+    if (result.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: 'Subject code not found.' });
+    }
+    return res.json({ success: true, data: result.recordset[0] });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── GET /api/applications/:id/subject-selections ────────────
+// Get student's saved subject selections grouped by semester
+router.get('/applications/:id/subject-selections', async (req, res) => {
+  const appId = parseInt(req.params.id);
+  try {
+    const appRes = await db.request()
+      .input('id', mssql.Int, appId)
+      .query(`SELECT id, status, college_id, course_id, year_of_study FROM applications WHERE id = @id`);
+    if (appRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: 'Application not found.' });
+    }
+    const app = appRes.recordset[0];
+
+    const subs = await db.request()
+      .input('appId', mssql.Int, appId)
+      .query(`
+        SELECT semester, subject_code, subject_title, display_order
+        FROM application_subjects
+        WHERE application_id = @appId
+        ORDER BY semester, display_order, id
+      `);
+
+    // Group by semester
+    const bySem = { 1: [], 2: [] };
+    for (const row of subs.recordset) {
+      if (bySem[row.semester]) bySem[row.semester].push({ code: row.subject_code, title: row.subject_title });
+    }
+
+    const canSelect = ['fees_paid', 'roll_assigned', 'enrolled'].includes(app.status);
+
+    return res.json({
+      success: true,
+      data: {
+        semester1: bySem[1],
+        semester2: bySem[2],
+        can_select: canSelect,
+        college_id: app.college_id,
+        course_id: app.course_id,
+        year_of_study: app.year_of_study,
+        status: app.status,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── POST /api/applications/:id/subject-selections ───────────
+// Save subject selections for a semester. Body: { semester, subjects: [{code, title}] }
+router.post('/applications/:id/subject-selections', async (req, res) => {
+  const appId = parseInt(req.params.id);
+  const { semester, subjects } = req.body;
+
+  if (!semester || ![1, 2].includes(parseInt(semester))) {
+    return res.status(400).json({ success: false, message: 'semester must be 1 or 2.' });
+  }
+  if (!Array.isArray(subjects)) {
+    return res.status(400).json({ success: false, message: 'subjects array is required.' });
+  }
+
+  const semInt = parseInt(semester);
+
+  try {
+    const appRes = await db.request()
+      .input('id', mssql.Int, appId)
+      .query(`SELECT id, status FROM applications WHERE id = @id`);
+    if (appRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: 'Application not found.' });
+    }
+    if (!['fees_paid', 'roll_assigned', 'enrolled'].includes(appRes.recordset[0].status)) {
+      return res.status(400).json({ success: false, message: 'Subject selection is only available after admission is confirmed.' });
+    }
+
+    // Delete existing selections for this semester
+    await db.request()
+      .input('appId', mssql.Int, appId)
+      .input('sem',   mssql.Int, semInt)
+      .query(`DELETE FROM application_subjects WHERE application_id = @appId AND semester = @sem`);
+
+    // Insert new selections
+    for (let i = 0; i < subjects.length; i++) {
+      const s = subjects[i];
+      if (!s.code || !s.title) continue;
+      await db.request()
+        .input('appId',   mssql.Int,      appId)
+        .input('sem',     mssql.Int,      semInt)
+        .input('code',    mssql.NVarChar, s.code.trim().toUpperCase())
+        .input('title',   mssql.NVarChar, s.title.trim())
+        .input('order',   mssql.Int,      i)
+        .query(`
+          INSERT INTO application_subjects (application_id, semester, subject_code, subject_title, display_order)
+          VALUES (@appId, @sem, @code, @title, @order)
+        `);
+    }
+
+    // Log subject selection activity
+    const subjectNote = `Semester ${semInt}: ${subjects.length} subject${subjects.length !== 1 ? 's' : ''} selected`;
+    await logActivity(appId, 'subject_selected', 'student', subjectNote);
+
+    // Update status to enrolled if roll_assigned and both sems have subjects
+    if (appRes.recordset[0].status === 'roll_assigned') {
+      const countRes = await db.request()
+        .input('appId', mssql.Int, appId)
+        .query(`SELECT COUNT(DISTINCT semester) AS sem_count FROM application_subjects WHERE application_id = @appId`);
+      if (countRes.recordset[0].sem_count >= 2) {
+        await db.request()
+          .input('id', mssql.Int, appId)
+          .query(`UPDATE applications SET status = 'enrolled', updated_at = GETDATE(), status_updated_at = GETDATE() WHERE id = @id`);
+        await logActivity(appId, 'enrolled', 'student', 'Subject selection completed');
+      }
+    }
+
+    return res.json({ success: true, message: 'Subjects saved.' });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: 'Server error.' });

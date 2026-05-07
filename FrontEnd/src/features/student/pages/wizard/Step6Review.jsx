@@ -170,19 +170,37 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
         </ReviewSection>
 
         <ReviewSection title="Previous Exam Details" onEdit={() => onEditStep(4)}>
-          <Row label="Board / College" value={data.board_or_college_name} />
-          <Row label="Year of Passing" value={data.year_of_passing} />
-          <Row label="Seat / PRN"      value={data.seat_number || data.prn_or_seat} />
-          <Row label="Total Marks"     value={data.total_marks_obtained && data.total_marks_max ? `${data.total_marks_obtained} / ${data.total_marks_max}` : '—'} />
-          {data.result && <Row label="Result" value={data.result?.toUpperCase()} />}
-          {data.subjects?.filter(s => s.subject_name).length > 0 && (
-            <div className="col-span-2 mt-1">
-              <p className="text-xs text-slate-400 mb-1">Subjects</p>
-              <div className="space-y-0.5">
-                {data.subjects.filter(s => s.subject_name).map((s, i) => (
-                  <p key={i} className="text-sm text-slate-700">{s.subject_name}: {s.marks_obtained} / {s.marks_max}</p>
-                ))}
-              </div>
+          {Object.keys(data.exams || {}).length === 0 ? (
+            <p className="col-span-2 text-sm text-slate-400">No exam details filled.</p>
+          ) : (
+            <div className="col-span-2 overflow-x-auto">
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-50">
+                    {['Exam','Institute','Board/Univ.','Month & Year','Seat No.','Marks','Out of','%','Class/Grade','Remark'].map(h => (
+                      <th key={h} className="border border-slate-200 px-2 py-1 text-left font-semibold text-slate-500 whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(data.exams).map(([type, row]) => (
+                    <tr key={type} className="even:bg-slate-50">
+                      <td className="border border-slate-200 px-2 py-1 font-semibold text-slate-700 whitespace-nowrap">
+                        {{'SSC':'SSC','HSC':'HSC','FY_SEM1':'F.Y. Sem I','FY_SEM2':'F.Y. Sem II','SY_SEM1':'S.Y. Sem I','SY_SEM2':'S.Y. Sem II'}[type] || type}
+                      </td>
+                      <td className="border border-slate-200 px-2 py-1">{row.institute || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1">{row.board || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{row.month_year || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1">{row.seat_no || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1">{row.marks_obtained || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1">{row.marks_max || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1">{row.percentage ? `${row.percentage}%` : '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1">{row.class_grade || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1">{row.remark || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </ReviewSection>

@@ -40,9 +40,12 @@ export default function ApplicationPrintView({ appId, regNumber, onClose }) {
     </div>
   )
 
-  const { application: app, previous_exam, documents } = data
+  const { application: app, previous_exams, documents } = data
   const fullName = [app.app_surname, app.app_first_name, app.app_middle_name].filter(Boolean).join(' ')
   const address  = [app.app_address, app.app_taluka, app.app_district, app.app_state].filter(Boolean).join(', ')
+
+  const ROW_LABEL = { SSC: 'SSC', HSC: 'HSC', FY_SEM1: 'F.Y. Sem I', FY_SEM2: 'F.Y. Sem II', SY_SEM1: 'S.Y. Sem I', SY_SEM2: 'S.Y. Sem II' }
+  const examEntries = Object.entries(previous_exams || {})
 
   return (
     <div className="mt-3 rounded-xl border border-slate-200 bg-white overflow-hidden">
@@ -117,18 +120,39 @@ export default function ApplicationPrintView({ appId, regNumber, onClose }) {
             {app.app_bank_account && <PRow label="Bank Account" value={`****${app.app_bank_account.slice(-4)}`} />}
           </PreviewSection>
 
-          {previous_exam && (
-            <PreviewSection title="Previous Exam Details">
-              <PRow label="Board / College" value={previous_exam.board_or_college_name} />
-              <PRow label="Year of Passing" value={previous_exam.year_of_passing} />
-              <PRow label="Seat / PRN"      value={previous_exam.seat_number || previous_exam.prn_or_seat} />
-              <PRow label="Total Marks"     value={previous_exam.total_marks_obtained && previous_exam.total_marks_max ? `${previous_exam.total_marks_obtained} / ${previous_exam.total_marks_max}` : '—'} />
-              {previous_exam.result && <PRow label="Result" value={previous_exam.result?.toUpperCase()} />}
-              {previous_exam.subjects?.filter(s => s.subject_name).map((s, i) => (
-                <PRow key={i} label={s.subject_name} value={`${s.marks_obtained} / ${s.marks_max}`} />
-              ))}
-            </PreviewSection>
-          )}
+          <PreviewSection title="Previous Exam Details">
+            {examEntries.length === 0 ? (
+              <p className="text-sm text-slate-400 sm:col-span-2">No exam details filled.</p>
+            ) : (
+              <div className="sm:col-span-2 overflow-x-auto">
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50">
+                      {['Exam','Institute','Board/Univ.','Month & Year','Seat No.','Marks','Out of','%','Class/Grade','Remark'].map(h => (
+                        <th key={h} className="border border-slate-200 px-2 py-1 text-left font-semibold text-slate-500 whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {examEntries.map(([type, r]) => (
+                      <tr key={type} className="even:bg-slate-50">
+                        <td className="border border-slate-200 px-2 py-1 font-semibold text-slate-700 whitespace-nowrap">{ROW_LABEL[type] || type}</td>
+                        <td className="border border-slate-200 px-2 py-1">{r.institute || '—'}</td>
+                        <td className="border border-slate-200 px-2 py-1">{r.board || '—'}</td>
+                        <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.month_year || '—'}</td>
+                        <td className="border border-slate-200 px-2 py-1">{r.seat_no || '—'}</td>
+                        <td className="border border-slate-200 px-2 py-1">{r.marks_obtained || '—'}</td>
+                        <td className="border border-slate-200 px-2 py-1">{r.marks_max || '—'}</td>
+                        <td className="border border-slate-200 px-2 py-1">{r.percentage ? `${r.percentage}%` : '—'}</td>
+                        <td className="border border-slate-200 px-2 py-1">{r.class_grade || '—'}</td>
+                        <td className="border border-slate-200 px-2 py-1">{r.remark || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </PreviewSection>
 
           <PreviewSection title="Documents">
             {(documents || []).length === 0
@@ -184,10 +208,15 @@ function PRow({ label, value, full }) {
 }
 
 // ── Build full self-contained HTML for print ─────────────────
+const PRINT_ROW_LABEL = { SSC: 'SSC', HSC: 'HSC', FY_SEM1: 'F.Y. Sem I', FY_SEM2: 'F.Y. Sem II', SY_SEM1: 'S.Y. Sem I', SY_SEM2: 'S.Y. Sem II' }
+
 function buildHTML(data, regNumber) {
-  const { application: app, previous_exam, documents } = data
+  const { application: app, previous_exams, documents } = data
   const fullName  = [app.app_surname, app.app_first_name, app.app_middle_name].filter(Boolean).join(' ')
   const address   = [app.app_address, app.app_taluka, app.app_district, app.app_state].filter(Boolean).join(', ')
+
+  const tdStyle = 'padding:4px 7px;font-size:10.5px;color:#0f172a;border:1px solid #e2e8f0;vertical-align:top;'
+  const thStyle = 'padding:4px 7px;font-size:10px;font-weight:600;color:#64748b;background:#f1f5f9;border:1px solid #e2e8f0;white-space:nowrap;text-align:left;'
 
   function row(label, value) {
     return `
@@ -209,10 +238,22 @@ function buildHTML(data, regNumber) {
       </div>`
   }
 
-  const subjectRows = (previous_exam?.subjects || [])
-    .filter(s => s.subject_name)
-    .map(s => row(s.subject_name, `${s.marks_obtained} / ${s.marks_max}`))
-    .join('')
+  const examEntries = Object.entries(previous_exams || {})
+  const examTableHTML = examEntries.length === 0
+    ? `<tr><td colspan="10" style="padding:8px 10px;font-size:11.5px;color:#94a3b8;font-style:italic;">No exam details filled.</td></tr>`
+    : examEntries.map(([type, r]) => `
+        <tr>
+          <td style="${tdStyle}font-weight:600;white-space:nowrap;">${PRINT_ROW_LABEL[type] || type}</td>
+          <td style="${tdStyle}">${r.institute || '—'}</td>
+          <td style="${tdStyle}">${r.board || '—'}</td>
+          <td style="${tdStyle};white-space:nowrap;">${r.month_year || '—'}</td>
+          <td style="${tdStyle}">${r.seat_no || '—'}</td>
+          <td style="${tdStyle}">${r.marks_obtained || '—'}</td>
+          <td style="${tdStyle}">${r.marks_max || '—'}</td>
+          <td style="${tdStyle}">${r.percentage ? r.percentage + '%' : '—'}</td>
+          <td style="${tdStyle}">${r.class_grade || '—'}</td>
+          <td style="${tdStyle}">${r.remark || '—'}</td>
+        </tr>`).join('')
 
   const docRows = (documents || []).length === 0
     ? `<tr><td colspan="2" style="padding:8px 10px;font-size:11.5px;color:#94a3b8;font-style:italic;">No documents linked.</td></tr>`
@@ -281,15 +322,30 @@ function buildHTML(data, regNumber) {
       (app.app_bank_account ? row('Bank Account', '****' + app.app_bank_account.slice(-4)) : '')
   )}
 
-  ${previous_exam ? section('Previous Exam Details',
-      row('Board / College', previous_exam.board_or_college_name) +
-      row('Year of Passing', previous_exam.year_of_passing) +
-      row('Seat / PRN',      previous_exam.seat_number || previous_exam.prn_or_seat) +
-      row('Total Marks',     previous_exam.total_marks_obtained && previous_exam.total_marks_max
-        ? `${previous_exam.total_marks_obtained} / ${previous_exam.total_marks_max}` : '—') +
-      (previous_exam.result ? row('Result', previous_exam.result.toUpperCase()) : '') +
-      subjectRows
-  ) : ''}
+  <div style="margin-bottom:14px;">
+    <div style="background:#f1f5f9;border:1px solid #e2e8f0;border-bottom:none;padding:6px 10px;border-radius:6px 6px 0 0;">
+      <span style="font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#64748b;">Previous Exam Details</span>
+    </div>
+    <div style="border:1px solid #e2e8f0;border-radius:0 0 6px 6px;overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:10.5px;">
+        <thead>
+          <tr>
+            <th style="${thStyle}">Exam</th>
+            <th style="${thStyle}">Institute</th>
+            <th style="${thStyle}">Board/Univ.</th>
+            <th style="${thStyle}">Month &amp; Year</th>
+            <th style="${thStyle}">Seat No.</th>
+            <th style="${thStyle}">Marks</th>
+            <th style="${thStyle}">Out of</th>
+            <th style="${thStyle}">%</th>
+            <th style="${thStyle}">Class/Grade</th>
+            <th style="${thStyle}">Remark</th>
+          </tr>
+        </thead>
+        <tbody>${examTableHTML}</tbody>
+      </table>
+    </div>
+  </div>
 
   ${section('Documents', docRows)}
 

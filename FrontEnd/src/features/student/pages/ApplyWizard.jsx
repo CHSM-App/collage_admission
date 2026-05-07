@@ -58,11 +58,8 @@ const initialState = {
     father_full_name:'', son_daughter_number:'', father_occupation:'', annual_income:'',
     aadhaar:'', prn:'', abc_id:'', university_app_no:'',
     bank_account:'', bank_ifsc:'', bank_name:'', bank_branch:'',
-    // Step 4
-    board_or_college_name:'', school_or_college_address:'',
-    seat_number:'', prn_or_seat:'', year_of_passing:'',
-    total_marks_obtained:'', total_marks_max:'', result:'',
-    subjects: [{ subject_name:'', marks_obtained:'', marks_max:'' }],
+    // Step 4 — keyed by exam_type: SSC, HSC, FY_SEM1, FY_SEM2, SY_SEM1, SY_SEM2
+    exams: {},
     // Step 5
     linked_documents: [],   // [{ document_type_id, document_name, file_name, file_path, is_mandatory }]
     required_documents: [], // from API
@@ -161,32 +158,31 @@ export default function ApplyWizard() {
         )
         const requiredDocs = rdRes.data.data || []
 
-        // Build subjects from existing exam.
-        // Leave previous-exam college name blank so transfer/migrated students
-        // can enter the institution where they actually completed the prior year.
-        const examData = previous_exam ? {
-          board_or_college_name:      previous_exam.board_or_college_name || '',
-          school_or_college_address:  previous_exam.school_or_college_address || '',
-          seat_number:                previous_exam.seat_number || '',
-          prn_or_seat:                previous_exam.prn_or_seat || '',
-          year_of_passing:            previous_exam.year_of_passing || '',
-          total_marks_obtained:       previous_exam.total_marks_obtained || '',
-          total_marks_max:            previous_exam.total_marks_max || '',
-          result:                     previous_exam.result || '',
-          subjects: previous_exam.subjects?.length
-            ? previous_exam.subjects.map(s => ({
-                subject_name:   s.subject_name,
-                marks_obtained: s.marks_obtained,
-                marks_max:      s.marks_max,
-              }))
-            : [{ subject_name: '', marks_obtained: '', marks_max: '' }],
-        } : { board_or_college_name: '' }
+        // Build exams map from previous_exams keyed by exam_type
+        const { previous_exams } = formRes.data.data
+        const examsData = {}
+        if (previous_exams) {
+          for (const [type, row] of Object.entries(previous_exams)) {
+            const v = (x) => (x != null && x !== '') ? String(x) : ''
+            examsData[type] = {
+              institute:      v(row.institute),
+              board:          v(row.board),
+              month_year:     v(row.month_year),
+              seat_no:        v(row.seat_no),
+              marks_obtained: v(row.marks_obtained),
+              marks_max:      v(row.marks_max),
+              percentage:     v(row.percentage),
+              class_grade:    v(row.class_grade),
+              remark:         v(row.remark),
+            }
+          }
+        }
 
         dispatch({
           type: 'SET_DATA',
           patch: {
             ...merged,
-            ...examData,
+            exams: examsData,
             linked_documents: documents,
             required_documents: requiredDocs,
             student_documents: studentDocs,

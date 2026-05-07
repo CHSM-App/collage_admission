@@ -13,9 +13,7 @@ export default function RollNumbers({ collegeId }) {
   const [generating, setGenerating] = useState(false)
   const [result, setResult]       = useState(null)
   const [error, setError]         = useState('')
-  const [form, setForm] = useState({
-    course_id: '', year_of_study: '1', academic_year: '2026-27',
-  })
+  const [form, setForm] = useState({ course_id: '' })
 
   useEffect(() => {
     api.get(`masters/${collegeId}/faculty`)
@@ -54,56 +52,34 @@ export default function RollNumbers({ collegeId }) {
       <div className="rounded-lg border border-slate-200 bg-white p-5">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">How it works</p>
         <ul className="mt-2 space-y-1 text-sm text-slate-600 list-disc list-inside">
-          <li>Finds all applications with status <strong>Fees Paid</strong> and no roll number.</li>
-          <li>Sorts them by registration number and appends to the existing sequence.</li>
-          <li>SY/TY students keep their existing roll number from FY — this step is skipped for them.</li>
+          <li>Finds all <strong>Fees Paid</strong> applications for the selected course with no roll number yet.</li>
+          <li>Assigns roll numbers in the order fees were paid — first to pay gets the lowest number.</li>
+          <li>Roll numbers are unique per college + course across all years and batches.</li>
+          <li>Safe to run multiple times — only unassigned students are processed.</li>
         </ul>
       </div>
 
       <form onSubmit={handleGenerate} className="rounded-lg border border-slate-200 bg-white p-5 space-y-4">
-        <p className="font-semibold text-slate-950">Select batch</p>
+        <p className="font-semibold text-slate-950">Select course</p>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Course</label>
-            {loading
-              ? <p className="text-sm text-slate-400">Loading…</p>
-              : (
-                <select
-                  required
-                  value={form.course_id}
-                  onChange={e => setForm(f => ({ ...f, course_id: e.target.value }))}
-                  className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-                >
-                  <option value="">Select course…</option>
-                  {courses.map(c => (
-                    <option key={c.code_no} value={c.code_no}>{c.degree_course_code} — {c.degree_course_name}</option>
-                  ))}
-                </select>
-              )
-            }
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Year of Study</label>
-            <select
-              value={form.year_of_study}
-              onChange={e => setForm(f => ({ ...f, year_of_study: e.target.value }))}
-              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-            >
-              <option value="1">FY (First Year)</option>
-              <option value="2">SY (Second Year)</option>
-              <option value="3">TY (Third Year)</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Academic Year</label>
-            <input
-              required
-              value={form.academic_year}
-              onChange={e => setForm(f => ({ ...f, academic_year: e.target.value }))}
-              className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
-            />
-          </div>
+        <div>
+          <label className="block text-xs font-semibold text-slate-600 mb-1">Course</label>
+          {loading
+            ? <p className="text-sm text-slate-400">Loading…</p>
+            : (
+              <select
+                required
+                value={form.course_id}
+                onChange={e => setForm(f => ({ ...f, course_id: e.target.value }))}
+                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm"
+              >
+                <option value="">Select course…</option>
+                {courses.map(c => (
+                  <option key={c.code_no} value={c.code_no}>{c.degree_course_code} — {c.degree_course_name}</option>
+                ))}
+              </select>
+            )
+          }
         </div>
 
         {error && (

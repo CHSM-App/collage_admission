@@ -154,7 +154,6 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
       fees_category:  data.fees_category,
       fees_category_override:        overrideMode,
       fees_category_override_remark: overrideMode ? overrideRemark : '',
-      division:           data.division           || null,
       degree_course_code: data.degree_course_code || degreeCourse?.degree_course_code || null,
     })
   }
@@ -167,7 +166,6 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
   }
 
   const e = errors
-  const selectedDivision = divisions.find(d => d.division_letter === data.division)
 
   return (
     <div>
@@ -224,49 +222,6 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
           </div>
         )}
 
-        {/* Division */}
-        {divisions.length > 0 && (
-          <FormField label="Division" hint="Select your class division.">
-            <div className="flex flex-wrap gap-2 mt-1">
-              {divisions.map(d => {
-                const selected = data.division === d.division_letter
-                return (
-                  <button
-                    key={d.division_letter}
-                    type="button"
-                    onClick={() => handleDivisionSelect(d.division_letter)}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm font-semibold transition ${
-                      selected
-                        ? 'bg-slate-900 text-white border-slate-900'
-                        : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
-                    }`}
-                  >
-                    Div {d.division_letter}
-                    <span className={`text-xs px-1.5 py-0.5 rounded border font-medium ${selected ? 'bg-white/20 text-white border-white/30' : FUNDING_COLORS[d.funding_type] || 'bg-slate-100 text-slate-500 border-slate-200'}`}>
-                      {FUNDING_LABELS[d.funding_type] || d.funding_type}
-                    </span>
-                  </button>
-                )
-              })}
-              {data.division && (
-                <button type="button" onClick={() => onChange({ target: { name: 'division', value: '' } })}
-                  className="text-xs text-slate-400 hover:text-red-500 self-center">✕ clear</button>
-              )}
-            </div>
-            {/* Funding type info pill */}
-            {selectedDivision && (
-              <div className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium ${FUNDING_COLORS[selectedDivision.funding_type] || ''}`}>
-                <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                Division {selectedDivision.division_letter} is <strong className="ml-0.5">{FUNDING_LABELS[selectedDivision.funding_type]}</strong>
-                {selectedDivision.funding_type === 'NonGranted' && ' — government concessions do not apply; full fees charged.'}
-                {selectedDivision.funding_type === 'Granted'    && ' — eligible for government concession schemes.'}
-                {selectedDivision.funding_type === 'Both'       && ' — mixed grant/non-grant seats.'}
-              </div>
-            )}
-          </FormField>
-        )}
 
         {/* Caste Category */}
         <FormField label="Caste / Community Category">
