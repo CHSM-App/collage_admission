@@ -304,6 +304,45 @@ CREATE TABLE admission_periods (
     is_disabled     BIT           NOT NULL DEFAULT 0,
     created_at      DATETIME2 DEFAULT GETDATE()
 );
+GO
+
+-- ============================================================
+-- ADMISSION PERIODS ARCHIVE (audit log)
+-- Mirrors admission_periods columns + audit metadata. Populated by
+-- AFTER INSERT/UPDATE/DELETE triggers below. No FKs / IDENTITY on the
+-- mirror columns — archive rows are historical snapshots.
+-- ============================================================
+CREATE TABLE [dbo].[admission_periods$Arc] (
+    arc_id              INT IDENTITY(1,1) PRIMARY KEY,
+    id                  INT           NULL,
+    college_id          INT           NULL,
+    course_id           INT           NULL,
+    year_of_study       INT           NULL,
+    academic_year       NVARCHAR(10)  NULL,
+    start_date          DATE          NULL,
+    end_date            DATE          NULL,
+    total_seats         INT           NULL,
+    filled_seats        INT           NULL,
+    is_active           BIT           NULL,
+    is_disabled         BIT           NULL,
+    created_at          DATETIME2     NULL,
+    action_type         NVARCHAR(10)  NOT NULL CHECK (action_type IN ('INSERT','UPDATE','DELETE')),
+    action_date         DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME(),
+    action_by           NVARCHAR(150) NULL,
+    machine_mac_address NVARCHAR(50)  NULL,
+    comments            NVARCHAR(500) NULL,
+    archived_date       DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME()
+);
+CREATE INDEX ix_admission_periods_arc_action_date ON [dbo].[admission_periods$Arc] (action_date);
+CREATE INDEX ix_admission_periods_arc_action_type ON [dbo].[admission_periods$Arc] (action_type);
+CREATE INDEX ix_admission_periods_arc_action_by   ON [dbo].[admission_periods$Arc] (action_by);
+GO
+
+-- Triggers — see migrate_admission_periods_archive.sql for the trigger
+-- bodies. They populate [admission_periods$Arc] with TRY/CATCH soft logging
+-- and read SESSION_CONTEXT keys 'app_user_id' / 'app_machine_mac' /
+-- 'app_comments' for the audit columns.
+-- ============================================================
 
 -- ============================================================
 -- STUDENT DOCUMENTS (uploaded once per student per type)
