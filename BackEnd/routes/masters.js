@@ -503,11 +503,31 @@ router.get('/:collegeId/group/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }) }
 })
 
+// Reject duplicate (course_code, course_title) combinations inside one group.
+// Comparison normalizes case + whitespace to match SQL Server's default
+// case-insensitive collation, so the API matches the DB constraint.
+function findDuplicateCourseCombo(courses) {
+  const seen = new Map()
+  for (const c of courses || []) {
+    const code  = (c.course_code  || '').trim().toLowerCase()
+    const title = (c.course_title || '').trim().toLowerCase()
+    if (!code && !title) continue
+    const key = `${code}|${title}`
+    if (seen.has(key)) {
+      return { firstPos: seen.get(key), dupPos: c.course_position, code: c.course_code, title: c.course_title }
+    }
+    seen.set(key, c.course_position)
+  }
+  return null
+}
+
 router.post('/:collegeId/group', requirePerm('masters'), async (req, res) => {
   const { faculty_master_id, semester, group_code, group_description, is_active = true, courses = [] } = req.body
   if (!faculty_master_id) return res.status(422).json({ success: false, message: 'faculty_master_id required.' })
   if (!group_code?.trim()) return res.status(422).json({ success: false, message: 'group_code required.' })
   if (!group_description?.trim()) return res.status(422).json({ success: false, message: 'group_description required.' })
+  const dup = findDuplicateCourseCombo(courses)
+  if (dup) return res.status(422).json({ success: false, message: `Selected Course Code and Course Title combination already exists (slots ${dup.firstPos} and ${dup.dupPos}).` })
   try {
     const r = await db.request()
       .input('cid', mssql.Int,      cid(req))
@@ -534,14 +554,21 @@ router.post('/:collegeId/group', requirePerm('masters'), async (req, res) => {
     }
     res.status(201).json({ success: true, data: newGroup })
   } catch (e) {
-    if (e.number === 2627 || e.number === 2601)
+    if (e.number === 2627 || e.number === 2601) {
+      // The group_master uq_group_master and group_courses uq_group_course_combo
+      // both surface as 2627/2601. Disambiguate by message text.
+      if (/uq_group_course_combo/i.test(e.message || ''))
+        return res.status(409).json({ success: false, message: 'Selected Course Code and Course Title combination already exists.' })
       return res.status(409).json({ success: false, message: 'Group code already exists for this program-semester.' })
+    }
     res.status(500).json({ success: false, message: e.message })
   }
 })
 
 router.put('/:collegeId/group/:id', requirePerm('masters'), async (req, res) => {
   const { faculty_master_id, semester, group_code, group_description, is_active, courses = [] } = req.body
+  const dup = findDuplicateCourseCombo(courses)
+  if (dup) return res.status(422).json({ success: false, message: `Selected Course Code and Course Title combination already exists (slots ${dup.firstPos} and ${dup.dupPos}).` })
   try {
     const r = await db.request()
       .input('id',  mssql.Int,      parseInt(req.params.id))
@@ -572,7 +599,11 @@ router.put('/:collegeId/group/:id', requirePerm('masters'), async (req, res) => 
         .query(`INSERT INTO group_courses (group_id,course_position,course_code,course_title) VALUES (@gid,@pos,@cc,@ct)`)
     }
     res.json({ success: true, data: r.recordset[0] })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) {
+    if ((e.number === 2627 || e.number === 2601) && /uq_group_course_combo/i.test(e.message || ''))
+      return res.status(409).json({ success: false, message: 'Selected Course Code and Course Title combination already exists.' })
+    res.status(500).json({ success: false, message: e.message })
+  }
 })
 
 router.delete('/:collegeId/group/:id', requirePerm('masters'), async (req, res) => {
@@ -883,6 +914,29 @@ router.get('/:collegeId/required-documents', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }) }
 })
 
+// Maps a Document Type name to the admission year it should accompany.
+// Returns null if the type is year-agnostic. Mirrors the UI helper in
+// FrontEnd/.../DocumentsMaster.jsx — keep them in sync.
+//
+// Policy:
+//   "Semester 1/2 Marksheet"  → year 2 (SY)
+//   "Semester 3/4 Marksheet"  → year 3 (TY)
+//   "FY Marksheet"            → year 2 (SY)
+//   "SY Marksheet"            → year 3 (TY)
+function expectedYearForMarksheet(name) {
+  const n = (name || '').toLowerCase()
+  const sem = n.match(/semester\s*(\d+)/)
+  if (sem && /marksheet|mark\s*sheet|result/.test(n)) {
+    const num = parseInt(sem[1])
+    if (num === 1 || num === 2) return 2
+    if (num === 3 || num === 4) return 3
+    return null
+  }
+  if (/(^|\W)fy\s+marksheet/.test(n) || /first\s+year\s+marksheet/.test(n)) return 2
+  if (/(^|\W)sy\s+marksheet/.test(n) || /second\s+year\s+marksheet/.test(n)) return 3
+  return null
+}
+
 // POST /masters/:collegeId/required-documents — add a required document
 router.post('/:collegeId/required-documents', requirePerm('masters'), async (req, res) => {
   const { faculty_master_id, year_of_study, document_type_id, is_mandatory } = req.body
@@ -890,10 +944,28 @@ router.post('/:collegeId/required-documents', requirePerm('masters'), async (req
     return res.status(400).json({ success: false, message: 'faculty_master_id, year_of_study, document_type_id are required.' })
   }
   try {
+    // Look up the doc type name to enforce the year/marksheet rule.
+    const dtRes = await db.request()
+      .input('dtid', mssql.Int, parseInt(document_type_id))
+      .query('SELECT name FROM document_types WHERE id = @dtid')
+    if (!dtRes.recordset.length) {
+      return res.status(404).json({ success: false, message: 'Document type not found.' })
+    }
+    const dtName = dtRes.recordset[0].name
+    const expected = expectedYearForMarksheet(dtName)
+    const yr = parseInt(year_of_study)
+    if (expected !== null && expected !== yr) {
+      const yrLabel = yr === 1 ? 'FY' : yr === 2 ? 'SY' : yr === 3 ? 'TY' : `Year ${yr}`
+      return res.status(422).json({
+        success: false,
+        message: `"${dtName}" cannot be assigned to ${yrLabel} admissions — this marksheet belongs to a different year.`,
+      })
+    }
+
     const r = await db.request()
       .input('cid',   mssql.Int,  cid(req))
       .input('fmid',  mssql.Int,  parseInt(faculty_master_id))
-      .input('yr',    mssql.Int,  parseInt(year_of_study))
+      .input('yr',    mssql.Int,  yr)
       .input('dtid',  mssql.Int,  parseInt(document_type_id))
       .input('mand',  mssql.Bit,  is_mandatory !== false ? 1 : 0)
       .query(`

@@ -90,6 +90,19 @@ export default function GroupMaster({ collegeId }) {
   async function save() {
     if (!form.group_code.trim())       return setError('Group Code is required.')
     if (!form.group_description.trim()) return setError('Group Description is required.')
+
+    // Duplicate Code+Title check within this group's slots.
+    // Compare on trimmed/lowercased values to match SQL's case-insensitive collation.
+    const filledRows = form.courses.filter(c => c.course_code.trim() || c.course_title.trim())
+    const seen = new Map()
+    for (const c of filledRows) {
+      const key = `${c.course_code.trim().toLowerCase()}|${c.course_title.trim().toLowerCase()}`
+      if (seen.has(key)) {
+        return setError(`Selected Course Code and Course Title combination already exists (slots ${seen.get(key)} and ${c.course_position}).`)
+      }
+      seen.set(key, c.course_position)
+    }
+
     setSaving(true); setError('')
     const payload = {
       ...form,

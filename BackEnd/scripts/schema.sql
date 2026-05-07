@@ -191,7 +191,10 @@ CREATE TABLE group_courses (
     group_id        INT           NOT NULL REFERENCES group_master(id) ON DELETE CASCADE,
     course_position INT           NOT NULL DEFAULT 0,
     course_code     NVARCHAR(30)  NOT NULL,
-    course_title    NVARCHAR(200) NOT NULL DEFAULT ''
+    course_title    NVARCHAR(200) NOT NULL DEFAULT '',
+    -- A given (course_code, course_title) pair may appear at most once per group.
+    -- Default SQL Server collation is case-insensitive, matching the API check.
+    CONSTRAINT uq_group_course_combo UNIQUE (group_id, course_code, course_title)
 );
 
 -- ============================================================

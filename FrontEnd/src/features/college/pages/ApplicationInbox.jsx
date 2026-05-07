@@ -19,7 +19,23 @@ const STATUS_META = {
   cancelled:                { label: 'Cancelled',                color: 'bg-slate-100 text-slate-500' },
 }
 
-const ALL_STATUSES = Object.entries(STATUS_META).map(([key, { label }]) => ({ key, label }))
+// Group statuses by label so labels that map to multiple workflow keys
+// (e.g. "Review Pending" covers both `submitted` and `under_review`)
+// appear as a single dropdown entry. The value is the comma-joined keys —
+// the backend already splits on ',' and filters with IN (...).
+const ALL_STATUSES = (() => {
+  const byLabel = new Map()
+  for (const [key, { label }] of Object.entries(STATUS_META)) {
+    const entry = byLabel.get(label)
+    if (entry) entry.keys.push(key)
+    else byLabel.set(label, { label, keys: [key] })
+  }
+  return [...byLabel.values()].map(({ label, keys }) => ({
+    value: keys.join(','),
+    keys,
+    label,
+  }))
+})()
 
 function useStatusCounts(apps) {
   return useMemo(() => {
@@ -134,9 +150,12 @@ export default function ApplicationInbox({ collegeId }) {
           className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-56"
         >
           <option value="">All Statuses ({pagination.total})</option>
-          {ALL_STATUSES.map(s => (
-            <option key={s.key} value={s.key}>{s.label} ({statusCounts[s.key] || 0})</option>
-          ))}
+          {ALL_STATUSES.map(s => {
+            const count = s.keys.reduce((sum, k) => sum + (statusCounts[k] || 0), 0)
+            return (
+              <option key={s.value} value={s.value}>{s.label} ({count})</option>
+            )
+          })}
         </select>
 
         {/* Course filter */}

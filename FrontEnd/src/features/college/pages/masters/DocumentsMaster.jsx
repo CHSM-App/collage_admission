@@ -8,6 +8,29 @@ const YEAR_LEVELS = [
   { value: 3, label: 'TY (Third Year)' },
 ]
 
+// Maps a Document Type name to the admission year it should accompany.
+// Returns null if the type is year-agnostic (10th/12th Marksheet, Photo, etc.)
+// — those pass through the dropdown filter unchanged.
+//
+// Policy (matches the API check in masters.js so UI and server agree):
+//   "Semester 1/2 Marksheet"  →  SY application (year 2)
+//   "Semester 3/4 Marksheet"  →  TY application (year 3)
+//   "FY Marksheet"            →  SY application (year 2)
+//   "SY Marksheet"            →  TY application (year 3)
+function expectedYearForMarksheet(name) {
+  const n = (name || '').toLowerCase()
+  const sem = n.match(/semester\s*(\d+)/)
+  if (sem && /marksheet|mark\s*sheet|result/.test(n)) {
+    const num = parseInt(sem[1])
+    if (num === 1 || num === 2) return 2
+    if (num === 3 || num === 4) return 3
+    return null
+  }
+  if (/(^|\W)fy\s+marksheet/.test(n) || /first\s+year\s+marksheet/.test(n)) return 2
+  if (/(^|\W)sy\s+marksheet/.test(n) || /second\s+year\s+marksheet/.test(n)) return 3
+  return null
+}
+
 export default function DocumentsMaster({ collegeId }) {
   const { canWrite } = usePermissions()
   const rw = canWrite('masters')
@@ -87,7 +110,24 @@ export default function DocumentsMaster({ collegeId }) {
   }
 
   const alreadyAdded = new Set(rows.map(r => r.document_type_id))
-  const availableTypes = docTypes.filter(dt => !alreadyAdded.has(dt.id))
+  // Step 1: drop already-added types. Step 2: drop year-tied marksheets that
+  // don't belong to the currently selected Year of Study.
+  const availableTypes = docTypes
+    .filter(dt => !alreadyAdded.has(dt.id))
+    .filter(dt => {
+      const expected = expectedYearForMarksheet(dt.name)
+      return expected === null || expected === selYear
+    })
+
+  // If the year changed and the previously chosen doc type is no longer
+  // valid for the new year, clear the selection so the user can't submit it.
+  useEffect(() => {
+    if (!selDocType) return
+    const dt = docTypes.find(d => String(d.id) === String(selDocType))
+    if (!dt) return
+    const expected = expectedYearForMarksheet(dt.name)
+    if (expected !== null && expected !== selYear) setSelDocType('')
+  }, [selYear, selDocType, docTypes])
 
   if (loading) return <p className="text-sm text-slate-400">Loading…</p>
 
@@ -219,6 +259,12 @@ export default function DocumentsMaster({ collegeId }) {
                   <option key={dt.id} value={dt.id}>{dt.name}</option>
                 ))}
               </select>
+              {selYear === 2 && (
+                <p className="mt-1 text-xs text-slate-500">Marksheet options limited to Sem 1 / Sem 2 (or FY) for SY admissions.</p>
+              )}
+              {selYear === 3 && (
+                <p className="mt-1 text-xs text-slate-500">Marksheet options limited to Sem 3 / Sem 4 (or SY) for TY admissions.</p>
+              )}
             </div>
             <div className="flex items-center gap-2 h-9">
               <input
