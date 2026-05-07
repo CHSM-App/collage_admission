@@ -2,12 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../../../services/api.js'
 import FormField from '../../../../shared/components/FormField.jsx'
-import Button from '../../../../shared/components/Button.jsx'
-
-const GENDER_OPTS = [
-  { value: 'Male',   label: 'Male' },
-  { value: 'Female', label: 'Female' },
-]
+import {
+  GenderRadio,
+  ExStudentCheckbox,
+  RegNoLookupRow,
+  CertActionBar,
+  CertFormShell,
+} from './shared.jsx'
 
 const EMPTY = {
   noc_certificate_id:    null,
@@ -207,175 +208,129 @@ export default function NoObjectionCertificate({ collegeId, readOnly }) {
         </p>
       )}
 
-      <div className="rounded-xl border border-slate-200 bg-white">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
-          <p className="text-sm font-semibold text-slate-700">
-            {mode === 'new' ? 'New Certificate' : mode === 'edit' ? 'Edit Certificate' : 'Certificate Details'}
-          </p>
-          {mode !== 'new' && (
-            <span className="text-xs font-mono text-slate-500">{form.certificate_no}</span>
-          )}
+      <CertFormShell mode={mode} certNo={form.certificate_no}>
+        {globalError && (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{globalError}</p>
+        )}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <FormField
+            label="Certificate No."
+            name="certificate_no"
+            value={form.certificate_no}
+            readOnly
+            hint={mode === 'new' ? 'Auto-generated on save (NOC/yyyy/0001)' : 'System-issued'}
+          />
+          <FormField
+            label="Date"
+            name="certificate_date"
+            type="date"
+            value={form.certificate_date}
+            onChange={handleChange}
+            error={errors.certificate_date}
+            required
+            readOnly={isReadOnlyMode}
+          />
         </div>
 
-        <div className="px-5 py-5 space-y-4">
-          {globalError && (
-            <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">{globalError}</p>
-          )}
+        <RegNoLookupRow
+          value={form.reg_no}
+          onChange={handleChange}
+          onSearch={lookupRegNo}
+          disabled={isReadOnlyMode}
+          lookingUp={lookingUp}
+        />
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <FormField
-              label="Certificate No."
-              name="certificate_no"
-              value={form.certificate_no}
-              readOnly
-              hint={mode === 'new' ? 'Auto-generated on save (NOC/yyyy/0001)' : 'System-issued'}
-            />
-            <FormField
-              label="Date"
-              name="certificate_date"
-              type="date"
-              value={form.certificate_date}
-              onChange={handleChange}
-              error={errors.certificate_date}
-              required
-              readOnly={isReadOnlyMode}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 items-end">
-            <FormField
-              label="Registration No."
-              name="reg_no"
-              value={form.reg_no}
-              onChange={handleChange}
-              placeholder="Student registration number"
-              readOnly={isReadOnlyMode}
-              hint="Search to auto-fill student details"
-            />
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={lookupRegNo}
-              disabled={isReadOnlyMode || lookingUp || !form.reg_no?.trim()}
-            >
-              {lookingUp ? 'Searching…' : 'Search'}
-            </Button>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <FormField
-              label="Student Name"
-              name="student_name"
-              value={form.student_name}
-              onChange={handleChange}
-              error={errors.student_name}
-              required
-              readOnly={isReadOnlyMode}
-              placeholder="Full name as per records"
-            />
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs font-semibold text-slate-600">Gender</label>
-              <div className="flex items-center gap-4 h-10 px-1">
-                {GENDER_OPTS.map(g => (
-                  <label key={g.value} className="flex items-center gap-1.5 text-sm text-slate-700 cursor-pointer">
-                    <input
-                      type="radio"
-                      name="gender"
-                      value={g.value}
-                      checked={form.gender === g.value}
-                      onChange={handleChange}
-                      disabled={isReadOnlyMode}
-                      className="accent-slate-700"
-                    />
-                    {g.label}
-                  </label>
-                ))}
-              </div>
-              {errors.gender && <p className="text-xs font-medium text-red-600">{errors.gender}</p>}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-            <FormField
-              label="Class"
-              name="class_name"
-              value={form.class_name}
-              onChange={handleChange}
-              error={errors.class_name}
-              required
-              readOnly={isReadOnlyMode}
-              placeholder="e.g. SY BCOM"
-            />
-            <FormField
-              label="From Date"
-              name="from_date"
-              type="date"
-              value={form.from_date}
-              onChange={handleChange}
-              readOnly={isReadOnlyMode}
-              hint="Academic period start"
-            />
-            <FormField
-              label="To Date"
-              name="to_date"
-              type="date"
-              value={form.to_date}
-              onChange={handleChange}
-              error={errors.to_date}
-              readOnly={isReadOnlyMode}
-              hint="Academic period end"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <FormField
-              label="PRN No."
-              name="prn_no"
-              value={form.prn_no}
-              onChange={handleChange}
-              readOnly={isReadOnlyMode}
-              placeholder="University PRN number"
-            />
-            <FormField
-              label="Final Confirmation No."
-              name="final_confirmation_no"
-              value={form.final_confirmation_no}
-              onChange={handleChange}
-              readOnly={isReadOnlyMode}
-              placeholder="Reference / confirmation number"
-            />
-          </div>
-
-          <label className="flex items-center gap-2 text-sm text-slate-700 px-1">
-            <input
-              type="checkbox"
-              name="is_ex_student"
-              checked={!!form.is_ex_student}
-              onChange={handleChange}
-              disabled={isReadOnlyMode}
-              className="h-4 w-4 accent-slate-700"
-            />
-            Ex-Student
-          </label>
-
-          <div className="flex flex-wrap gap-2 pt-2 border-t border-slate-100">
-            <Button onClick={handleSave} disabled={!canSave || saving}>
-              {saving ? 'Saving…' : 'Save'}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={handleEdit}
-              disabled={!canEdit || mode !== 'view' || !form.noc_certificate_id}
-            >
-              Edit
-            </Button>
-            <Button variant="secondary" onClick={handleCancel}>Cancel</Button>
-            <Button variant="secondary" onClick={handlePrint} disabled={!form.noc_certificate_id}>Print</Button>
-            <Button variant="secondary" onClick={handleExit}>Exit</Button>
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <FormField
+            label="Student Name"
+            name="student_name"
+            value={form.student_name}
+            onChange={handleChange}
+            error={errors.student_name}
+            required
+            readOnly={isReadOnlyMode}
+            placeholder="Full name as per records"
+          />
+          <GenderRadio
+            value={form.gender}
+            onChange={handleChange}
+            disabled={isReadOnlyMode}
+            error={errors.gender}
+          />
         </div>
-      </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <FormField
+            label="Class"
+            name="class_name"
+            value={form.class_name}
+            onChange={handleChange}
+            error={errors.class_name}
+            required
+            readOnly={isReadOnlyMode}
+            placeholder="e.g. SY BCOM"
+          />
+          <FormField
+            label="From Date"
+            name="from_date"
+            type="date"
+            value={form.from_date}
+            onChange={handleChange}
+            readOnly={isReadOnlyMode}
+            hint="Academic period start"
+          />
+          <FormField
+            label="To Date"
+            name="to_date"
+            type="date"
+            value={form.to_date}
+            onChange={handleChange}
+            error={errors.to_date}
+            readOnly={isReadOnlyMode}
+            hint="Academic period end"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <FormField
+            label="PRN No."
+            name="prn_no"
+            value={form.prn_no}
+            onChange={handleChange}
+            readOnly={isReadOnlyMode}
+            placeholder="University PRN number"
+          />
+          <FormField
+            label="Final Confirmation No."
+            name="final_confirmation_no"
+            value={form.final_confirmation_no}
+            onChange={handleChange}
+            readOnly={isReadOnlyMode}
+            placeholder="Reference / confirmation number"
+          />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <ExStudentCheckbox
+            checked={form.is_ex_student}
+            onChange={handleChange}
+            disabled={isReadOnlyMode}
+          />
+        </div>
+
+        <CertActionBar
+          onSave={handleSave}
+          onEdit={handleEdit}
+          onCancel={handleCancel}
+          onPrint={handlePrint}
+          onExit={handleExit}
+          saving={saving}
+          canSave={canSave}
+          canEdit={canEdit && mode === 'view' && !!form.noc_certificate_id}
+          canPrint={!!form.noc_certificate_id}
+        />
+      </CertFormShell>
 
       <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-100">
