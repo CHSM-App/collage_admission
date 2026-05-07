@@ -48,7 +48,18 @@ export default function RoleLoginForm({ role }) {
     }
   }, [activeRole, isAuthenticated, navigate])
 
+  // Auto-dismiss the error banner after a generous timeout so it doesn't
+  // linger forever, but is on screen long enough to read comfortably.
+  useEffect(() => {
+    if (!error) return
+    const timer = setTimeout(() => clearError(), 10000)
+    return () => clearTimeout(timer)
+  }, [error, clearError])
+
   const handleChange = (event) => {
+    // Clearing on input dismisses the banner the moment the user starts
+    // correcting what they typed — they've seen the error, they're fixing it.
+    if (error) clearError()
     let value = event.target.value
     if (event.target.name === 'phone') value = value.replace(/\D/g, '').slice(0, 10)
     setFormData((currentFormData) => ({
@@ -150,9 +161,36 @@ export default function RoleLoginForm({ role }) {
         </div>
 
         {error ? (
-          <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
-            {error}
-          </p>
+          <div
+            role="alert"
+            aria-live="assertive"
+            className="flex items-start gap-3 rounded-lg border-2 border-red-300 bg-red-50 px-4 py-3 shadow-sm"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+            <p className="flex-1 text-sm font-semibold leading-relaxed text-red-800">
+              {error}
+            </p>
+            <button
+              type="button"
+              onClick={clearError}
+              aria-label="Dismiss error"
+              className="flex-shrink-0 rounded text-red-400 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-red-300"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         ) : null}
 
         <Button type="submit" className="w-full" disabled={loading} loading={loading}>

@@ -103,17 +103,24 @@ CREATE TABLE faculty_master (
     degree_course_code      NVARCHAR(20)  NOT NULL,
     degree_course_name      NVARCHAR(200) NOT NULL,
     duration_years          INT           NOT NULL DEFAULT 3,
-    -- Semester unique codes (used for exam roll/registration numbering)
+    -- Semester unique codes (used for exam roll/registration numbering).
+    -- Required count = duration_years * 2 (enforced at the application layer).
     unique_code_sem1        NVARCHAR(20)  NULL,
     unique_code_sem2        NVARCHAR(20)  NULL,
     unique_code_sem3        NVARCHAR(20)  NULL,
     unique_code_sem4        NVARCHAR(20)  NULL,
     unique_code_sem5        NVARCHAR(20)  NULL,
     unique_code_sem6        NVARCHAR(20)  NULL,
-    -- Year-wise exam seat codes
+    unique_code_sem7        NVARCHAR(20)  NULL,
+    unique_code_sem8        NVARCHAR(20)  NULL,
+    unique_code_sem9        NVARCHAR(20)  NULL,
+    unique_code_sem10       NVARCHAR(20)  NULL,
+    -- Year-wise exam seat codes. Required count = duration_years.
     exam_seat_code_year1    NVARCHAR(20)  NULL,
     exam_seat_code_year2    NVARCHAR(20)  NULL,
     exam_seat_code_year3    NVARCHAR(20)  NULL,
+    exam_seat_code_year4    NVARCHAR(20)  NULL,
+    exam_seat_code_year5    NVARCHAR(20)  NULL,
     is_active               BIT           NOT NULL DEFAULT 1,
     created_by              NVARCHAR(100) NULL,
     modified_by             NVARCHAR(100) NULL,

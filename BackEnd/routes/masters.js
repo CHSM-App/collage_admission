@@ -51,72 +51,91 @@ router.get('/:collegeId/faculty', async (req, res) => {
   } catch (e) { res.status(500).json({ success: false, message: e.message }) }
 })
 
+// Duration-driven slot count (sems = duration*2, exam codes = duration).
+// Mirrors the Program Master form's auto-config matrix.
+const SEM_SLOTS  = (yrs) => Math.max(0, Math.min(10, parseInt(yrs) * 2 || 0))
+const YEAR_SLOTS = (yrs) => Math.max(0, Math.min( 5, parseInt(yrs)     || 0))
+
+// All possible columns we read/write
+const ALL_SEM_COLS  = Array.from({ length: 10 }, (_, i) => `unique_code_sem${i + 1}`)
+const ALL_YEAR_COLS = Array.from({ length:  5 }, (_, i) => `exam_seat_code_year${i + 1}`)
+
 // POST /masters/:collegeId/faculty — create
 router.post('/:collegeId/faculty', requirePerm('masters'), async (req, res) => {
+  const body = req.body
   const {
     degree_course_code, degree_course_name, duration_years = 3,
-    unique_code_sem1, unique_code_sem2, unique_code_sem3,
-    unique_code_sem4, unique_code_sem5, unique_code_sem6,
-    exam_seat_code_year1, exam_seat_code_year2, exam_seat_code_year3,
     is_active = true, created_by,
-  } = req.body
+  } = body
 
   if (!degree_course_code?.trim()) return res.status(422).json({ success: false, message: 'degree_course_code is required.' })
   if (!degree_course_name?.trim()) return res.status(422).json({ success: false, message: 'degree_course_name is required.' })
-  if (!/^[A-Za-z0-9\(\).\-/ ]+$/.test(exam_seat_code_year1 || 'A')) {
-    // basic check — exam seat codes should be alpha-character-based; validated more strictly in UI
+
+  const yrs       = parseInt(duration_years) || 3
+  const semSlots  = SEM_SLOTS(yrs)
+  const yearSlots = YEAR_SLOTS(yrs)
+
+  // Required-count validation: sem codes = duration * 2, year codes = duration
+  for (let i = 0; i < semSlots; i++) {
+    if (!body[`unique_code_sem${i + 1}`]?.toString().trim()) {
+      return res.status(422).json({ success: false, message: `Semester ${i + 1} code is required for a ${yrs}-year program.` })
+    }
+  }
+  for (let i = 0; i < yearSlots; i++) {
+    if (!body[`exam_seat_code_year${i + 1}`]?.toString().trim()) {
+      return res.status(422).json({ success: false, message: `Year ${i + 1} exam seat code is required for a ${yrs}-year program.` })
+    }
   }
 
-  // Check sem codes uniqueness per college (excluding nulls)
-  const semCodes = [unique_code_sem1,unique_code_sem2,unique_code_sem3,unique_code_sem4,unique_code_sem5,unique_code_sem6].filter(Boolean)
-  const examCodes = [exam_seat_code_year1,exam_seat_code_year2,exam_seat_code_year3].filter(Boolean)
+  // Build slot arrays — indices >= slotCount are forced null so old data
+  // from a longer duration doesn't linger when shrinking duration.
+  const semVals  = ALL_SEM_COLS.map((c, i)  => i < semSlots  ? (body[c] || null) : null)
+  const yearVals = ALL_YEAR_COLS.map((c, i) => i < yearSlots ? (body[c] || null) : null)
+
+  // Uniqueness check per college (excluding nulls), across all 10 sem and 5 year slots
+  const semCodes  = semVals.filter(Boolean)
+  const examCodes = yearVals.filter(Boolean)
   if (semCodes.length > 0) {
     const existing = await db.request().input('cid', mssql.Int, cid(req)).query(`
-      SELECT unique_code_sem1,unique_code_sem2,unique_code_sem3,unique_code_sem4,unique_code_sem5,unique_code_sem6
-      FROM faculty_master WHERE college_id=@cid AND is_active=1
+      SELECT ${ALL_SEM_COLS.join(',')} FROM faculty_master WHERE college_id=@cid AND is_active=1
     `)
-    const allSems = existing.recordset.flatMap(r => [r.unique_code_sem1,r.unique_code_sem2,r.unique_code_sem3,r.unique_code_sem4,r.unique_code_sem5,r.unique_code_sem6].filter(Boolean))
+    const allSems = existing.recordset.flatMap(r => ALL_SEM_COLS.map(c => r[c]).filter(Boolean))
     const dup = semCodes.find(c => allSems.includes(c))
     if (dup) return res.status(409).json({ success: false, message: `Semester code "${dup}" is already used by another course in this college.` })
   }
   if (examCodes.length > 0) {
     const existing = await db.request().input('cid', mssql.Int, cid(req)).query(`
-      SELECT exam_seat_code_year1,exam_seat_code_year2,exam_seat_code_year3
-      FROM faculty_master WHERE college_id=@cid AND is_active=1
+      SELECT ${ALL_YEAR_COLS.join(',')} FROM faculty_master WHERE college_id=@cid AND is_active=1
     `)
-    const allExam = existing.recordset.flatMap(r => [r.exam_seat_code_year1,r.exam_seat_code_year2,r.exam_seat_code_year3].filter(Boolean))
+    const allExam = existing.recordset.flatMap(r => ALL_YEAR_COLS.map(c => r[c]).filter(Boolean))
     const dup = examCodes.find(c => allExam.includes(c))
     if (dup) return res.status(409).json({ success: false, message: `Exam seat code "${dup}" is already used by another course in this college.` })
   }
 
   try {
-    const r = await db.request()
-      .input('cid', mssql.Int, cid(req))
+    const reqQ = db.request()
+      .input('cid', mssql.Int,      cid(req))
       .input('dc',  mssql.NVarChar, degree_course_code.trim().toUpperCase())
       .input('dn',  mssql.NVarChar, degree_course_name.trim())
-      .input('dy',  mssql.Int,      parseInt(duration_years) || 3)
-      .input('s1',  mssql.NVarChar, unique_code_sem1 || null)
-      .input('s2',  mssql.NVarChar, unique_code_sem2 || null)
-      .input('s3',  mssql.NVarChar, unique_code_sem3 || null)
-      .input('s4',  mssql.NVarChar, unique_code_sem4 || null)
-      .input('s5',  mssql.NVarChar, unique_code_sem5 || null)
-      .input('s6',  mssql.NVarChar, unique_code_sem6 || null)
-      .input('e1',  mssql.NVarChar, exam_seat_code_year1 || null)
-      .input('e2',  mssql.NVarChar, exam_seat_code_year2 || null)
-      .input('e3',  mssql.NVarChar, exam_seat_code_year3 || null)
+      .input('dy',  mssql.Int,      yrs)
       .input('ia',  mssql.Bit,      is_active ? 1 : 0)
       .input('cb',  mssql.NVarChar, created_by || null)
-      .query(`
-        INSERT INTO faculty_master
-          (college_id,degree_course_code,degree_course_name,duration_years,
-           unique_code_sem1,unique_code_sem2,unique_code_sem3,
-           unique_code_sem4,unique_code_sem5,unique_code_sem6,
-           exam_seat_code_year1,exam_seat_code_year2,exam_seat_code_year3,
-           is_active,created_by)
-        OUTPUT INSERTED.*
-        VALUES
-          (@cid,@dc,@dn,@dy,@s1,@s2,@s3,@s4,@s5,@s6,@e1,@e2,@e3,@ia,@cb)
-      `)
+    ALL_SEM_COLS.forEach((_, i)  => reqQ.input(`s${i + 1}`, mssql.NVarChar, semVals[i]))
+    ALL_YEAR_COLS.forEach((_, i) => reqQ.input(`e${i + 1}`, mssql.NVarChar, yearVals[i]))
+
+    const semParams  = ALL_SEM_COLS.map((_, i)  => `@s${i + 1}`).join(',')
+    const yearParams = ALL_YEAR_COLS.map((_, i) => `@e${i + 1}`).join(',')
+
+    const r = await reqQ.query(`
+      INSERT INTO faculty_master
+        (college_id,degree_course_code,degree_course_name,duration_years,
+         ${ALL_SEM_COLS.join(',')},
+         ${ALL_YEAR_COLS.join(',')},
+         is_active,created_by)
+      OUTPUT INSERTED.*
+      VALUES
+        (@cid,@dc,@dn,@dy,${semParams},${yearParams},@ia,@cb)
+    `)
     res.status(201).json({ success: true, data: r.recordset[0] })
   } catch (e) {
     if (e.number === 2627 || e.number === 2601)
@@ -127,41 +146,55 @@ router.post('/:collegeId/faculty', requirePerm('masters'), async (req, res) => {
 
 // PUT /masters/:collegeId/faculty/:id — update
 router.put('/:collegeId/faculty/:id', requirePerm('masters'), async (req, res) => {
+  const body = req.body
   const {
     degree_course_code, degree_course_name, duration_years,
-    unique_code_sem1, unique_code_sem2, unique_code_sem3,
-    unique_code_sem4, unique_code_sem5, unique_code_sem6,
-    exam_seat_code_year1, exam_seat_code_year2, exam_seat_code_year3,
     is_active, modified_by,
-  } = req.body
+  } = body
+
+  const yrs       = parseInt(duration_years) || 3
+  const semSlots  = SEM_SLOTS(yrs)
+  const yearSlots = YEAR_SLOTS(yrs)
+
+  for (let i = 0; i < semSlots; i++) {
+    if (!body[`unique_code_sem${i + 1}`]?.toString().trim()) {
+      return res.status(422).json({ success: false, message: `Semester ${i + 1} code is required for a ${yrs}-year program.` })
+    }
+  }
+  for (let i = 0; i < yearSlots; i++) {
+    if (!body[`exam_seat_code_year${i + 1}`]?.toString().trim()) {
+      return res.status(422).json({ success: false, message: `Year ${i + 1} exam seat code is required for a ${yrs}-year program.` })
+    }
+  }
+
+  // Slots beyond the active duration are explicitly cleared
+  const semVals  = ALL_SEM_COLS.map((c, i)  => i < semSlots  ? (body[c] || null) : null)
+  const yearVals = ALL_YEAR_COLS.map((c, i) => i < yearSlots ? (body[c] || null) : null)
+
   try {
-    const r = await db.request()
+    const reqQ = db.request()
       .input('id',  mssql.Int,      parseInt(req.params.id))
       .input('cid', mssql.Int,      cid(req))
       .input('dc',  mssql.NVarChar, degree_course_code?.trim().toUpperCase())
       .input('dn',  mssql.NVarChar, degree_course_name?.trim())
-      .input('dy',  mssql.Int,      parseInt(duration_years) || 3)
-      .input('s1',  mssql.NVarChar, unique_code_sem1 || null)
-      .input('s2',  mssql.NVarChar, unique_code_sem2 || null)
-      .input('s3',  mssql.NVarChar, unique_code_sem3 || null)
-      .input('s4',  mssql.NVarChar, unique_code_sem4 || null)
-      .input('s5',  mssql.NVarChar, unique_code_sem5 || null)
-      .input('s6',  mssql.NVarChar, unique_code_sem6 || null)
-      .input('e1',  mssql.NVarChar, exam_seat_code_year1 || null)
-      .input('e2',  mssql.NVarChar, exam_seat_code_year2 || null)
-      .input('e3',  mssql.NVarChar, exam_seat_code_year3 || null)
+      .input('dy',  mssql.Int,      yrs)
       .input('ia',  mssql.Bit,      is_active ? 1 : 0)
       .input('mb',  mssql.NVarChar, modified_by || null)
-      .query(`
-        UPDATE faculty_master SET
-          degree_course_code=@dc, degree_course_name=@dn, duration_years=@dy,
-          unique_code_sem1=@s1, unique_code_sem2=@s2, unique_code_sem3=@s3,
-          unique_code_sem4=@s4, unique_code_sem5=@s5, unique_code_sem6=@s6,
-          exam_seat_code_year1=@e1, exam_seat_code_year2=@e2, exam_seat_code_year3=@e3,
-          is_active=@ia, modified_by=@mb, modified_on=GETDATE()
-        OUTPUT INSERTED.*
-        WHERE code_no=@id AND college_id=@cid
-      `)
+    ALL_SEM_COLS.forEach((_, i)  => reqQ.input(`s${i + 1}`, mssql.NVarChar, semVals[i]))
+    ALL_YEAR_COLS.forEach((_, i) => reqQ.input(`e${i + 1}`, mssql.NVarChar, yearVals[i]))
+
+    const semSet  = ALL_SEM_COLS.map((c, i)  => `${c}=@s${i + 1}`).join(',')
+    const yearSet = ALL_YEAR_COLS.map((c, i) => `${c}=@e${i + 1}`).join(',')
+
+    const r = await reqQ.query(`
+      UPDATE faculty_master SET
+        degree_course_code=@dc, degree_course_name=@dn, duration_years=@dy,
+        ${semSet},
+        ${yearSet},
+        is_active=@ia, modified_by=@mb, modified_on=GETDATE()
+      OUTPUT INSERTED.*
+      WHERE code_no=@id AND college_id=@cid
+    `)
     if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Record not found.' })
     res.json({ success: true, data: r.recordset[0] })
   } catch (e) {

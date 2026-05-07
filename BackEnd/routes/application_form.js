@@ -634,7 +634,12 @@ router.patch('/applications/:id/other-details', async (req, res) => {
   if (!marital_status)  errors.marital_status  = 'Marital status is required.';
   if (!father_full_name)errors.father_full_name= 'Father\'s full name is required.';
   if (!father_occupation)errors.father_occupation='Father\'s occupation is required.';
-  if (!annual_income)   errors.annual_income   = 'Annual family income is required.';
+  if (!annual_income) {
+    errors.annual_income = 'Annual family income is required.';
+  } else {
+    const ai = parseFloat(annual_income);
+    if (isNaN(ai) || ai <= 0) errors.annual_income = 'Annual family income must be greater than 0.';
+  }
   if (!aadhaar)         errors.aadhaar         = 'Aadhaar number is required.';
   else if (!validateAadhaar(aadhaar)) errors.aadhaar = 'Aadhaar must be exactly 12 digits.';
   if (app.year_of_study > 1 && !abc_id) errors.abc_id = 'ABC ID is required for SY/TY students.';
