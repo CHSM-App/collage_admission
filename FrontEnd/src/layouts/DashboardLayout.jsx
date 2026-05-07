@@ -19,7 +19,7 @@ const sidebarItems = {
     { label: 'Overview',       to: DASHBOARD_PATHS.student },
     { label: 'Browse & Apply', to: `${DASHBOARD_PATHS.student}?section=browse` },
     { label: 'My Applications',to: `${DASHBOARD_PATHS.student}?section=applications` },
-    { label: 'My Documents',   to: `${DASHBOARD_PATHS.student}?section=documents` },
+    // { label: 'My Documents',   to: `${DASHBOARD_PATHS.student}?section=documents` },
     { label: 'Notifications',  to: `${DASHBOARD_PATHS.student}?section=notifications` },
   ],
   college: [

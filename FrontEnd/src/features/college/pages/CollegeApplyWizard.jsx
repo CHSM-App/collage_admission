@@ -55,10 +55,7 @@ const initialState = {
     aadhaar:'', prn:'', abc_id:'', university_app_no:'',
     bank_account:'', bank_ifsc:'', bank_name:'', bank_branch:'',
     // Step 3 (exam)
-    board_or_college_name:'', school_or_college_address:'',
-    seat_number:'', prn_or_seat:'', year_of_passing:'',
-    total_marks_obtained:'', total_marks_max:'', result:'',
-    subjects: [{ subject_name:'', marks_obtained:'', marks_max:'' }],
+    exams: {},
     // Step 4 (documents)
     linked_documents: [],
     required_documents: [],
@@ -124,7 +121,7 @@ export default function CollegeApplyWizard() {
 
         // Fetch form data
         const formRes = await api.get(`api/applications/${appId}/form`)
-        const { application: app, previous_exam, documents } = formRes.data.data
+        const { application: app, previous_exam, previous_exams, documents } = formRes.data.data
 
         if (!studentId) studentId = app.student_id
 
@@ -143,21 +140,24 @@ export default function CollegeApplyWizard() {
         )
         const requiredDocs = rdRes.data.data || []
 
-        // Leave previous-exam college name blank so transfer/migrated students
-        // can enter the institution where they actually completed the prior year.
-        const examData = previous_exam ? {
-          board_or_college_name:     previous_exam.board_or_college_name || '',
-          school_or_college_address: previous_exam.school_or_college_address || '',
-          seat_number:               previous_exam.seat_number || '',
-          prn_or_seat:               previous_exam.prn_or_seat || '',
-          year_of_passing:           previous_exam.year_of_passing || '',
-          total_marks_obtained:      previous_exam.total_marks_obtained || '',
-          total_marks_max:           previous_exam.total_marks_max || '',
-          result:                    previous_exam.result || '',
-          subjects: previous_exam.subjects?.length
-            ? previous_exam.subjects.map(s => ({ subject_name: s.subject_name, marks_obtained: s.marks_obtained, marks_max: s.marks_max }))
-            : [{ subject_name: '', marks_obtained: '', marks_max: '' }],
-        } : { board_or_college_name: '' }
+        const examsData = {}
+        if (previous_exams) {
+          for (const [type, row] of Object.entries(previous_exams)) {
+            const v = (x) => (x != null && x !== '') ? String(x) : ''
+            examsData[type] = {
+              institute:      v(row.institute),
+              board:          v(row.board),
+              month_year:     v(row.month_year),
+              seat_no:        v(row.seat_no),
+              marks_obtained: v(row.marks_obtained),
+              marks_max:      v(row.marks_max),
+              percentage:     v(row.percentage),
+              class_grade:    v(row.class_grade),
+              remark:         v(row.remark),
+            }
+          }
+        }
+        const examData = { exams: examsData }
 
         dispatch({
           type: 'SET_DATA',
@@ -456,16 +456,44 @@ function CollegeReviewStep({ data, saving, submitError, isEditMode, onBack, onEd
         />
 
         {/* Exam */}
-        <ReviewSection
-          title="Exam Details"
-          optional
-          onEdit={() => onEditStep(3)}
-          rows={[
-            ['Board / College', d.board_or_college_name],
-            ['Year', d.year_of_passing],
-            ['Marks', d.total_marks_obtained && d.total_marks_max ? `${d.total_marks_obtained} / ${d.total_marks_max}` : ''],
-          ]}
-        />
+        <div className="rounded-lg border border-slate-200 overflow-hidden">
+          <div className="flex items-center justify-between bg-slate-50 px-4 py-2.5 border-b border-slate-100">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-600">Exam Details</p>
+            <button onClick={() => onEditStep(3)} className="text-xs text-blue-600 hover:underline">Edit</button>
+          </div>
+          <div className="px-4 py-3 overflow-x-auto">
+            {Object.keys(d.exams || {}).length === 0 ? (
+              <p className="text-sm text-slate-400 italic">—</p>
+            ) : (
+              <table className="w-full text-xs border-collapse">
+                <thead>
+                  <tr className="bg-slate-50">
+                    {['Exam','Institute','Board/Univ.','Month & Year','Seat No.','Marks','Out of','%','Class/Grade'].map(h => (
+                      <th key={h} className="border border-slate-200 px-2 py-1 text-left font-semibold text-slate-500 whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(d.exams).map(([type, r]) => (
+                    <tr key={type} className="even:bg-slate-50">
+                      <td className="border border-slate-200 px-2 py-1 font-semibold text-slate-700 whitespace-nowrap">
+                        {{'SSC':'SSC','HSC':'HSC','FY_SEM1':'F.Y. Sem I','FY_SEM2':'F.Y. Sem II','SY_SEM1':'S.Y. Sem I','SY_SEM2':'S.Y. Sem II'}[type] || type}
+                      </td>
+                      <td className="border border-slate-200 px-2 py-1">{r.institute || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1">{r.board || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.month_year || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1">{r.seat_no || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1">{r.marks_obtained || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1">{r.marks_max || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1">{r.percentage ? `${r.percentage}%` : '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1">{r.class_grade || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
 
         {/* Documents */}
         <div className="rounded-lg border border-slate-200 overflow-hidden">

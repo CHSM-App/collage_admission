@@ -40,9 +40,11 @@ export default function ApplicationDetail({ collegeId, appId }) {
   const [showCorrection, setShowCorrection] = useState(false)
   const [showConfirm, setShowConfirm]       = useState(false)
   const [correctionNote, setCorrectionNote] = useState('')
-  const [feeTotal,  setFeeTotal]   = useState('')
-  const [feePayNow, setFeePayNow]  = useState('')
-  const [feeError,  setFeeError]   = useState('')
+  const [feeTotal,    setFeeTotal]    = useState('')
+  const [feePayNow,   setFeePayNow]   = useState('')
+  const [feeError,    setFeeError]    = useState('')
+  const [division,    setDivision]    = useState('')
+  const [divisions,   setDivisions]   = useState([])
   const [error, setError]     = useState('')
 
   function fetchApp() {
@@ -53,6 +55,17 @@ export default function ApplicationDetail({ collegeId, appId }) {
   }
 
   useEffect(() => { fetchApp() }, [appId, collegeId])
+
+  useEffect(() => {
+    if (!app) return
+    setDivision(app.app_division || '')
+    if (app.course_id && app.year_of_study) {
+      const yearMap = { 1: 'FY', 2: 'SY', 3: 'TY' }
+      api.get(`masters/${collegeId}/division?faculty_id=${app.course_id}&year_level=${yearMap[app.year_of_study]}`)
+        .then(r => setDivisions((r.data.data || []).filter(d => d.is_active)))
+        .catch(() => {})
+    }
+  }, [app])
 
   async function doAction(endpoint, body = {}) {
     setActing(true)
@@ -80,6 +93,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
       await api.post(`college-admin/${collegeId}/applications/${appId}/confirm`, {
         fee_total_amount:   total,
         fee_pay_now_amount: payNow,
+        division:           division || null,
         document_ids_verified: app?.documents?.map(d => d.id) || [],
       })
       navigate('/college/dashboard?section=inbox')
@@ -192,33 +206,38 @@ export default function ApplicationDetail({ collegeId, appId }) {
 
       {/* ── Previous Exam Details ── */}
       <Section title="Previous Exam Details">
-        {d.exam ? (
-          <>
-            <Row label="Board / College"  value={d.exam.board_or_college_name} />
-            <Row label="Year of Passing"  value={d.exam.year_of_passing} />
-            <Row label="Seat / PRN"       value={d.exam.seat_number || d.exam.prn_or_seat} />
-            <Row
-              label="Total Marks"
-              value={d.exam.total_marks_obtained && d.exam.total_marks_max
-                ? `${d.exam.total_marks_obtained} / ${d.exam.total_marks_max}`
-                : '—'}
-            />
-            {d.exam.result && <Row label="Result" value={d.exam.result.toUpperCase()} />}
-            {d.exam.subjects?.filter(s => s.subject_name).length > 0 && (
-              <div className="col-span-2 mt-1">
-                <p className="text-xs text-slate-400 mb-1">Subjects</p>
-                <div className="space-y-0.5">
-                  {d.exam.subjects.filter(s => s.subject_name).map((s, i) => (
-                    <p key={i} className="text-sm text-slate-700">
-                      {s.subject_name}: {s.marks_obtained} / {s.marks_max}
-                    </p>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
-        ) : (
+        {Object.keys(d.exams || {}).length === 0 ? (
           <p className="text-sm text-slate-500 col-span-2">No exam details filled.</p>
+        ) : (
+          <div className="col-span-2 overflow-x-auto">
+            <table className="w-full text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-50">
+                  {['Exam','Institute','Board/Univ.','Month & Year','Seat No.','Marks','Out of','%','Class/Grade','Remark'].map(h => (
+                    <th key={h} className="border border-slate-200 px-2 py-1 text-left font-semibold text-slate-500 whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(d.exams).map(([type, r]) => (
+                  <tr key={type} className="even:bg-slate-50">
+                    <td className="border border-slate-200 px-2 py-1 font-semibold text-slate-700 whitespace-nowrap">
+                      {{'SSC':'SSC','HSC':'HSC','FY_SEM1':'F.Y. Sem I','FY_SEM2':'F.Y. Sem II','SY_SEM1':'S.Y. Sem I','SY_SEM2':'S.Y. Sem II'}[type] || type}
+                    </td>
+                    <td className="border border-slate-200 px-2 py-1">{r.institute || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1">{r.board || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.month_year || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1">{r.seat_no || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1">{r.marks_obtained || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1">{r.marks_max || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1">{r.percentage ? `${r.percentage}%` : '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1">{r.class_grade || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1">{r.remark || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Section>
 
@@ -266,6 +285,11 @@ export default function ApplicationDetail({ collegeId, appId }) {
           )
         })}
       </Section>
+
+      {/* ── Selected Subjects ── */}
+      {['fees_paid', 'roll_assigned', 'enrolled'].includes(d.status) && (
+        <SelectedSubjectsSection appId={appId} />
+      )}
 
       {error && (
         <p className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</p>
@@ -339,6 +363,34 @@ export default function ApplicationDetail({ collegeId, appId }) {
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-4">
               <p className="text-sm font-semibold text-emerald-800">Verify Documents &amp; Set Fee Amounts</p>
               <p className="text-xs text-emerald-700">Enter the fee details to confirm admission. The student will be notified to pay.</p>
+
+              {/* Division selector */}
+              {divisions.length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-2">Division</label>
+                  <div className="flex flex-wrap gap-2">
+                    {divisions.map(dv => (
+                      <button
+                        key={dv.division_letter}
+                        type="button"
+                        onClick={() => setDivision(d => d === dv.division_letter ? '' : dv.division_letter)}
+                        className={`px-3 py-1.5 rounded-lg border text-sm font-semibold transition ${
+                          division === dv.division_letter
+                            ? 'bg-slate-900 text-white border-slate-900'
+                            : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
+                        }`}
+                      >
+                        Div {dv.division_letter}
+                      </button>
+                    ))}
+                    {division && (
+                      <button type="button" onClick={() => setDivision('')}
+                        className="text-xs text-slate-400 hover:text-red-500 self-center">✕ clear</button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -453,6 +505,7 @@ const ACTION_META = {
   fees_paid:              { label: 'College Fee Fully Paid',          color: 'bg-emerald-600', actor: 'Student' },
   roll_assigned:          { label: 'Roll Number Assigned',            color: 'bg-violet-500',  actor: 'College' },
   enrolled:               { label: 'Enrolled',                        color: 'bg-green-600',   actor: 'Student' },
+  subject_selected:       { label: 'Subjects Selected',               color: 'bg-violet-400',  actor: 'Student' },
   cancelled:              { label: 'Application Cancelled',           color: 'bg-slate-500',   actor: 'College' },
 }
 
@@ -462,7 +515,7 @@ function ActivityTimeline({ app }) {
 
   const entries = activity.map(a => {
     const meta = ACTION_META[a.action] || { label: a.action, color: 'bg-slate-400', actor: a.actor_role }
-    return { label: meta.label, color: meta.color, actor: meta.actor, date: a.created_at, note: a.note }
+    return { label: meta.label, color: meta.color, actor: meta.actor, date: a.created_at, note: a.action === 'subject_selected' ? null : a.note }
   })
 
   return (
@@ -498,7 +551,7 @@ function ActivityTimeline({ app }) {
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5">
                     {e.date
-                      ? new Date(e.date.endsWith('Z') ? e.date : e.date + 'Z').toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                      ? new Date(e.date).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
                       : '—'}
                   </p>
                   {e.note && (
@@ -510,6 +563,57 @@ function ActivityTimeline({ app }) {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function SelectedSubjectsSection({ appId }) {
+  const [data, setData]     = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    api.get(`api/applications/${appId}/subject-selections`)
+      .then(r => setData(r.data.data))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [appId])
+
+  const sem1 = data?.semester1 || []
+  const sem2 = data?.semester2 || []
+  const hasAny = sem1.length > 0 || sem2.length > 0
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+      <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+        <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Selected Subjects</p>
+      </div>
+      <div className="px-4 py-3">
+        {loading ? (
+          <p className="text-sm text-slate-400">Loading…</p>
+        ) : !hasAny ? (
+          <p className="text-sm text-slate-400">No subjects selected yet.</p>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {[1, 2].map(sem => {
+              const rows = sem === 1 ? sem1 : sem2
+              if (rows.length === 0) return null
+              return (
+                <div key={sem}>
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Semester {sem}</p>
+                  <div className="space-y-1">
+                    {rows.map((s, i) => (
+                      <div key={i} className="flex items-center gap-3 text-sm">
+                        <span className="font-mono text-xs text-slate-400 w-24 shrink-0">{s.code}</span>
+                        <span className="text-slate-800">{s.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -816,7 +920,7 @@ function CollegePayPanel({ collegeId, appId, onPaid }) {
                   <span className="h-5 w-5 rounded-full bg-emerald-100 flex items-center justify-center text-xs font-bold text-emerald-700 shrink-0">{i+1}</span>
                   <div>
                     <p className="font-medium text-slate-700">{p.razorpay_payment_id?.startsWith('CASH-') ? 'Cash / Offline' : 'Online (Razorpay)'}</p>
-                    <p className="text-xs text-slate-400">{new Date(p.completed_at?.replace(' ','T')).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})}</p>
+                    <p className="text-xs text-slate-400">{new Date(p.completed_at?.replace(' ','T')).toLocaleString('en-IN',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',timeZone:'Asia/Kolkata'})}</p>
                   </div>
                 </div>
                 <span className="font-bold text-emerald-700">₹{Number(p.amount).toLocaleString('en-IN')}</span>

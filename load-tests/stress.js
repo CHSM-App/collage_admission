@@ -13,8 +13,8 @@ import http  from 'k6/http'
 import { check, sleep } from 'k6'
 
 const BASE             = 'https://collageserver.vengurlatech.com'
-const COLLEGE_EMAIL    = 'admin@testcollege.com'
-const COLLEGE_PASSWORD = 'password123'
+const COLLEGE_EMAIL    = 'coep@gmail.com'
+const COLLEGE_PASSWORD = 'Admin@123'
 const COLLEGE_ID       = 1
 
 export const options = {
@@ -33,21 +33,27 @@ export const options = {
   },
 }
 
-export default function () {
-  // Login
-  const loginRes = http.post(
+// Login once per VU (setup), reuse token across iterations
+export function setup() {
+  const r = http.post(
     `${BASE}/auth/login/college`,
     JSON.stringify({ email: COLLEGE_EMAIL, password: COLLEGE_PASSWORD }),
     { headers: { 'Content-Type': 'application/json' } }
   )
-  if (loginRes.status !== 200) { sleep(1); return }
+  if (r.status !== 200) {
+    console.log(`Setup login failed: HTTP ${r.status} — ${r.body}`)
+    return { token: null }
+  }
+  return { token: JSON.parse(r.body)?.token }
+}
 
-  const token = JSON.parse(loginRes.body)?.token
+export default function (data) {
+  if (!data.token) { sleep(1); return }
 
   // Hit the heaviest endpoint repeatedly
   const r = http.get(
     `${BASE}/college-admin/${COLLEGE_ID}/applications?page=1&limit=20`,
-    { headers: { Authorization: `Bearer ${token}` } }
+    { headers: { Authorization: `Bearer ${data.token}` } }
   )
   check(r, { 'status 200': r => r.status === 200 })
 

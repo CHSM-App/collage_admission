@@ -1,217 +1,171 @@
-import { useCallback, useState } from 'react'
-import FormField from '../../../../shared/components/FormField.jsx'
+import { useState } from 'react'
 import { StepHeader, StepFooter } from './Step1Context.jsx'
-import Button from '../../../../shared/components/Button.jsx'
 
-const RESULT_OPTIONS = [
-  { value: 'pass', label: 'Pass' },
-  { value: 'atkt', label: 'ATKT' },
-  { value: 'fail', label: 'Fail' },
-]
+// Exam rows shown per year of study
+const EXAM_ROWS = {
+  1: ['SSC', 'HSC'],
+  2: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2'],
+  3: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2'],
+}
 
-export default function Step4Exam({ data, errors, globalError, saving, onChange, setField, onBack, onNext, extraFooter, readOnly }) {
-  const isFY = data.year_of_study === 1
-  const e    = errors
+const ROW_LABEL = {
+  SSC:     'SSC',
+  HSC:     'HSC',
+  FY_SEM1: 'F.Y. Sem I',
+  FY_SEM2: 'F.Y. Sem II',
+  SY_SEM1: 'S.Y. Sem I',
+  SY_SEM2: 'S.Y. Sem II',
+}
+
+const MANDATORY = {
+  1: ['SSC', 'HSC'],
+  2: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2'],
+  3: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2'],
+}
+
+function emptyRow() {
+  return { institute: '', board: '', month_year: '', seat_no: '', marks_obtained: '', marks_max: '', percentage: '', class_grade: '', remark: '' }
+}
+
+function computePct(obtained, max) {
+  const o = parseFloat(obtained), m = parseFloat(max)
+  if (!o || !m || m === 0) return ''
+  return ((o / m) * 100).toFixed(2)
+}
+
+export default function Step4Exam({ data, errors, globalError, saving, setField, onBack, onNext, extraFooter, readOnly }) {
+  const yearOfStudy = data.year_of_study || 1
+  const rows = EXAM_ROWS[yearOfStudy] || EXAM_ROWS[1]
+  const mandatory = MANDATORY[yearOfStudy] || MANDATORY[1]
   const [localError, setLocalError] = useState('')
 
-  // Computed percentage
-  const pct = computePct(data.total_marks_obtained, data.total_marks_max)
+  const exams = data.exams || {}
 
-  // Subjects helpers
-  const subjects = data.subjects || [{ subject_name: '', marks_obtained: '', marks_max: '' }]
+  function getRow(type) {
+    return exams[type] || emptyRow()
+  }
 
-  function setSubject(idx, field, value) {
-    const updated = subjects.map((s, i) => i === idx ? { ...s, [field]: value } : s)
-    setField('subjects', updated)
+  function setRowField(type, field, value) {
+    const updated = { ...exams, [type]: { ...getRow(type), [field]: value } }
+    // Auto-compute percentage when marks change
+    if (field === 'marks_obtained' || field === 'marks_max') {
+      const row = updated[type]
+      updated[type].percentage = computePct(row.marks_obtained, row.marks_max)
+    }
+    setField('exams', updated)
   }
-  function addSubject() {
-    setField('subjects', [...subjects, { subject_name: '', marks_obtained: '', marks_max: '' }])
-  }
-  function removeSubject(idx) {
-    if (subjects.length <= 1) return
-    setField('subjects', subjects.filter((_, i) => i !== idx))
+
+  const REQUIRED_FIELDS = ['institute', 'board', 'month_year', 'seat_no', 'marks_obtained', 'marks_max', 'percentage', 'class_grade']
+  const FIELD_LABEL = {
+    institute: 'Name of Institute', board: 'Board/University', month_year: 'Month & Year of Passing',
+    seat_no: 'Seat No.', marks_obtained: 'Marks Obtained', marks_max: 'Out of',
+    percentage: '%', class_grade: 'Class/Grade',
   }
 
   function handleNext() {
-    const yr = parseInt(data.year_of_passing)
-    if (data.year_of_passing && (isNaN(yr) || yr > new Date().getFullYear())) {
-      setLocalError('Year of passing cannot be in the future.'); return
+    for (const type of mandatory) {
+      const row = getRow(type)
+      for (const field of REQUIRED_FIELDS) {
+        if (!String(row[field] || '').trim()) {
+          setLocalError(`${ROW_LABEL[type]}: ${FIELD_LABEL[field]} is required.`)
+          return
+        }
+      }
     }
     setLocalError('')
-    const collegeName = data.board_or_college_name?.trim() || ''
-    if (!collegeName) { setLocalError('College / Board name is required.'); return }
-    onNext({
-      board_or_college_name:     collegeName,
-      school_or_college_address: data.school_or_college_address,
-      seat_number:               isFY ? data.seat_number : undefined,
-      prn_or_seat:               !isFY ? data.prn_or_seat : undefined,
-      year_of_passing:           data.year_of_passing,
-      total_marks_obtained:      data.total_marks_obtained,
-      total_marks_max:           data.total_marks_max,
-      result:                    !isFY ? data.result : undefined,
-      subjects,
-    })
+    onNext({ exams })
   }
+
+  const COLS = [
+    { key: 'institute',      label: 'Name of Institute with Place *', width: 'min-w-[160px]' },
+    { key: 'board',          label: 'Board / University *',           width: 'min-w-[120px]' },
+    { key: 'month_year',     label: 'Month & Year of Passing *',      width: 'min-w-[110px]' },
+    { key: 'seat_no',        label: 'Seat No. *',                     width: 'min-w-[90px]' },
+    { key: 'marks_obtained', label: 'Marks Obtained *',               width: 'min-w-[80px]' },
+    { key: 'marks_max',      label: 'Out of *',                       width: 'min-w-[70px]' },
+    { key: 'percentage',     label: '% *',                            width: 'min-w-[60px]', readOnly: true },
+    { key: 'class_grade',    label: 'Class / Grade *',                width: 'min-w-[80px]' },
+    { key: 'remark',         label: 'Remark',                         width: 'min-w-[80px]' },
+  ]
 
   return (
     <div>
       <StepHeader
         step={4}
-        title={isFY ? 'Previous Exam Details — 12th Board' : `Previous Exam Details — ${data.year_of_study === 2 ? 'FY' : 'SY'} Results`}
-        desc={
-          isFY
-            ? 'Enter your 12th standard board examination details.'
-            : `Enter your ${data.year_of_study === 2 ? 'First Year' : 'Second Year'} college exam results.`
-        }
+        title="Previous Exam Details"
+        desc={`Enter your academic exam details. ${mandatory.map(t => ROW_LABEL[t]).join(', ')} ${mandatory.length > 1 ? 'are' : 'is'} mandatory.`}
       />
 
-      <div className="px-4 sm:px-5 py-5 space-y-5">
+      <div className="px-4 sm:px-5 py-5">
 
-        {/* Board / College */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <FormField
-            label={isFY ? 'Board Name' : 'Previous College Name'}
-            name="board_or_college_name"
-            value={data.board_or_college_name || ''}
-            onChange={onChange}
-            error={e.board_or_college_name}
-            required
-            placeholder={isFY ? 'Maharashtra State Board' : 'Name of college where you completed the previous year'}
-          />
-          <FormField
-            label={isFY ? 'School Name' : 'College Address'}
-            name="school_or_college_address"
-            value={data.school_or_college_address}
-            onChange={onChange}
-            placeholder={isFY ? 'St. Xavier High School, Vengurla' : ''}
-          />
+        {/* Scrollable table */}
+        <div className="overflow-x-auto rounded-lg border border-slate-200">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="bg-slate-50">
+                <th className="border border-slate-200 px-3 py-2 text-left text-xs font-semibold text-slate-600 whitespace-nowrap min-w-[70px]">
+                  Exam
+                </th>
+                {COLS.map(col => (
+                  <th key={col.key} className={`border border-slate-200 px-3 py-2 text-left text-xs font-semibold text-slate-600 whitespace-nowrap ${col.width}`}>
+                    {col.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(type => {
+                const row = getRow(type)
+                const isMandatory = mandatory.includes(type)
+                // SSC/HSC on SY/TY: lock only when the row has actual prefilled data
+                const hasPrefill = ['SSC', 'HSC'].includes(type) && yearOfStudy > 1
+                  && !!(row.institute && row.marks_obtained && row.marks_max)
+                const isLocked = readOnly || hasPrefill
+                return (
+                  <tr key={type} className={isMandatory ? 'bg-white' : 'bg-slate-50/50'}>
+                    <td className="border border-slate-200 px-3 py-2 font-semibold text-slate-700 whitespace-nowrap text-xs">
+                      {ROW_LABEL[type]}
+                      {isMandatory && <span className="text-red-500 ml-0.5">*</span>}
+                    </td>
+                    {COLS.map(col => (
+                      <td key={col.key} className="border border-slate-200 p-1">
+                        <input
+                          type={['marks_obtained', 'marks_max', 'percentage'].includes(col.key) ? 'number' : 'text'}
+                          value={row[col.key] || ''}
+                          onChange={e => setRowField(type, col.key, e.target.value)}
+                          readOnly={col.readOnly || isLocked}
+                          placeholder=""
+                          className={`w-full px-2 py-1.5 text-sm rounded border-0 outline-none focus:ring-2 focus:ring-blue-200 focus:bg-blue-50 transition ${
+                            col.readOnly || isLocked
+                              ? 'bg-slate-100 text-slate-500 cursor-default'
+                              : 'bg-white hover:bg-slate-50'
+                          }`}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         </div>
 
-        {/* Seat / PRN */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {isFY ? (
-            <FormField label="Seat Number" name="seat_number" value={data.seat_number}
-              onChange={onChange} error={e.seat_number} required placeholder="AB12345" />
-          ) : (
-            <FormField label="FY Seat No / PRN" name="prn_or_seat" value={data.prn_or_seat}
-              onChange={onChange} error={e.prn_or_seat} required placeholder="Your FY PRN or seat number" />
-          )}
-
-          <FormField label="Year of Passing" name="year_of_passing" type="number"
-            value={data.year_of_passing} onChange={onChange} error={e.year_of_passing}
-            required placeholder={new Date().getFullYear()} max={new Date().getFullYear()} />
-
-          {!isFY && (
-            <FormField label="Result" name="result" type="select" value={data.result}
-              onChange={onChange} error={e.result} required options={RESULT_OPTIONS} />
-          )}
-        </div>
-
-        {/* Marks summary */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <FormField label="Total Marks Obtained" name="total_marks_obtained" type="number"
-            value={data.total_marks_obtained} onChange={onChange} error={e.total_marks_obtained}
-            required placeholder="450" />
-          <FormField label="Total Marks (Out of)" name="total_marks_max" type="number"
-            value={data.total_marks_max} onChange={onChange} error={e.total_marks_max}
-            required placeholder="600" />
-          <FormField label="Percentage" value={pct} readOnly hint="Auto-calculated" />
-        </div>
-
-        {/* Subject-wise marks */}
-        <div>
-          <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-400 border-b border-slate-100 pb-1.5">
-            Subject-wise Marks *
+        {yearOfStudy > 1 && (
+          <p className="mt-2 text-xs text-slate-400">
+            SSC and HSC details are pre-filled from your previous application if available.
           </p>
-          {e.subjects && <p className="mb-2 text-xs text-red-600">{e.subjects}</p>}
-
-          <div className="space-y-2">
-            {/* Header row — hidden on mobile */}
-            <div className="hidden sm:grid grid-cols-[1fr_120px_120px_36px] gap-2 px-1">
-              <p className="text-xs font-semibold text-slate-400">Subject Name</p>
-              <p className="text-xs font-semibold text-slate-400">Marks Obtained</p>
-              <p className="text-xs font-semibold text-slate-400">Out of</p>
-              <span />
-            </div>
-
-            {subjects.map((sub, idx) => (
-              <div key={idx} className="grid grid-cols-1 sm:grid-cols-[1fr_120px_120px_36px] gap-2 items-start p-3 sm:p-0 rounded-lg sm:rounded-none bg-slate-50 sm:bg-transparent border sm:border-0 border-slate-100">
-                {/* Mobile label */}
-                <p className="sm:hidden text-xs font-semibold text-slate-400 mb-1">Subject {idx + 1}</p>
-
-                <input
-                  type="text"
-                  value={sub.subject_name}
-                  onChange={e => setSubject(idx, 'subject_name', e.target.value)}
-                  placeholder={`Subject ${idx + 1}`}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-100"
-                />
-                <input
-                  type="number"
-                  value={sub.marks_obtained}
-                  onChange={e => setSubject(idx, 'marks_obtained', e.target.value)}
-                  placeholder="Marks"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-100"
-                />
-                <input
-                  type="number"
-                  value={sub.marks_max}
-                  onChange={e => setSubject(idx, 'marks_max', e.target.value)}
-                  placeholder="Max"
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2.5 text-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-100"
-                />
-                <button
-                  type="button"
-                  onClick={() => removeSubject(idx)}
-                  disabled={subjects.length <= 1}
-                  className="flex h-10 w-10 sm:h-10 sm:w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-30 transition"
-                  aria-label="Remove subject"
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <button
-            type="button"
-            onClick={addSubject}
-            className="mt-3 flex items-center gap-1.5 text-sm font-semibold text-emerald-600 hover:text-emerald-700"
-          >
-            <span className="text-lg leading-none">+</span> Add subject
-          </button>
-
-          {/* Marks mismatch warning */}
-          {marksMismatch(subjects, data.total_marks_obtained) && (
-            <p className="mt-2 text-xs text-amber-600 font-medium">
-              ⚠ Sum of subject marks ({sumSubjectMarks(subjects)}) doesn't match total marks obtained ({data.total_marks_obtained}). You may continue, but please verify.
-            </p>
-          )}
-        </div>
-
-        {(localError || globalError) && (
-          <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{localError || globalError}</p>
         )}
 
-        <StepFooter onBack={onBack} onNext={handleNext} saving={saving} extraFooter={extraFooter} readOnly={readOnly} />
+        {(localError || globalError) && (
+          <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {localError || globalError}
+          </p>
+        )}
+
+        <div className="mt-5">
+          <StepFooter onBack={onBack} onNext={handleNext} saving={saving} extraFooter={extraFooter} readOnly={readOnly} />
+        </div>
       </div>
     </div>
   )
-}
-
-function computePct(obtained, max) {
-  const o = parseFloat(obtained)
-  const m = parseFloat(max)
-  if (!o || !m || m === 0) return ''
-  return `${((o / m) * 100).toFixed(2)}%`
-}
-
-function sumSubjectMarks(subjects) {
-  return subjects.reduce((sum, s) => sum + (parseFloat(s.marks_obtained) || 0), 0)
-}
-
-function marksMismatch(subjects, total) {
-  const sum = sumSubjectMarks(subjects)
-  const tot = parseFloat(total)
-  return sum > 0 && tot > 0 && Math.abs(sum - tot) > 0.01
 }

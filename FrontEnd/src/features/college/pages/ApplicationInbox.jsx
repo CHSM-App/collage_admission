@@ -102,18 +102,10 @@ export default function ApplicationInbox({ collegeId }) {
 
   return (
     <section className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">College portal</p>
-          <h1 className="mt-2 text-3xl font-bold text-slate-950">Application Inbox</h1>
-          <p className="mt-1 text-slate-600">Review and manage student applications.</p>
-        </div>
-        <a
-          href="/college/dashboard?section=add-application"
-          className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 transition mt-2"
-        >
-          + Add Application
-        </a>
+      <div>
+        <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">College portal</p>
+        <h1 className="mt-2 text-3xl font-bold text-slate-950">Application Inbox</h1>
+        <p className="mt-1 text-slate-600">Review and manage student applications.</p>
       </div>
 
       {/* Filters */}
