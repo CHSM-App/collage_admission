@@ -508,3 +508,100 @@ CREATE TABLE required_documents (
     is_mandatory     BIT NOT NULL DEFAULT 1,
     created_at       DATETIME2 DEFAULT GETDATE()
 );
+
+-- ============================================================
+-- BONAFIDE CERTIFICATE
+-- Certificate numbers are auto-generated server-side as
+-- "BON/<calendar-year>/<4-digit-serial>" and are unique within a college.
+-- ============================================================
+CREATE TABLE certificate_bonafide (
+    bonafide_id      INT IDENTITY(1,1) PRIMARY KEY,
+    college_id       INT           NOT NULL REFERENCES colleges(id),
+    certificate_no   NVARCHAR(50)  NOT NULL,
+    certificate_date DATE          NOT NULL,
+    reg_no           NVARCHAR(50)  NULL,
+    student_name     NVARCHAR(200) NOT NULL,
+    gender           NVARCHAR(10)  NULL,
+    is_ex_student    BIT           NOT NULL DEFAULT 0,
+    class_name       NVARCHAR(100) NULL,
+    academic_year    NVARCHAR(20)  NULL,
+    birth_date       DATE          NULL,
+    roll_no          INT           NULL,
+    caste            NVARCHAR(100) NULL,
+    created_by       INT           NULL,
+    created_date     DATETIME      NOT NULL DEFAULT GETDATE(),
+    updated_by       INT           NULL,
+    updated_date     DATETIME      NULL,
+    is_deleted       BIT           NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX ix_cert_bonafide_certificate_no
+    ON certificate_bonafide (college_id, certificate_no)
+    WHERE is_deleted = 0;
+CREATE INDEX ix_cert_bonafide_reg_no
+    ON certificate_bonafide (college_id, reg_no);
+
+-- ============================================================
+-- CHARACTER CERTIFICATE
+-- Certificate numbers are auto-generated server-side as
+-- "CHAR/<calendar-year>/<4-digit-serial>" and are unique within a college.
+-- ============================================================
+CREATE TABLE certificate_character (
+    character_certificate_id INT IDENTITY(1,1) PRIMARY KEY,
+    college_id               INT           NOT NULL REFERENCES colleges(id),
+    certificate_no           NVARCHAR(50)  NOT NULL,
+    certificate_date         DATE          NOT NULL,
+    reg_no                   NVARCHAR(50)  NULL,
+    student_name             NVARCHAR(200) NOT NULL,
+    gender                   NVARCHAR(10)  NULL,
+    is_ex_student            BIT           NOT NULL DEFAULT 0,
+    class_name               NVARCHAR(100) NULL,
+    academic_year            NVARCHAR(20)  NULL,
+    known_from_years         INT           NULL,
+    birth_date               DATE          NULL,
+    roll_no                  INT           NULL,
+    caste                    NVARCHAR(100) NULL,
+    created_by               INT           NULL,
+    created_date             DATETIME      NOT NULL DEFAULT GETDATE(),
+    updated_by               INT           NULL,
+    updated_date             DATETIME      NULL,
+    is_deleted               BIT           NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX ix_cert_character_certificate_no
+    ON certificate_character (college_id, certificate_no)
+    WHERE is_deleted = 0;
+CREATE INDEX ix_cert_character_reg_no
+    ON certificate_character (college_id, reg_no);
+
+-- ============================================================
+-- NO OBJECTION CERTIFICATE
+-- Certificate numbers are auto-generated server-side as
+-- "NOC/<calendar-year>/<4-digit-serial>" and are unique within a college.
+-- ============================================================
+CREATE TABLE certificate_noc (
+    noc_certificate_id    INT IDENTITY(1,1) PRIMARY KEY,
+    college_id            INT           NOT NULL REFERENCES colleges(id),
+    certificate_no        NVARCHAR(50)  NOT NULL,
+    certificate_date      DATE          NOT NULL,
+    reg_no                NVARCHAR(50)  NULL,
+    student_name          NVARCHAR(200) NOT NULL,
+    gender                NVARCHAR(10)  NULL,
+    is_ex_student         BIT           NOT NULL DEFAULT 0,
+    class_name            NVARCHAR(100) NULL,
+    from_date             DATE          NULL,
+    to_date               DATE          NULL,
+    prn_no                NVARCHAR(100) NULL,
+    final_confirmation_no NVARCHAR(100) NULL,
+    created_by            INT           NULL,
+    created_date          DATETIME      NOT NULL DEFAULT GETDATE(),
+    updated_by            INT           NULL,
+    updated_date          DATETIME      NULL,
+    is_deleted            BIT           NOT NULL DEFAULT 0,
+    CONSTRAINT chk_cert_noc_date_range CHECK (from_date IS NULL OR to_date IS NULL OR from_date <= to_date)
+);
+CREATE UNIQUE INDEX ix_cert_noc_certificate_no
+    ON certificate_noc (college_id, certificate_no)
+    WHERE is_deleted = 0;
+CREATE INDEX ix_cert_noc_reg_no
+    ON certificate_noc (college_id, reg_no);
+CREATE INDEX ix_cert_noc_prn_no
+    ON certificate_noc (college_id, prn_no);
