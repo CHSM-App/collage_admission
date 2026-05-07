@@ -12,6 +12,7 @@ const ALL_PERMISSIONS = [
   { key: 'collect_fees',       label: 'Collect Fees',                  desc: 'Record cash payments and manage fee receipts' },
   { key: 'assign_subjects',    label: 'Assign Roll Numbers',           desc: 'Generate and assign roll numbers to enrolled students' },
   { key: 'masters',            label: 'Manage Masters',                desc: 'Add/edit program, course, bank, fee, and document masters' },
+  { key: 'certificates',       label: 'Issue Certificates',            desc: 'Generate bonafide, character, and no objection certificates for students' },
 ]
 
 // ── Nav visibility definitions ────────────────────────────────
@@ -38,6 +39,14 @@ const NAV_SECTIONS = [
       { key: 'master-division',  label: 'Division Master',   desc: 'Class divisions' },
       { key: 'master-fees',      label: 'Fees Master',       desc: 'Fee heads, slabs, and class overrides' },
       { key: 'master-documents', label: 'Required Documents',desc: 'Document checklist configuration' },
+    ],
+  },
+  {
+    group: 'Certificates',
+    items: [
+      { key: 'cert-bonafide',  label: 'Bonafide Certificate',     desc: 'Issue bonafide certificate confirming enrolment' },
+      { key: 'cert-character', label: 'Character Certificate',    desc: 'Issue character certificate for a student' },
+      { key: 'cert-noc',       label: 'No Objection Certificate', desc: 'Issue NOC for transfer or external application' },
     ],
   },
 ]
