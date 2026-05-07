@@ -91,8 +91,16 @@ export default function Step3Other({ data, errors, globalError, saving, onChange
             <FormField label="Aadhaar Number" name="aadhaar" value={data.aadhaar}
               onChange={onChange} error={e.aadhaar} required placeholder="123456789012"
               hint="12 digits, no spaces" maxLength={12} />
-            <FormField label="ABC ID (Academic Bank of Credits)" name="abc_id" value={data.abc_id}
-              onChange={onChange} error={e.abc_id} required placeholder="Your UGC ABC ID" />
+            <FormField
+              label={`ABC ID (Academic Bank of Credits)${data.year_of_study > 1 ? ' *' : ''}`}
+              name="abc_id"
+              value={data.abc_id}
+              onChange={onChange}
+              error={e.abc_id}
+              required={data.year_of_study > 1}
+              placeholder={data.year_of_study > 1 ? 'Required for SY/TY' : 'Optional for FY'}
+              hint={data.year_of_study === 1 ? 'Optional — can be added later once issued' : 'Mandatory for SY and TY'}
+            />
             <FormField
               label={`PRN (Permanent Registration Number)${data.year_of_study > 1 ? ' *' : ''}`}
               name="prn" value={data.prn} onChange={onChange} error={e.prn}

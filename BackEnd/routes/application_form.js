@@ -596,7 +596,7 @@ router.patch('/applications/:id/other-details', async (req, res) => {
   if (!annual_income)   errors.annual_income   = 'Annual family income is required.';
   if (!aadhaar)         errors.aadhaar         = 'Aadhaar number is required.';
   else if (!validateAadhaar(aadhaar)) errors.aadhaar = 'Aadhaar must be exactly 12 digits.';
-  if (!abc_id)          errors.abc_id          = 'ABC ID is required.';
+  if (app.year_of_study > 1 && !abc_id) errors.abc_id = 'ABC ID is required for SY/TY students.';
   if (app.year_of_study > 1 && !prn) errors.prn = 'PRN is required for SY/TY students.';
 
   // Bank: if any one provided, account + IFSC become required
