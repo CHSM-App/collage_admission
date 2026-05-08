@@ -56,63 +56,137 @@ router.get('/:collegeId/faculty', async (req, res) => {
 const SEM_SLOTS  = (yrs) => Math.max(0, Math.min(10, parseInt(yrs) * 2 || 0))
 const YEAR_SLOTS = (yrs) => Math.max(0, Math.min( 5, parseInt(yrs)     || 0))
 
-// All possible columns we read/write
-const ALL_SEM_COLS  = Array.from({ length: 10 }, (_, i) => `unique_code_sem${i + 1}`)
-const ALL_YEAR_COLS = Array.from({ length:  5 }, (_, i) => `exam_seat_code_year${i + 1}`)
+// Discover which sem/year columns actually exist on faculty_master.
+// Older databases (pre-migrate_faculty_master_extended_duration) only have
+// sem1..6 and year1..3 — referencing sem7..10 / year4..5 in those DBs throws
+// "Invalid column name". Querying INFORMATION_SCHEMA per request keeps the
+// route working on any version of the schema; the cost is one tiny lookup
+// per save (Program Master is admin-only / low-traffic).
+async function getFacultyMasterCols() {
+  const r = await db.request().query(`
+    SELECT COLUMN_NAME
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_NAME = 'faculty_master'
+      AND TABLE_SCHEMA = 'dbo'
+      AND (COLUMN_NAME LIKE 'unique_code_sem%' OR COLUMN_NAME LIKE 'exam_seat_code_year%')
+  `)
+  const all = r.recordset.map(x => x.COLUMN_NAME)
+  const byNum = (a, b) => parseInt(a.match(/\d+$/)[0], 10) - parseInt(b.match(/\d+$/)[0], 10)
+  return {
+    sems:  all.filter(n => /^unique_code_sem\d+$/.test(n)).sort(byNum),
+    years: all.filter(n => /^exam_seat_code_year\d+$/.test(n)).sort(byNum),
+  }
+}
+
+// Centralized SQL → HTTP error translator for faculty_master saves. Logs
+// the full SQL detail server-side (so a developer can debug) and returns
+// a user-friendly, action-oriented message to the client. Never leaks raw
+// SQL message text to the response.
+function handleFacultySaveError(e, res, op) {
+  console.error(`[faculty-master ${op}] save failed:`, {
+    sqlNumber: e.number,
+    sqlState:  e.state,
+    procedure: e.procName,
+    message:   e.message,
+    stack:     e.stack,
+  })
+  // Unique constraint violation (degree_course_code per college)
+  if (e.number === 2627 || e.number === 2601) {
+    return res.status(409).json({ success: false, message: 'A degree course with this code already exists for this college.' })
+  }
+  // Invalid column / schema mismatch (pre-migration DB)
+  if (e.number === 207) {
+    return res.status(500).json({
+      success: false,
+      message: 'The database schema is out of date. Please ask an administrator to run the latest migrations (BackEnd/scripts/migrate_faculty_master_extended_duration.js) and try again.',
+    })
+  }
+  // NOT NULL violation
+  if (e.number === 515) {
+    return res.status(422).json({ success: false, message: 'A required field is missing. Please review the form and try again.' })
+  }
+  // String / binary truncation
+  if (e.number === 8152 || e.number === 2628) {
+    return res.status(422).json({ success: false, message: 'One of the values entered is too long. Please shorten it and try again.' })
+  }
+  // Foreign key violation
+  if (e.number === 547) {
+    return res.status(422).json({ success: false, message: 'A referenced college or course is invalid.' })
+  }
+  // Generic fallback — do not include raw SQL text in the user response.
+  return res.status(500).json({
+    success: false,
+    message: 'Could not save the degree course due to an internal error. Please try again, or contact your administrator if the problem persists.',
+  })
+}
 
 // POST /masters/:collegeId/faculty — create
 router.post('/:collegeId/faculty', requirePerm('masters'), async (req, res) => {
-  const body = req.body
-  const {
-    degree_course_code, degree_course_name, duration_years = 3,
-    is_active = true, created_by,
-  } = body
-
-  if (!degree_course_code?.trim()) return res.status(422).json({ success: false, message: 'degree_course_code is required.' })
-  if (!degree_course_name?.trim()) return res.status(422).json({ success: false, message: 'degree_course_name is required.' })
-
-  const yrs       = parseInt(duration_years) || 3
-  const semSlots  = SEM_SLOTS(yrs)
-  const yearSlots = YEAR_SLOTS(yrs)
-
-  // Required-count validation: sem codes = duration * 2, year codes = duration
-  for (let i = 0; i < semSlots; i++) {
-    if (!body[`unique_code_sem${i + 1}`]?.toString().trim()) {
-      return res.status(422).json({ success: false, message: `Semester ${i + 1} code is required for a ${yrs}-year program.` })
-    }
-  }
-  for (let i = 0; i < yearSlots; i++) {
-    if (!body[`exam_seat_code_year${i + 1}`]?.toString().trim()) {
-      return res.status(422).json({ success: false, message: `Year ${i + 1} exam seat code is required for a ${yrs}-year program.` })
-    }
-  }
-
-  // Build slot arrays — indices >= slotCount are forced null so old data
-  // from a longer duration doesn't linger when shrinking duration.
-  const semVals  = ALL_SEM_COLS.map((c, i)  => i < semSlots  ? (body[c] || null) : null)
-  const yearVals = ALL_YEAR_COLS.map((c, i) => i < yearSlots ? (body[c] || null) : null)
-
-  // Uniqueness check per college (excluding nulls), across all 10 sem and 5 year slots
-  const semCodes  = semVals.filter(Boolean)
-  const examCodes = yearVals.filter(Boolean)
-  if (semCodes.length > 0) {
-    const existing = await db.request().input('cid', mssql.Int, cid(req)).query(`
-      SELECT ${ALL_SEM_COLS.join(',')} FROM faculty_master WHERE college_id=@cid AND is_active=1
-    `)
-    const allSems = existing.recordset.flatMap(r => ALL_SEM_COLS.map(c => r[c]).filter(Boolean))
-    const dup = semCodes.find(c => allSems.includes(c))
-    if (dup) return res.status(409).json({ success: false, message: `Semester code "${dup}" is already used by another course in this college.` })
-  }
-  if (examCodes.length > 0) {
-    const existing = await db.request().input('cid', mssql.Int, cid(req)).query(`
-      SELECT ${ALL_YEAR_COLS.join(',')} FROM faculty_master WHERE college_id=@cid AND is_active=1
-    `)
-    const allExam = existing.recordset.flatMap(r => ALL_YEAR_COLS.map(c => r[c]).filter(Boolean))
-    const dup = examCodes.find(c => allExam.includes(c))
-    if (dup) return res.status(409).json({ success: false, message: `Exam seat code "${dup}" is already used by another course in this college.` })
-  }
-
   try {
+    const body = req.body
+    const {
+      degree_course_code, degree_course_name, duration_years = 3,
+      is_active = true, created_by,
+    } = body
+
+    if (!degree_course_code?.trim()) return res.status(422).json({ success: false, message: 'Degree Course Code is required.' })
+    if (!degree_course_name?.trim()) return res.status(422).json({ success: false, message: 'Degree Course Name is required.' })
+
+    const yrs       = parseInt(duration_years) || 3
+    const semSlots  = SEM_SLOTS(yrs)
+    const yearSlots = YEAR_SLOTS(yrs)
+
+    // Schema-aware: only reference columns that actually exist. Pre-migration
+    // DBs only have sem1..6 / year1..3.
+    const cols = await getFacultyMasterCols()
+    if (semSlots > cols.sems.length || yearSlots > cols.years.length) {
+      return res.status(422).json({
+        success: false,
+        message:
+          `This database supports degree programs up to ${Math.floor(cols.sems.length / 2)} years. ` +
+          `To enable longer durations, an administrator must run the migration: ` +
+          `node BackEnd/scripts/migrate_faculty_master_extended_duration.js`,
+      })
+    }
+
+    // Required-count validation: sem codes = duration * 2, year codes = duration
+    for (let i = 0; i < semSlots; i++) {
+      if (!body[`unique_code_sem${i + 1}`]?.toString().trim()) {
+        return res.status(422).json({ success: false, message: `Semester ${i + 1} code is required for a ${yrs}-year program.` })
+      }
+    }
+    for (let i = 0; i < yearSlots; i++) {
+      if (!body[`exam_seat_code_year${i + 1}`]?.toString().trim()) {
+        return res.status(422).json({ success: false, message: `Year ${i + 1} exam seat code is required for a ${yrs}-year program.` })
+      }
+    }
+
+    // Slot arrays sized to what the schema actually has. Indices >= active
+    // slot count are forced null so stale data from a longer duration doesn't
+    // linger if duration is later shrunk.
+    const semVals  = cols.sems.map((c, i)  => i < semSlots  ? (body[c] || null) : null)
+    const yearVals = cols.years.map((c, i) => i < yearSlots ? (body[c] || null) : null)
+
+    // Uniqueness check per college (excluding nulls), using only existing columns
+    const semCodes  = semVals.filter(Boolean)
+    const examCodes = yearVals.filter(Boolean)
+    if (semCodes.length > 0) {
+      const existing = await db.request().input('cid', mssql.Int, cid(req)).query(`
+        SELECT ${cols.sems.join(',')} FROM faculty_master WHERE college_id=@cid AND is_active=1
+      `)
+      const allSems = existing.recordset.flatMap(r => cols.sems.map(c => r[c]).filter(Boolean))
+      const dup = semCodes.find(c => allSems.includes(c))
+      if (dup) return res.status(409).json({ success: false, message: `Semester code "${dup}" is already used by another course in this college.` })
+    }
+    if (examCodes.length > 0) {
+      const existing = await db.request().input('cid', mssql.Int, cid(req)).query(`
+        SELECT ${cols.years.join(',')} FROM faculty_master WHERE college_id=@cid AND is_active=1
+      `)
+      const allExam = existing.recordset.flatMap(r => cols.years.map(c => r[c]).filter(Boolean))
+      const dup = examCodes.find(c => allExam.includes(c))
+      if (dup) return res.status(409).json({ success: false, message: `Exam seat code "${dup}" is already used by another course in this college.` })
+    }
+
     const reqQ = db.request()
       .input('cid', mssql.Int,      cid(req))
       .input('dc',  mssql.NVarChar, degree_course_code.trim().toUpperCase())
@@ -120,71 +194,83 @@ router.post('/:collegeId/faculty', requirePerm('masters'), async (req, res) => {
       .input('dy',  mssql.Int,      yrs)
       .input('ia',  mssql.Bit,      is_active ? 1 : 0)
       .input('cb',  mssql.NVarChar, created_by || null)
-    ALL_SEM_COLS.forEach((_, i)  => reqQ.input(`s${i + 1}`, mssql.NVarChar, semVals[i]))
-    ALL_YEAR_COLS.forEach((_, i) => reqQ.input(`e${i + 1}`, mssql.NVarChar, yearVals[i]))
+    cols.sems.forEach((_,  i) => reqQ.input(`s${i + 1}`, mssql.NVarChar, semVals[i]))
+    cols.years.forEach((_, i) => reqQ.input(`e${i + 1}`, mssql.NVarChar, yearVals[i]))
 
-    const semParams  = ALL_SEM_COLS.map((_, i)  => `@s${i + 1}`).join(',')
-    const yearParams = ALL_YEAR_COLS.map((_, i) => `@e${i + 1}`).join(',')
+    const semParams  = cols.sems.map((_,  i) => `@s${i + 1}`).join(',')
+    const yearParams = cols.years.map((_, i) => `@e${i + 1}`).join(',')
 
     const r = await reqQ.query(`
       INSERT INTO faculty_master
         (college_id,degree_course_code,degree_course_name,duration_years,
-         ${ALL_SEM_COLS.join(',')},
-         ${ALL_YEAR_COLS.join(',')},
+         ${cols.sems.join(',')},
+         ${cols.years.join(',')},
          is_active,created_by)
       OUTPUT INSERTED.*
       VALUES
         (@cid,@dc,@dn,@dy,${semParams},${yearParams},@ia,@cb)
     `)
-    res.status(201).json({ success: true, data: r.recordset[0] })
+    return res.status(201).json({ success: true, data: r.recordset[0] })
   } catch (e) {
-    if (e.number === 2627 || e.number === 2601)
-      return res.status(409).json({ success: false, message: 'Degree course code already exists for this college.' })
-    res.status(500).json({ success: false, message: e.message })
+    return handleFacultySaveError(e, res, 'create')
   }
 })
 
 // PUT /masters/:collegeId/faculty/:id — update
 router.put('/:collegeId/faculty/:id', requirePerm('masters'), async (req, res) => {
-  const body = req.body
-  const {
-    degree_course_code, degree_course_name, duration_years,
-    is_active, modified_by,
-  } = body
-
-  const yrs       = parseInt(duration_years) || 3
-  const semSlots  = SEM_SLOTS(yrs)
-  const yearSlots = YEAR_SLOTS(yrs)
-
-  for (let i = 0; i < semSlots; i++) {
-    if (!body[`unique_code_sem${i + 1}`]?.toString().trim()) {
-      return res.status(422).json({ success: false, message: `Semester ${i + 1} code is required for a ${yrs}-year program.` })
-    }
-  }
-  for (let i = 0; i < yearSlots; i++) {
-    if (!body[`exam_seat_code_year${i + 1}`]?.toString().trim()) {
-      return res.status(422).json({ success: false, message: `Year ${i + 1} exam seat code is required for a ${yrs}-year program.` })
-    }
-  }
-
-  // Slots beyond the active duration are explicitly cleared
-  const semVals  = ALL_SEM_COLS.map((c, i)  => i < semSlots  ? (body[c] || null) : null)
-  const yearVals = ALL_YEAR_COLS.map((c, i) => i < yearSlots ? (body[c] || null) : null)
-
   try {
+    const body = req.body
+    const {
+      degree_course_code, degree_course_name, duration_years,
+      is_active, modified_by,
+    } = body
+
+    if (!degree_course_code?.trim()) return res.status(422).json({ success: false, message: 'Degree Course Code is required.' })
+    if (!degree_course_name?.trim()) return res.status(422).json({ success: false, message: 'Degree Course Name is required.' })
+
+    const yrs       = parseInt(duration_years) || 3
+    const semSlots  = SEM_SLOTS(yrs)
+    const yearSlots = YEAR_SLOTS(yrs)
+
+    const cols = await getFacultyMasterCols()
+    if (semSlots > cols.sems.length || yearSlots > cols.years.length) {
+      return res.status(422).json({
+        success: false,
+        message:
+          `This database supports degree programs up to ${Math.floor(cols.sems.length / 2)} years. ` +
+          `To enable longer durations, an administrator must run the migration: ` +
+          `node BackEnd/scripts/migrate_faculty_master_extended_duration.js`,
+      })
+    }
+
+    for (let i = 0; i < semSlots; i++) {
+      if (!body[`unique_code_sem${i + 1}`]?.toString().trim()) {
+        return res.status(422).json({ success: false, message: `Semester ${i + 1} code is required for a ${yrs}-year program.` })
+      }
+    }
+    for (let i = 0; i < yearSlots; i++) {
+      if (!body[`exam_seat_code_year${i + 1}`]?.toString().trim()) {
+        return res.status(422).json({ success: false, message: `Year ${i + 1} exam seat code is required for a ${yrs}-year program.` })
+      }
+    }
+
+    // Slots beyond the active duration are explicitly cleared in the UPDATE.
+    const semVals  = cols.sems.map((c, i)  => i < semSlots  ? (body[c] || null) : null)
+    const yearVals = cols.years.map((c, i) => i < yearSlots ? (body[c] || null) : null)
+
     const reqQ = db.request()
       .input('id',  mssql.Int,      parseInt(req.params.id))
       .input('cid', mssql.Int,      cid(req))
-      .input('dc',  mssql.NVarChar, degree_course_code?.trim().toUpperCase())
-      .input('dn',  mssql.NVarChar, degree_course_name?.trim())
+      .input('dc',  mssql.NVarChar, degree_course_code.trim().toUpperCase())
+      .input('dn',  mssql.NVarChar, degree_course_name.trim())
       .input('dy',  mssql.Int,      yrs)
       .input('ia',  mssql.Bit,      is_active ? 1 : 0)
       .input('mb',  mssql.NVarChar, modified_by || null)
-    ALL_SEM_COLS.forEach((_, i)  => reqQ.input(`s${i + 1}`, mssql.NVarChar, semVals[i]))
-    ALL_YEAR_COLS.forEach((_, i) => reqQ.input(`e${i + 1}`, mssql.NVarChar, yearVals[i]))
+    cols.sems.forEach((_,  i) => reqQ.input(`s${i + 1}`, mssql.NVarChar, semVals[i]))
+    cols.years.forEach((_, i) => reqQ.input(`e${i + 1}`, mssql.NVarChar, yearVals[i]))
 
-    const semSet  = ALL_SEM_COLS.map((c, i)  => `${c}=@s${i + 1}`).join(',')
-    const yearSet = ALL_YEAR_COLS.map((c, i) => `${c}=@e${i + 1}`).join(',')
+    const semSet  = cols.sems.map((c, i)  => `${c}=@s${i + 1}`).join(',')
+    const yearSet = cols.years.map((c, i) => `${c}=@e${i + 1}`).join(',')
 
     const r = await reqQ.query(`
       UPDATE faculty_master SET
@@ -195,12 +281,10 @@ router.put('/:collegeId/faculty/:id', requirePerm('masters'), async (req, res) =
       OUTPUT INSERTED.*
       WHERE code_no=@id AND college_id=@cid
     `)
-    if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Record not found.' })
-    res.json({ success: true, data: r.recordset[0] })
+    if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Degree course not found.' })
+    return res.json({ success: true, data: r.recordset[0] })
   } catch (e) {
-    if (e.number === 2627 || e.number === 2601)
-      return res.status(409).json({ success: false, message: 'Degree course code already exists for this college.' })
-    res.status(500).json({ success: false, message: e.message })
+    return handleFacultySaveError(e, res, 'update')
   }
 })
 

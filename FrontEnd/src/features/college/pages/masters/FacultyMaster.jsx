@@ -81,7 +81,22 @@ export default function FacultyMaster({ collegeId }) {
       }
       closeModal(); load()
     } catch (e) {
-      setError(e?.response?.data?.message || 'Save failed.')
+      // Prefer the server's user-friendly message; fall back to a useful
+      // generic per-failure-mode rather than a bare "Save failed."
+      console.error('Faculty master save error:', e)
+      const serverMsg = e?.response?.data?.message
+      const status    = e?.response?.status
+      let msg
+      if (serverMsg) {
+        msg = serverMsg
+      } else if (e?.code === 'ERR_NETWORK' || e?.message === 'Network Error') {
+        msg = 'Could not reach the server. Check your connection and try again.'
+      } else if (status >= 500) {
+        msg = 'The server encountered an internal error. Please try again, or contact your administrator if the problem persists.'
+      } else {
+        msg = 'Could not save the degree course. Please review your input and try again.'
+      }
+      setError(msg)
     } finally { setSaving(false) }
   }
 
