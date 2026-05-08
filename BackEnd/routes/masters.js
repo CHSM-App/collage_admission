@@ -56,26 +56,54 @@ router.get('/:collegeId/faculty', async (req, res) => {
 const SEM_SLOTS  = (yrs) => Math.max(0, Math.min(10, parseInt(yrs) * 2 || 0))
 const YEAR_SLOTS = (yrs) => Math.max(0, Math.min( 5, parseInt(yrs)     || 0))
 
+// Legacy column layout — what every faculty_master had before the
+// extended-duration migration. Used as a safe fallback when schema
+// discovery can't locate the table (wrong DB context, non-dbo schema,
+// permissions issue on sys.columns, etc.). Prefers "save still works for
+// 2/3-year programs" over "fail loudly with 0-column nonsense".
+const LEGACY_FACULTY_COLS = {
+  sems:  ['unique_code_sem1','unique_code_sem2','unique_code_sem3','unique_code_sem4','unique_code_sem5','unique_code_sem6'],
+  years: ['exam_seat_code_year1','exam_seat_code_year2','exam_seat_code_year3'],
+  source: 'fallback',
+}
+
 // Discover which sem/year columns actually exist on faculty_master.
 // Older databases (pre-migrate_faculty_master_extended_duration) only have
 // sem1..6 and year1..3 — referencing sem7..10 / year4..5 in those DBs throws
-// "Invalid column name". Querying INFORMATION_SCHEMA per request keeps the
-// route working on any version of the schema; the cost is one tiny lookup
-// per save (Program Master is admin-only / low-traffic).
+// "Invalid column name". Resolving the table via OBJECT_ID() respects the
+// current user's schema search path, so this works regardless of whether
+// faculty_master is in dbo, a per-tenant schema, or anywhere else the user
+// can see by default. Tries an explicit dbo-prefixed fallback as a second
+// chance before giving up.
 async function getFacultyMasterCols() {
-  const r = await db.request().query(`
-    SELECT COLUMN_NAME
-    FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_NAME = 'faculty_master'
-      AND TABLE_SCHEMA = 'dbo'
-      AND (COLUMN_NAME LIKE 'unique_code_sem%' OR COLUMN_NAME LIKE 'exam_seat_code_year%')
-  `)
-  const all = r.recordset.map(x => x.COLUMN_NAME)
-  const byNum = (a, b) => parseInt(a.match(/\d+$/)[0], 10) - parseInt(b.match(/\d+$/)[0], 10)
-  return {
-    sems:  all.filter(n => /^unique_code_sem\d+$/.test(n)).sort(byNum),
-    years: all.filter(n => /^exam_seat_code_year\d+$/.test(n)).sort(byNum),
+  let recordset = []
+  try {
+    const r = await db.request().query(`
+      SELECT c.name AS COLUMN_NAME
+      FROM sys.columns c
+      WHERE c.object_id = COALESCE(OBJECT_ID('faculty_master'), OBJECT_ID('dbo.faculty_master'))
+        AND (c.name LIKE 'unique_code_sem%' OR c.name LIKE 'exam_seat_code_year%')
+    `)
+    recordset = r.recordset || []
+  } catch (e) {
+    console.warn('[faculty-master] schema discovery query failed:', e.message)
   }
+
+  const all   = recordset.map(x => x.COLUMN_NAME)
+  const byNum = (a, b) => parseInt(a.match(/\d+$/)[0], 10) - parseInt(b.match(/\d+$/)[0], 10)
+  const sems  = all.filter(n => /^unique_code_sem\d+$/i.test(n)).sort(byNum)
+  const years = all.filter(n => /^exam_seat_code_year\d+$/i.test(n)).sort(byNum)
+
+  if (sems.length === 0 || years.length === 0) {
+    console.warn(
+      `[faculty-master] schema discovery found ${sems.length} sem cols / ${years.length} year cols. ` +
+      `Falling back to the legacy 6-sem / 3-year layout. ` +
+      `If the migration HAS been run, verify the DB connection's current database contains faculty_master ` +
+      `and the user can read sys.columns for it.`
+    )
+    return LEGACY_FACULTY_COLS
+  }
+  return { sems, years, source: 'discovered' }
 }
 
 // Centralized SQL → HTTP error translator for faculty_master saves. Logs

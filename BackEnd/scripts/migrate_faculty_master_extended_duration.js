@@ -34,25 +34,50 @@ const NEW_COLS = [
 async function run() {
   const pool = await sql.connect(config);
 
+  // Print connection context so the operator can confirm we're on the
+  // intended server/database. If the runtime app points at a different
+  // DB (different env vars), running this migration here won't help there.
+  const ctx = await pool.request().query(`
+    SELECT @@SERVERNAME AS server_name, DB_NAME() AS db_name, SUSER_SNAME() AS user_name
+  `);
+  const c = ctx.recordset[0];
+  console.log(`Connected to ${c.server_name} / database "${c.db_name}" as user "${c.user_name}"`);
+
+  // Resolve the table once, accepting either the user's default schema or
+  // explicit dbo. Bail clearly if the table isn't visible from this user.
+  const oidRes = await pool.request().query(`
+    SELECT COALESCE(OBJECT_ID('faculty_master'), OBJECT_ID('dbo.faculty_master')) AS oid
+  `);
+  const tableOid = oidRes.recordset[0].oid;
+  if (!tableOid) {
+    console.error(
+      `faculty_master not found in database "${c.db_name}". ` +
+      `Either the table doesn't exist here or this user can't see it. ` +
+      `Verify .env (DB_SERVER / DB_NAME / DB_USER) points at the same database the application uses.`
+    );
+    await pool.close();
+    process.exit(2);
+  }
+
+  let added = 0, skipped = 0;
   for (const col of NEW_COLS) {
-    const check = await pool.request().query(`
-      SELECT COUNT(*) AS cnt
-      FROM sys.columns
-      WHERE object_id = OBJECT_ID('faculty_master') AND name = '${col}'
-    `);
+    const check = await pool.request()
+      .input('oid',  sql.Int,      tableOid)
+      .input('name', sql.NVarChar, col)
+      .query(`SELECT COUNT(*) AS cnt FROM sys.columns WHERE object_id = @oid AND name = @name`);
     if (check.recordset[0].cnt > 0) {
-      console.log(`Column ${col} already exists — skipping.`);
+      console.log(`  ${col}: already exists — skipping.`);
+      skipped++;
     } else {
-      console.log(`Adding ${col}...`);
-      await pool.request().query(`
-        ALTER TABLE faculty_master ADD ${col} NVARCHAR(20) NULL
-      `);
-      console.log(`  added.`);
+      console.log(`  ${col}: adding...`);
+      await pool.request().query(`ALTER TABLE faculty_master ADD ${col} NVARCHAR(20) NULL`);
+      console.log(`  ${col}: added.`);
+      added++;
     }
   }
 
   await pool.close();
-  console.log('Migration complete.');
+  console.log(`Migration complete: ${added} column(s) added, ${skipped} already present.`);
 }
 
 run().catch(err => {
