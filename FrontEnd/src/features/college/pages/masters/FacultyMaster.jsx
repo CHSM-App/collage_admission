@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from '../../../../services/api.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
+import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 
 // Duration-driven slot count: sem codes = duration*2, year codes = duration.
 // Matrix: 2yr→4/2, 3yr→6/3, 4yr→8/4, 5yr→10/5.
@@ -31,6 +32,8 @@ export default function FacultyMaster({ collegeId }) {
   const [form, setForm]       = useState(EMPTY)
   const [saving, setSaving]   = useState(false)
   const [error, setError]     = useState('')
+  const [sortCol, setSortCol] = useState('degree_course_code')
+  const [sortDir, setSortDir] = useState('asc')
 
   function load() {
     setLoading(true)
@@ -108,10 +111,24 @@ export default function FacultyMaster({ collegeId }) {
     } catch { alert('Delete failed.') }
   }
 
-  const filtered = rows.filter(r =>
-    r.degree_course_code.toLowerCase().includes(search.toLowerCase()) ||
-    r.degree_course_name.toLowerCase().includes(search.toLowerCase())
-  )
+  function toggleSort(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('asc') }
+  }
+
+  const filtered = rows
+    .filter(r =>
+      r.degree_course_code.toLowerCase().includes(search.toLowerCase()) ||
+      r.degree_course_name.toLowerCase().includes(search.toLowerCase())
+    )
+    .sort((a, b) => {
+      let av = a[sortCol], bv = b[sortCol]
+      if (sortCol === 'is_active') { av = av ? 1 : 0; bv = bv ? 1 : 0 }
+      if (typeof av === 'number') return sortDir === 'asc' ? av - bv : bv - av
+      return sortDir === 'asc'
+        ? String(av ?? '').localeCompare(String(bv ?? ''))
+        : String(bv ?? '').localeCompare(String(av ?? ''))
+    })
 
   return (
     <div>
@@ -124,18 +141,18 @@ export default function FacultyMaster({ collegeId }) {
         placeholder="Search by code or name…"
         className="mb-3 w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300" />
 
-      {loading ? <p className="text-sm text-slate-400">Loading…</p> : (
+      {loading ? <SkeletonTable rows={5} cols={4} /> : (
         <>
           {/* Desktop table */}
           <div className="hidden sm:block overflow-x-auto rounded-xl border border-slate-100">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                 <tr>
-                  <th className="px-4 py-3 text-left">Code</th>
-                  <th className="px-4 py-3 text-left">Name</th>
-                  <th className="px-4 py-3 text-center">Years</th>
+                  <Th col="degree_course_code" label="Code"      align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <Th col="degree_course_name" label="Name"      align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <Th col="duration_years"     label="Years"     align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <th className="px-4 py-3 text-left">Exam Seat Codes</th>
-                  <th className="px-4 py-3 text-center">Status</th>
+                  <Th col="is_active"          label="Status"    align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
@@ -265,6 +282,23 @@ export default function FacultyMaster({ collegeId }) {
         </div>
       )}
     </div>
+  )
+}
+
+function Th({ col, label, align, sortCol, sortDir, onSort }) {
+  const active = sortCol === col
+  return (
+    <th
+      className={`px-4 py-3 text-${align} cursor-pointer select-none hover:text-slate-800 transition`}
+      onClick={() => onSort(col)}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        <span className="text-slate-300">
+          {active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}
+        </span>
+      </span>
+    </th>
   )
 }
 

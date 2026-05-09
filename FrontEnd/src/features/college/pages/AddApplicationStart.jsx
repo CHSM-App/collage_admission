@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 import api from '../../../services/api.js'
 import Button from '../../../shared/components/Button.jsx'
+import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
 
@@ -285,7 +286,7 @@ export default function AddApplicationStart() {
           Admission Course <span className="text-red-500">*</span>
         </label>
         {periodsLoading ? (
-          <p className="text-sm text-slate-400">Loading periods…</p>
+          <SkeletonLines rows={2} />
         ) : periods.length === 0 ? (
           <p className="text-sm text-slate-500">No admission periods found. Create one first.</p>
         ) : (

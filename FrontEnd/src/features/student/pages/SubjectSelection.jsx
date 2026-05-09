@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from '../../../services/api.js'
 import Button from '../../../shared/components/Button.jsx'
+import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 
 const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year' }
 
@@ -77,7 +78,7 @@ export default function SubjectSelection({ application, onDone, onCancel }) {
     }
   }
 
-  if (loading) return <p className="text-slate-500 p-6 text-sm">Loading subjects…</p>
+  if (loading) return <div className="p-6"><SkeletonLines rows={6} /></div>
   if (!info)   return <p className="text-red-500 p-6 text-sm">{error || 'Could not load subject data.'}</p>
 
   const readOnly = !info.can_select

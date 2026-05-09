@@ -6,6 +6,7 @@ import SubjectSelection from './SubjectSelection.jsx'
 import CollegeFeePayment from './CollegeFeePayment.jsx'
 import PaymentReceipts from './PaymentReceipts.jsx'
 import ApplicationPrintView from './ApplicationPrintView.jsx'
+import { SkeletonCards } from '../../../shared/components/Skeleton.jsx'
 
 const YEAR_LABEL  = { 1: 'FY', 2: 'SY', 3: 'TY' }
 const STATUS_META = {
@@ -134,7 +135,7 @@ export default function MyApplications() {
         </div>
       )}
 
-      {loading && <p className="text-slate-500">Loading…</p>}
+      {loading && <SkeletonCards count={3} />}
 
       {!loading && apps.length === 0 && (
         <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center">

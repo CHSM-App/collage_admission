@@ -1,16 +1,27 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import api from '../../../../services/api.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
+import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 
-const YEAR_OPTIONS = [
-  { value: 1, label: 'FY — First Year' },
-  { value: 2, label: 'SY — Second Year' },
-  { value: 3, label: 'TY — Third Year' },
+const YEAR_LABELS = [
+  { value: 1, short: 'FY', label: 'FY — First Year'   },
+  { value: 2, short: 'SY', label: 'SY — Second Year'  },
+  { value: 3, short: 'TY', label: 'TY — Third Year'   },
+  { value: 4, short: '4Y', label: '4Y — Fourth Year'  },
+  { value: 5, short: '5Y', label: '5Y — Fifth Year'   },
 ]
 
-const YEAR_SHORT = { 1: 'FY', 2: 'SY', 3: 'TY' }
+function yearShort(y) { return YEAR_LABELS.find(l => l.value === y)?.short || `Y${y}` }
+function yearOptions(durationYears) {
+  const n = parseInt(durationYears) || 3
+  return YEAR_LABELS.slice(0, Math.min(n, 5))
+}
 
 const EMPTY_FORM = { faculty_master_id: '', year_of_study: 1, label: '', is_active: true }
+
+function durationFor(programs, facultyId) {
+  return programs.find(p => String(p.code_no) === String(facultyId))?.duration_years || 3
+}
 
 export default function ClassMaster({ collegeId }) {
   const { canWrite } = usePermissions()
@@ -32,6 +43,41 @@ export default function ClassMaster({ collegeId }) {
   const [editLabel, setEditLabel] = useState('')
   const [editActive, setEditActive] = useState(true)
   const [editSaving, setEditSaving] = useState(false)
+
+  const [sortCol, setSortCol] = useState('degree_course_code')
+  const [sortDir, setSortDir] = useState('asc')
+  function toggleSortCM(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('asc') }
+  }
+
+  const [search, setSearch]           = useState('')
+  const [filterProgram, setFilterProgram] = useState('')
+  const [filterYear, setFilterYear]   = useState('')
+
+  const sorted = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return [...rows]
+      .filter(r => {
+        if (filterProgram && String(r.faculty_master_id) !== String(filterProgram)) return false
+        if (filterYear   && String(r.year_of_study)     !== String(filterYear))     return false
+        if (q) {
+          const hay = [r.degree_course_code, r.degree_course_name, r.label, yearShort(r.year_of_study)]
+            .join(' ').toLowerCase()
+          if (!hay.includes(q)) return false
+        }
+        return true
+      })
+      .sort((a, b) => {
+        let av = a[sortCol], bv = b[sortCol]
+        if (sortCol === 'year_of_study') { av = Number(av); bv = Number(bv) }
+        if (av == null) av = ''; if (bv == null) bv = ''
+        const cmp = typeof av === 'number' && typeof bv === 'number' ? av - bv : String(av).localeCompare(String(bv))
+        return sortDir === 'asc' ? cmp : -cmp
+      })
+  }, [rows, search, filterProgram, filterYear, sortCol, sortDir])
+
+  const hasFilters = search || filterProgram || filterYear
 
   useEffect(() => {
     api.get(`masters/${collegeId}/faculty`)
@@ -97,7 +143,7 @@ export default function ClassMaster({ collegeId }) {
   }
 
   async function handleDelete(row) {
-    if (!confirm(`Delete class "${row.degree_course_code} — ${YEAR_SHORT[row.year_of_study]}"? This cannot be undone.`)) return
+    if (!confirm(`Delete class "${row.degree_course_code} — ${yearShort(row.year_of_study)}"? This cannot be undone.`)) return
     try {
       await api.delete(`masters/${collegeId}/class/${row.id}`)
       load()
@@ -123,6 +169,60 @@ export default function ClassMaster({ collegeId }) {
       </div>
 
       {error && <p className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
+
+      {/* Filters */}
+      <div className="flex flex-col sm:flex-row gap-2 flex-wrap mb-4">
+        <div className="relative flex-1 min-w-40">
+          <svg className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M17 11A6 6 0 115 11a6 6 0 0112 0z"/>
+          </svg>
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search program, year, label…"
+            className="w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          {search && (
+            <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs">✕</button>
+          )}
+        </div>
+        <select
+          value={filterProgram}
+          onChange={e => setFilterProgram(e.target.value)}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-56"
+        >
+          <option value="">All Programs</option>
+          {programs.map(p => (
+            <option key={p.code_no} value={p.code_no}>{p.degree_course_code} — {p.degree_course_name}</option>
+          ))}
+        </select>
+        <select
+          value={filterYear}
+          onChange={e => setFilterYear(e.target.value)}
+          className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-36"
+        >
+          <option value="">All Years</option>
+          {YEAR_LABELS.map(y => (
+            <option key={y.value} value={y.value}>{y.short}</option>
+          ))}
+        </select>
+        {hasFilters && (
+          <button
+            onClick={() => { setSearch(''); setFilterProgram(''); setFilterYear('') }}
+            className="text-sm text-slate-400 hover:text-slate-700 font-medium whitespace-nowrap self-center"
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+      {!loading && (
+        <p className="text-xs text-slate-400 mb-3">
+          {hasFilters
+            ? `${sorted.length} result${sorted.length !== 1 ? 's' : ''}`
+            : `${rows.length} class${rows.length !== 1 ? 'es' : ''} total`}
+        </p>
+      )}
 
       {/* Inline create form */}
       {showForm && rw && (
@@ -157,7 +257,7 @@ export default function ClassMaster({ collegeId }) {
                 onChange={e => set('year_of_study', parseInt(e.target.value))}
                 className={inp}
               >
-                {YEAR_OPTIONS.map(y => (
+                {yearOptions(durationFor(programs, form.faculty_master_id)).map(y => (
                   <option key={y.value} value={y.value}>{y.label}</option>
                 ))}
               </select>
@@ -206,7 +306,7 @@ export default function ClassMaster({ collegeId }) {
       )}
 
       {loading ? (
-        <p className="text-sm text-slate-400">Loading…</p>
+        <SkeletonTable rows={4} cols={4} />
       ) : (
         <>
           {/* Desktop table */}
@@ -214,29 +314,29 @@ export default function ClassMaster({ collegeId }) {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                 <tr>
-                  <th className="px-4 py-3 text-left">Program</th>
-                  <th className="px-4 py-3 text-center">Year</th>
-                  <th className="px-4 py-3 text-left">Label</th>
-                  <th className="px-4 py-3 text-center">Status</th>
+                  <MSTh col="degree_course_code" label="Program" align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortCM} />
+                  <MSTh col="year_of_study"      label="Year"    align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortCM} />
+                  <MSTh col="label"              label="Label"   align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortCM} />
+                  <MSTh col="is_active"          label="Status"  align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortCM} />
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {rows.length === 0 && (
+                {sorted.length === 0 && (
                   <tr>
                     <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
-                      No classes configured yet.
+                      {hasFilters ? 'No classes match your filters.' : 'No classes configured yet.'}
                     </td>
                   </tr>
                 )}
-                {rows.map(row => (
+                {sorted.map(row => (
                   <tr key={row.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 text-slate-800">
                       <span className="font-mono font-semibold text-slate-700">{row.degree_course_code}</span>
                       <span className="text-slate-400 ml-1 text-xs">— {row.degree_course_name}</span>
                     </td>
                     <td className="px-4 py-3 text-center font-semibold text-slate-700">
-                      {YEAR_SHORT[row.year_of_study]}
+                      {yearShort(row.year_of_study)}
                     </td>
                     <td className="px-4 py-3 text-slate-500">
                       {editId === row.id ? (
@@ -297,13 +397,13 @@ export default function ClassMaster({ collegeId }) {
           {/* Mobile card list */}
           <div className="sm:hidden space-y-2">
             {rows.length === 0 && (
-              <p className="text-center text-slate-400 py-8 text-sm">No classes configured yet.</p>
+              <p className="text-center text-slate-400 py-8 text-sm">{hasFilters ? 'No classes match your filters.' : 'No classes configured yet.'}</p>
             )}
             {rows.map(row => (
               <div key={row.id} className="border border-slate-100 rounded-xl p-4 bg-white">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <p className="font-mono font-semibold text-slate-700">{row.degree_course_code} — {YEAR_SHORT[row.year_of_study]}</p>
+                    <p className="font-mono font-semibold text-slate-700">{row.degree_course_code} — {yearShort(row.year_of_study)}</p>
                     <p className="text-sm text-slate-500 mt-0.5">{row.degree_course_name}</p>
                     {row.label && <p className="text-xs text-slate-400 mt-1">{row.label}</p>}
                   </div>
@@ -327,3 +427,15 @@ export default function ClassMaster({ collegeId }) {
 }
 
 const inp = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300 bg-white'
+
+function MSTh({ col, label, align = 'left', sortCol, sortDir, onSort }) {
+  const active = sortCol === col
+  return (
+    <th className={`px-4 py-3 text-${align} cursor-pointer select-none hover:text-slate-800 transition`} onClick={() => onSort(col)}>
+      <span className="inline-flex items-center gap-1">
+        {label}
+        <span className="text-slate-300">{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+      </span>
+    </th>
+  )
+}

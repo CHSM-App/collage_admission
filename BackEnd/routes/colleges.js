@@ -115,6 +115,26 @@ router.get('/', async (req, res) => {
   }
 });
 
+// Search colleges by code OR name (student find-college page)
+router.get('/search', async (req, res) => {
+  const q = (req.query.q || '').trim()
+  if (!q) return res.json({ success: true, data: [] })
+  try {
+    const result = await db.request()
+      .input('q', `%${q}%`)
+      .query(`
+        SELECT TOP 10 id, name, city, phone, college_code
+        FROM colleges
+        WHERE UPPER(college_code) LIKE UPPER(@q) OR name LIKE @q
+        ORDER BY name
+      `)
+    return res.json({ success: true, data: result.recordset })
+  } catch (err) {
+    console.error(err)
+    return res.status(500).json({ success: false, message: 'Server error.' })
+  }
+})
+
 // Lookup college by code + return its open admission periods (student entry point)
 router.get('/by-code/:code', async (req, res) => {
   const code = req.params.code.trim().toUpperCase();

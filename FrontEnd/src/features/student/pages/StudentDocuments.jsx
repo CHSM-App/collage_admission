@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import api from '../../../services/api.js'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
+import { SkeletonCards } from '../../../shared/components/Skeleton.jsx'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000/').replace(/\/$/, '')
 
@@ -156,7 +157,7 @@ export default function StudentDocuments() {
         </p>
       </div>
 
-      {loading && <p className="text-slate-500">Loading…</p>}
+      {loading && <SkeletonCards count={4} />}
 
       {previewDoc && (
         <DocPreviewModal doc={previewDoc} onClose={() => setPreviewDoc(null)} />

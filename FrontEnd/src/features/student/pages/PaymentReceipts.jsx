@@ -1,9 +1,10 @@
 /**
  * PaymentReceipts — shows all payment receipts for an application.
- * Each receipt is printable / downloadable as PDF and shareable via Web Share API.
+ * Each receipt is printable / downloadable as PDF.
  */
 import { useEffect, useRef, useState } from 'react'
 import api from '../../../services/api.js'
+import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 
 const YEAR_LABEL = { 1: 'First Year (FY)', 2: 'Second Year (SY)', 3: 'Third Year (TY)' }
 const TYPE_LABEL = {
@@ -50,7 +51,7 @@ export default function PaymentReceipts({ applicationId, onClose }) {
       .finally(() => setLoading(false))
   }, [applicationId])
 
-  if (loading) return <div className="py-6 text-center text-slate-400 text-sm">Loading receipts…</div>
+  if (loading) return <div className="py-4 px-2"><SkeletonLines rows={4} /></div>
   if (error)   return <div className="py-6 text-center text-red-500 text-sm">{error}</div>
   if (!data?.payments?.length) return <div className="py-6 text-center text-slate-400 text-sm">No payment receipts found.</div>
 
@@ -203,7 +204,6 @@ function ReceiptSheet({ app, pmt }) {
           ${trow('Payment Status',  'Paid')}
           ${trow('Payment Date',    fmtDate(pmt.completed_at) + '  ' + fmtTime(pmt.completed_at))}
           ${pmt.razorpay_payment_id ? trow('Transaction ID',  pmt.razorpay_payment_id, true) : ''}
-          ${pmt.razorpay_order_id   ? trow('Order ID',        pmt.razorpay_order_id,   true) : ''}
         </tbody>
       </table>
     </div>
@@ -247,62 +247,6 @@ function ReceiptSheet({ app, pmt }) {
     setTimeout(() => { win.print(); win.close() }, 600)
   }
 
-  async function handleShare() {
-    const filename = `${receiptNo}.pdf`
-
-    // Rasterize the on-screen receipt DOM so the PDF matches exactly
-    // what the user sees — no separately-maintained HTML template.
-    async function buildPdfBlob() {
-      const { default: jsPDF } = await import('jspdf')
-      const { default: html2canvas } = await import('html2canvas')
-
-      const node = sheetRef.current
-      if (!node) throw new Error('Receipt not rendered')
-
-      const canvas = await html2canvas(node, {
-        scale: 2,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        windowWidth: node.scrollWidth,
-      })
-
-      const imgData = canvas.toDataURL('image/jpeg', 0.95)
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
-      const pageW = pdf.internal.pageSize.getWidth()
-      const pageH = pdf.internal.pageSize.getHeight()
-      const imgH = (canvas.height * pageW) / canvas.width
-      let y = 0
-      while (y < imgH) {
-        if (y > 0) pdf.addPage()
-        pdf.addImage(imgData, 'JPEG', 0, -y, pageW, imgH)
-        y += pageH
-      }
-      return pdf.output('blob')
-    }
-
-    try {
-      const blob = await buildPdfBlob()
-      const file = new File([blob], filename, { type: 'application/pdf' })
-
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ title: `Receipt ${receiptNo}`, files: [file] })
-      } else {
-        // Fallback: trigger download as PDF
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = filename
-        a.click()
-        URL.revokeObjectURL(url)
-      }
-    } catch (err) {
-      if (err.name !== 'AbortError') {
-        console.error('Share failed:', err)
-        alert('Could not share. Use Print / Save PDF instead.')
-      }
-    }
-  }
-
   return (
     <div className="border-t border-slate-100">
       {/* Action buttons */}
@@ -315,15 +259,6 @@ function ReceiptSheet({ app, pmt }) {
             <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
           </svg>
           Print / Save PDF
-        </button>
-        <button
-          onClick={handleShare}
-          className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-white text-slate-700 text-xs font-semibold px-3 py-1.5 hover:bg-slate-50 transition"
-        >
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/>
-          </svg>
-          Share PDF
         </button>
       </div>
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from '../../../services/api.js'
 import Button from '../../../shared/components/Button.jsx'
+import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 
 // ── Permission definitions ────────────────────────────────────
 const ALL_PERMISSIONS = [
@@ -391,7 +392,7 @@ export default function RolesPanel({ college }) {
 
           {/* Roles list */}
           {loading ? (
-            <p className="text-sm text-slate-400">Loading…</p>
+            <SkeletonLines rows={3} />
           ) : roles.length === 0 ? (
             <div className="rounded-xl border border-dashed border-slate-300 px-6 py-10 text-center text-sm text-slate-400">
               No roles yet. Create a role to start adding staff members.

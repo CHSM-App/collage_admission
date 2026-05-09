@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import api from '../../../../services/api.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
+import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 
 const EMPTY = { bank_account_number: '', bank_name: '', branch: '', ifsc_code: '', account_type: 'Savings', is_active: true }
 
@@ -13,6 +14,20 @@ export default function BankMaster({ collegeId }) {
   const [form, setForm]       = useState(EMPTY)
   const [saving, setSaving]   = useState(false)
   const [error, setError]     = useState('')
+  const [sortCol, setSortCol] = useState('bank_name')
+  const [sortDir, setSortDir] = useState('asc')
+  function toggleSortBM(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('asc') }
+  }
+  const sorted = useMemo(() => [...rows].sort((a, b) => {
+    let av = a[sortCol], bv = b[sortCol]
+    if (av == null) av = ''; if (bv == null) bv = ''
+    const cmp = typeof av === 'boolean' || typeof bv === 'boolean'
+      ? (av === bv ? 0 : av ? -1 : 1)
+      : String(av).localeCompare(String(bv))
+    return sortDir === 'asc' ? cmp : -cmp
+  }), [rows, sortCol, sortDir])
 
   function load() {
     setLoading(true)
@@ -54,25 +69,25 @@ export default function BankMaster({ collegeId }) {
         {rw && <button onClick={openNew} className="shrink-0 px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700">+ New</button>}
       </div>
 
-      {loading ? <p className="text-sm text-slate-400">Loading…</p> : (
+      {loading ? <SkeletonTable rows={4} cols={3} /> : (
         <>
           {/* Desktop table */}
           <div className="hidden sm:block overflow-x-auto rounded-xl border border-slate-100">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                 <tr>
-                  <th className="px-4 py-3 text-left">Bank Name</th>
-                  <th className="px-4 py-3 text-left">Account No.</th>
-                  <th className="px-4 py-3 text-left">Branch</th>
-                  <th className="px-4 py-3 text-left">IFSC</th>
-                  <th className="px-4 py-3 text-center">Type</th>
-                  <th className="px-4 py-3 text-center">Status</th>
+                  <MSTh col="bank_name"           label="Bank Name"   align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortBM} />
+                  <MSTh col="bank_account_number" label="Account No." align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortBM} />
+                  <MSTh col="branch"              label="Branch"      align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortBM} />
+                  <MSTh col="ifsc_code"           label="IFSC"        align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortBM} />
+                  <MSTh col="account_type"        label="Type"        align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortBM} />
+                  <MSTh col="is_active"           label="Status"      align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortBM} />
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {rows.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">No bank accounts configured.</td></tr>}
-                {rows.map(r => (
+                {sorted.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">No bank accounts configured.</td></tr>}
+                {sorted.map(r => (
                   <tr key={r.ledger_code} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-medium text-slate-800">{r.bank_name}</td>
                     <td className="px-4 py-3 font-mono text-slate-600">{r.bank_account_number}</td>
@@ -96,8 +111,8 @@ export default function BankMaster({ collegeId }) {
 
           {/* Mobile card list */}
           <div className="sm:hidden space-y-2">
-            {rows.length === 0 && <p className="text-center text-slate-400 py-8 text-sm">No bank accounts configured.</p>}
-            {rows.map(r => (
+            {sorted.length === 0 && <p className="text-center text-slate-400 py-8 text-sm">No bank accounts configured.</p>}
+            {sorted.map(r => (
               <div key={r.ledger_code} className="border border-slate-100 rounded-xl p-4 bg-white">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -164,3 +179,15 @@ function F({ label, children }) {
   return <div className="flex flex-col gap-1"><label className="text-xs font-semibold text-slate-600">{label}</label>{children}</div>
 }
 const inp = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300'
+
+function MSTh({ col, label, align = 'left', sortCol, sortDir, onSort }) {
+  const active = sortCol === col
+  return (
+    <th className={`px-4 py-3 text-${align} cursor-pointer select-none hover:text-slate-800 transition`} onClick={() => onSort(col)}>
+      <span className="inline-flex items-center gap-1">
+        {label}
+        <span className="text-slate-300">{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+      </span>
+    </th>
+  )
+}

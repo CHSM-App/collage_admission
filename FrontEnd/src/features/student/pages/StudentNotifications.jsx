@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 import { useNotifications } from '../hooks/useNotifications.js'
+import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 
 const TYPE_STYLES = {
   info:    'bg-blue-50   border-blue-200   text-blue-800',
@@ -46,7 +47,7 @@ export default function StudentNotifications() {
         )}
       </div>
 
-      {loading && <p className="text-slate-500">Loading…</p>}
+      {loading && <SkeletonLines rows={5} />}
 
       {!loading && notifications.length === 0 && (
         <div className="rounded-lg border border-slate-200 bg-white px-6 py-10 text-center">

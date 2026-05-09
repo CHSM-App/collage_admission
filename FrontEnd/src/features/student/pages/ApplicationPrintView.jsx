@@ -5,6 +5,7 @@
  */
 import { useEffect, useState } from 'react'
 import api from '../../../services/api.js'
+import { SkeletonDetail } from '../../../shared/components/Skeleton.jsx'
 
 const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year' }
 
@@ -30,8 +31,8 @@ export default function ApplicationPrintView({ appId, regNumber, onClose }) {
   }
 
   if (loading) return (
-    <div className="mt-3 rounded-xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-400">
-      Loading application…
+    <div className="mt-3 rounded-xl border border-slate-200 bg-white p-6">
+      <SkeletonDetail />
     </div>
   )
   if (error) return (

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import api from '../../../services/api.js'
 import Pagination from '../../../shared/components/Pagination.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import RolesPanel      from './RolesPanel.jsx'
+import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
 import FacultyMaster   from '../../college/pages/masters/FacultyMaster.jsx'
 import CourseMaster    from '../../college/pages/masters/CourseMaster.jsx'
 import GroupMaster     from '../../college/pages/masters/GroupMaster.jsx'
@@ -57,21 +58,32 @@ export default function CollegeList() {
   function selectCollege(c) { setSelected(c); setTab('roles'); setFeeEdit(false); setFeeMsg('') }
   function goBack()          { setSelected(null) }
 
+  const feeMsgTimer = useRef(null)
+
+  function showFeeMsg(msg) {
+    setFeeMsg(msg)
+    clearTimeout(feeMsgTimer.current)
+    // Auto-clear success message after 3 seconds
+    if (msg === 'Fee updated.') {
+      feeMsgTimer.current = setTimeout(() => setFeeMsg(''), 3000)
+    }
+  }
+
   async function saveFee() {
     const fee = parseFloat(feeVal)
-    if (isNaN(fee) || fee < 0) { setFeeMsg('Enter a valid amount.'); return }
+    if (isNaN(fee) || fee < 0) { showFeeMsg('Enter a valid amount.'); return }
     setFeeSaving(true); setFeeMsg('')
     try {
       await api.put(`admin/colleges/${selected.id}`, { application_fee: fee })
-      setFeeMsg('Fee updated.')
+      showFeeMsg('Fee updated.')
       setFeeEdit(false)
       fetchColleges()
     } catch (err) {
-      setFeeMsg(err?.response?.data?.message || 'Failed to update.')
+      showFeeMsg(err?.response?.data?.message || 'Failed to update.')
     } finally { setFeeSaving(false) }
   }
 
-  if (loading) return <div className="text-sm text-slate-400">Loading colleges…</div>
+  if (loading) return <SkeletonTable rows={5} cols={4} />
 
   if (selected) {
     return (
