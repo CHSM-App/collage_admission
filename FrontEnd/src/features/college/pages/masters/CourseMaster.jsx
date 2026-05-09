@@ -181,7 +181,9 @@ export default function CourseMaster({ collegeId }) {
       </div>
 
       {selFacultyName && (
-        <p className="text-xs text-slate-400 mb-3">{selFacultyName} — Semester {selSem}</p>
+        <p className="text-xs text-slate-400 mb-3">
+          {selFacultyName} — {selFacultyRow?.duration_years || '?'} years ({semCount} semesters) — Semester {selSem}
+        </p>
       )}
 
       {error   && <p className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
