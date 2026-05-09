@@ -3,7 +3,9 @@ import api from '../../../../services/api.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 
 const SUBJECT_TYPES = ['Core','Elective','Practical','Project','Foundation','AbilityEnhancement']
-const SEMESTERS     = [1,2,3,4,5,6]
+// Semester tabs are derived from the selected program's duration: tabs = years * 2
+// (matches FacultyMaster's semSlotsFor). Clamp to [1, 10] to mirror schema limits.
+const semCountFor = (yrs) => Math.max(1, Math.min(10, (parseInt(yrs) || 0) * 2))
 
 const EMPTY_ROW = () => ({
   _key: Math.random(),
@@ -133,7 +135,16 @@ export default function CourseMaster({ collegeId }) {
     } catch { alert('Delete failed.') }
   }
 
-  const selFacultyName = faculty.find(f => f.code_no == selFaculty)?.degree_course_name || ''
+  const selFacultyRow  = faculty.find(f => f.code_no == selFaculty)
+  const selFacultyName = selFacultyRow?.degree_course_name || ''
+  const semCount       = semCountFor(selFacultyRow?.duration_years)
+  const semesters      = Array.from({ length: semCount }, (_, i) => i + 1)
+
+  // Selected semester can fall outside the new program's range when the user
+  // switches from a longer to a shorter course — snap back to Sem 1 silently.
+  useEffect(() => {
+    if (selFacultyRow && selSem > semCount) setSelSem(1)
+  }, [selFacultyRow, semCount, selSem])
 
   return (
     <div>
@@ -159,7 +170,7 @@ export default function CourseMaster({ collegeId }) {
         <div className="flex flex-col gap-1">
           <label className="text-xs font-semibold text-slate-500">Semester</label>
           <div className="flex gap-1 flex-wrap">
-            {SEMESTERS.map(s => (
+            {semesters.map(s => (
               <button key={s} onClick={() => switchSem(s)}
                 className={`w-9 h-9 rounded-lg text-sm font-medium border transition ${selSem === s ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
                 {s}
