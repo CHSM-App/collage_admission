@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { StepHeader, StepFooter } from './Step1Context.jsx'
 
 // Exam rows shown per year of study
@@ -40,6 +40,18 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
   const [localError, setLocalError] = useState('')
 
   const exams = data.exams || {}
+
+  // Compute which SSC/HSC rows were prefilled from DB at mount time only.
+  // Using empty deps so this never re-evaluates from live form state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const prefilledTypes = useMemo(() => {
+    const initial = data.exams || {}
+    return new Set(
+      Object.entries(initial)
+        .filter(([t, row]) => ['SSC', 'HSC'].includes(t) && !!(row.institute && row.marks_obtained && row.marks_max))
+        .map(([t]) => t)
+    )
+  }, []) // intentionally empty — snapshot at mount
 
   function getRow(type) {
     return exams[type] || emptyRow()
@@ -117,9 +129,8 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
               {rows.map(type => {
                 const row = getRow(type)
                 const isMandatory = mandatory.includes(type)
-                // SSC/HSC on SY/TY: lock only when the row has actual prefilled data
-                const hasPrefill = ['SSC', 'HSC'].includes(type) && yearOfStudy > 1
-                  && !!(row.institute && row.marks_obtained && row.marks_max)
+                // SSC/HSC on SY/TY: lock only when the row had DB-prefilled data at mount time
+                const hasPrefill = yearOfStudy > 1 && prefilledTypes.has(type)
                 const isLocked = readOnly || hasPrefill
                 return (
                   <tr key={type} className={isMandatory ? 'bg-white' : 'bg-slate-50/50'}>
