@@ -822,7 +822,7 @@ router.post('/:collegeId/roll-numbers/generate', requirePerm('assign_subjects'),
 });
 
 // ── College Fee Receipts ─────────────────────────────────────
-// GET /:collegeId/fee-receipts?status=paid|pending&course_id=&year_of_study=&q=
+// GET /:collegeId/fee-receipts?status=paid|partial|pending&course_id=&year_of_study=&q=
 router.get('/:collegeId/fee-receipts', requirePerm('collect_fees'), async (req, res) => {
   const { status, course_id, year_of_study, q } = req.query;
   const { page, limit, offset } = parsePage(req.query);
@@ -853,8 +853,10 @@ router.get('/:collegeId/fee-receipts', requirePerm('collect_fees'), async (req, 
 
     if (status === 'paid') {
       where += ' AND a.fee_total_amount > 0 AND ISNULL(psum.total_paid, 0) >= a.fee_total_amount - 0.01';
+    } else if (status === 'partial') {
+      where += ' AND a.fee_total_amount > 0 AND ISNULL(psum.total_paid, 0) > 0 AND ISNULL(psum.total_paid, 0) < a.fee_total_amount - 0.01';
     } else if (status === 'pending') {
-      where += ' AND (a.fee_total_amount IS NULL OR a.fee_total_amount = 0 OR ISNULL(psum.total_paid, 0) < a.fee_total_amount - 0.01)';
+      where += ' AND (a.fee_total_amount IS NULL OR a.fee_total_amount = 0 OR ISNULL(psum.total_paid, 0) = 0)';
     }
     if (course_id) {
       where += ' AND a.course_id = @crs';

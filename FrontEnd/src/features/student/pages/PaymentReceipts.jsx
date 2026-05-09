@@ -2,7 +2,7 @@
  * PaymentReceipts — shows all payment receipts for an application.
  * Each receipt is printable / downloadable as PDF and shareable via Web Share API.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import api from '../../../services/api.js'
 
 const YEAR_LABEL = { 1: 'First Year (FY)', 2: 'Second Year (SY)', 3: 'Third Year (TY)' }
@@ -99,6 +99,7 @@ function ReceiptSheet({ app, pmt }) {
   const typeLabel   = TYPE_LABEL[pmt.payment_type] || pmt.payment_type
   const fullLabel   = typeLabel
   const studentName = (app.app_full_name || app.student_name || '').trim()
+  const sheetRef    = useRef(null)
 
   function buildHTML() {
     const collegeAddr   = [app.college_address, app.college_city].filter(Boolean).join(', ')
@@ -249,30 +250,23 @@ function ReceiptSheet({ app, pmt }) {
   async function handleShare() {
     const filename = `${receiptNo}.pdf`
 
-    // Generate PDF from the receipt HTML
+    // Rasterize the on-screen receipt DOM so the PDF matches exactly
+    // what the user sees — no separately-maintained HTML template.
     async function buildPdfBlob() {
       const { default: jsPDF } = await import('jspdf')
       const { default: html2canvas } = await import('html2canvas')
 
-      // Render HTML into a hidden iframe so styles apply cleanly
-      const iframe = document.createElement('iframe')
-      iframe.style.cssText = 'position:fixed;left:-9999px;top:0;width:860px;height:1200px;border:none;'
-      document.body.appendChild(iframe)
-      iframe.contentDocument.open()
-      iframe.contentDocument.write(buildHTML())
-      iframe.contentDocument.close()
+      const node = sheetRef.current
+      if (!node) throw new Error('Receipt not rendered')
 
-      await new Promise(r => setTimeout(r, 800)) // let fonts/images render
-
-      const canvas = await html2canvas(iframe.contentDocument.body, {
+      const canvas = await html2canvas(node, {
         scale: 2,
         useCORS: true,
         backgroundColor: '#ffffff',
-        windowWidth: 860,
+        windowWidth: node.scrollWidth,
       })
-      document.body.removeChild(iframe)
 
-      const imgData = canvas.toDataURL('image/jpeg', 0.92)
+      const imgData = canvas.toDataURL('image/jpeg', 0.95)
       const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
       const pageW = pdf.internal.pageSize.getWidth()
       const pageH = pdf.internal.pageSize.getHeight()
@@ -293,7 +287,7 @@ function ReceiptSheet({ app, pmt }) {
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ title: `Receipt ${receiptNo}`, files: [file] })
       } else {
-        // Fallback: trigger download
+        // Fallback: trigger download as PDF
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
@@ -333,8 +327,8 @@ function ReceiptSheet({ app, pmt }) {
         </button>
       </div>
 
-      {/* Receipt preview card */}
-      <div className="bg-white overflow-hidden">
+      {/* Receipt preview card — also the source of the shared PDF */}
+      <div ref={sheetRef} className="bg-white overflow-hidden">
 
         {/* Top accent */}
         <div className="h-1" style={{ background: 'linear-gradient(90deg,#0f172a 0%,#1d4ed8 50%,#0ea5e9 100%)' }} />

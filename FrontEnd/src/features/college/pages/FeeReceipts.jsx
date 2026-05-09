@@ -111,6 +111,7 @@ export default function FeeReceipts({ collegeId }) {
           className="rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300">
           <option value="">All Statuses</option>
           <option value="paid">Paid</option>
+          <option value="partial">Partially</option>
           <option value="pending">Pending</option>
         </select>
         <select value={courseId} onChange={e => setCourseId(e.target.value)}

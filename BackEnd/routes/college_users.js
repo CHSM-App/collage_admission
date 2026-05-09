@@ -35,6 +35,7 @@ const ALL_PERMISSIONS = [
   'assign_subjects',
   'collect_fees',
   'masters',
+  'certificates',
 ];
 
 const NAV_ITEMS = [
@@ -52,6 +53,9 @@ const NAV_ITEMS = [
   'master-division',
   'master-fees',
   'master-documents',
+  'cert-bonafide',
+  'cert-character',
+  'cert-noc',
 ];
 
 // ── PUT /admin/colleges/:id ──────────────────────────────────

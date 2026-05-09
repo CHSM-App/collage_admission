@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getDashboardPath, getLoginPath } from '../../../app/routePaths.js'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
@@ -50,12 +50,14 @@ export function useAuth() {
     navigate(loginPath, { replace: true })
   }
 
+  const clearError = useCallback(() => setError(''), [])
+
   return {
     ...authContext,
     loading,
     error,
     login,
     logout,
-    clearError: () => setError(''),
+    clearError,
   }
 }
