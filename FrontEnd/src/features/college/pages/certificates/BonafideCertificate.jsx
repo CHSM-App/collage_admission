@@ -102,7 +102,25 @@ export default function BonafideCertificate({ collegeId, readOnly }) {
         caste:         d.caste         || f.caste,
       }))
     } catch (err) {
-      setGlobalError(err?.response?.data?.message || 'Lookup failed.')
+      // Prefer the server's user-friendly message; fall back to status-aware
+      // text rather than a bare "Lookup failed." so the user knows what went wrong.
+      const serverMsg = err?.response?.data?.message
+      const status    = err?.response?.status
+      let msg
+      if (serverMsg) {
+        msg = serverMsg
+      } else if (err?.code === 'ERR_NETWORK' || err?.message === 'Network Error') {
+        msg = 'Could not reach the server. Check your connection and try again.'
+      } else if (status === 404) {
+        msg = `No student found for registration number "${reg}". Please verify the number and try again.`
+      } else if (status === 400) {
+        msg = 'Please enter a valid registration number.'
+      } else if (status >= 500) {
+        msg = 'The server could not look up the student right now. Please try again, or contact your administrator if the problem persists.'
+      } else {
+        msg = 'Could not look up the student. Please try again.'
+      }
+      setGlobalError(msg)
     } finally {
       setLookingUp(false)
     }

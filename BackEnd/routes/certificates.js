@@ -71,6 +71,10 @@ router.get('/:collegeId/student-lookup', requirePerm('certificates'), async (req
   if (!reg) return res.status(400).json({ success: false, message: 'reg_no is required.' })
 
   try {
+    // Column map (per current schema):
+    //   applications: app_surname / app_first_name / app_middle_name (no app_full_name),
+    //                 app_category (no app_caste), no sex/birth_date/prn columns.
+    //   students:     full_name, gender, dob, category (no sex / birth_date / caste / prn).
     const r = await db.request()
       .input('cid', mssql.Int, cid(req))
       .input('reg', mssql.NVarChar, reg)
@@ -80,16 +84,14 @@ router.get('/:collegeId/student-lookup', requirePerm('certificates'), async (req
           a.year_of_study,
           a.academic_year,
           a.roll_number,
-          a.app_full_name,
-          a.app_sex,
-          a.app_birth_date,
-          a.app_caste,
-          a.app_prn,
+          a.app_surname,
+          a.app_first_name,
+          a.app_middle_name,
+          a.app_category,
           s.full_name  AS student_full_name,
-          s.sex        AS student_sex,
-          s.birth_date AS student_birth_date,
-          s.caste      AS student_caste,
-          s.prn        AS student_prn,
+          s.gender     AS student_gender,
+          s.dob        AS student_dob,
+          s.category   AS student_category,
           fm.degree_course_code,
           fm.degree_course_name
         FROM applications a
@@ -107,23 +109,27 @@ router.get('/:collegeId/student-lookup', requirePerm('certificates'), async (req
     const a   = r.recordset[0]
     const yr  = YEAR_LABEL[a.year_of_study] || `Year ${a.year_of_study || ''}`
     const cls = a.degree_course_code ? `${yr} ${a.degree_course_code}` : yr
+    const appName = [a.app_surname, a.app_first_name, a.app_middle_name].filter(Boolean).join(' ').trim()
     return res.json({
       success: true,
       data: {
         registration_number: a.registration_number,
-        student_name:        a.app_full_name  || a.student_full_name || '',
-        gender:              a.app_sex        || a.student_sex       || '',
-        birth_date:          a.app_birth_date || a.student_birth_date,
-        caste:               a.app_caste      || a.student_caste     || '',
-        roll_no:             a.roll_number || '',
-        academic_year:       a.academic_year || '',
+        student_name:        appName || a.student_full_name || '',
+        gender:              a.student_gender   || '',
+        birth_date:          a.student_dob,
+        caste:               a.app_category     || a.student_category || '',
+        roll_no:             a.roll_number      || '',
+        academic_year:       a.academic_year    || '',
         class_name:          cls.trim(),
-        prn_no:              a.app_prn        || a.student_prn       || '',
+        prn_no:              '',
       },
     })
   } catch (e) {
-    console.error(e)
-    return res.status(500).json({ success: false, message: 'Server error.' })
+    console.error('[student-lookup] query failed:', { reg, message: e.message, code: e.code })
+    return res.status(500).json({
+      success: false,
+      message: 'Could not look up the student. The student database returned an error — please try again, or contact your administrator if the problem persists.',
+    })
   }
 })
 
