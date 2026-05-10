@@ -4,7 +4,13 @@ import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 
 const FEES_TYPES = ['Student','Misc','ExamFees']
-const YEAR_LEVELS = ['FY','SY','TY']
+const ALL_YEAR_LEVELS = ['FY','SY','TY','4Y','5Y']
+// Year tabs are derived from the selected program's duration (matches
+// DivisionMaster.yearLevelsFor and FacultyMaster's exam_seat_code_year* layout).
+function yearLevelsFor(durationYears) {
+  const n = Math.max(1, Math.min(5, parseInt(durationYears) || 3))
+  return ALL_YEAR_LEVELS.slice(0, n)
+}
 
 const EMPTY_FEE = {
   fees_type: 'Student', is_other_misc: false,
@@ -94,6 +100,15 @@ export default function FeesMaster({ collegeId }) {
     setCwFaculty(active)
     if (active.length) { setCwSelFac(active[0].code_no) }
   }
+
+  const cwSelFacRow = cwFaculty.find(f => f.code_no == cwSelFac)
+  const cwYearLevels = yearLevelsFor(cwSelFacRow?.duration_years)
+
+  // If the user switches to a shorter program, the currently selected year
+  // (e.g. 4Y) may no longer be valid — snap back to FY silently.
+  useEffect(() => {
+    if (cwSelFacRow && !cwYearLevels.includes(cwSelYear)) setCwSelYear('FY')
+  }, [cwSelFacRow, cwYearLevels, cwSelYear])
 
   useEffect(() => {
     if (!cwModal || !cwSelFac) return
@@ -363,7 +378,7 @@ export default function FeesMaster({ collegeId }) {
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-slate-500">Year Level</label>
                 <div className="flex gap-1">
-                  {YEAR_LEVELS.map(y => (
+                  {cwYearLevels.map(y => (
                     <button key={y} onClick={() => setCwSelYear(y)}
                       className={`px-4 h-9 rounded-lg text-sm font-medium border transition ${cwSelYear === y ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
                       {y}
