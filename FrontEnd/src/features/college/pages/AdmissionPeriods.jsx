@@ -4,7 +4,11 @@ import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
 
-const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
+const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
+const YEAR_LONG  = {
+  1: 'FY (First Year)', 2: 'SY (Second Year)', 3: 'TY (Third Year)',
+  4: '4Y (Fourth Year)', 5: '5Y (Fifth Year)',
+}
 
 export default function AdmissionPeriods({ collegeId }) {
   const { canWrite } = usePermissions()
@@ -49,6 +53,21 @@ export default function AdmissionPeriods({ collegeId }) {
   }
 
   useEffect(() => { fetchData() }, [collegeId])
+
+  // Year-of-study options come from the selected course's duration_years
+  // (matches FacultyMaster's semSlotsFor / DivisionMaster's yearLevelsFor).
+  // Default to 3 (TY) when no course is picked yet so the dropdown isn't empty.
+  const selectedCourse = courses.find(c => String(c.code_no) === String(form.course_id))
+  const maxYear = Math.max(1, Math.min(5, parseInt(selectedCourse?.duration_years) || 3))
+  const yearOptions = Array.from({ length: maxYear }, (_, i) => i + 1)
+
+  // If the user changes the course to one with a shorter duration, the
+  // currently selected year_of_study may be out of range — snap to FY.
+  useEffect(() => {
+    if (selectedCourse && parseInt(form.year_of_study) > maxYear) {
+      setForm(f => ({ ...f, year_of_study: '1' }))
+    }
+  }, [selectedCourse, maxYear, form.year_of_study])
 
   // Active open periods first, then closed (but reopenable), then disabled at bottom
   const sortedPeriods = [
@@ -207,9 +226,9 @@ export default function AdmissionPeriods({ collegeId }) {
               <label className="block text-xs font-semibold text-slate-600 mb-1">Year of Study</label>
               <select value={form.year_of_study} onChange={e => setForm(f => ({ ...f, year_of_study: e.target.value }))}
                 className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
-                <option value="1">FY (First Year)</option>
-                <option value="2">SY (Second Year)</option>
-                <option value="3">TY (Third Year)</option>
+                {yearOptions.map(y => (
+                  <option key={y} value={y}>{YEAR_LONG[y]}</option>
+                ))}
               </select>
             </div>
             <div>
