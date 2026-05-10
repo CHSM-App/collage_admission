@@ -31,7 +31,7 @@ async function run() {
         id                INT IDENTITY(1,1) PRIMARY KEY,
         college_id        INT NOT NULL,
         faculty_master_id INT NOT NULL,
-        year_of_study     TINYINT NOT NULL CHECK (year_of_study IN (1,2,3)),
+        year_of_study     TINYINT NOT NULL CONSTRAINT CK_class_master_year_of_study CHECK (year_of_study BETWEEN 1 AND 5),
         label             NVARCHAR(50) NULL,
         is_active         BIT NOT NULL DEFAULT 1,
         created_at        DATETIME DEFAULT GETDATE(),

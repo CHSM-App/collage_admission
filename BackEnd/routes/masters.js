@@ -1143,13 +1143,30 @@ router.get('/:collegeId/class', async (req, res) => {
 router.post('/:collegeId/class', requirePerm('masters'), async (req, res) => {
   const { faculty_master_id, year_of_study, label, is_active = true } = req.body
   if (!faculty_master_id) return res.status(422).json({ success: false, message: 'faculty_master_id is required.' })
-  if (!year_of_study || ![1, 2, 3].includes(parseInt(year_of_study)))
-    return res.status(422).json({ success: false, message: 'year_of_study must be 1, 2, or 3.' })
+  const yr = parseInt(year_of_study)
+  // Schema supports 1-5 year programs; the per-program ceiling (duration_years)
+  // is enforced below after we look up the selected program.
+  if (!yr || yr < 1 || yr > 5)
+    return res.status(422).json({ success: false, message: 'year_of_study must be between 1 and 5.' })
   try {
+    // Look up the program so we can reject year_of_study that exceeds its duration.
+    const prog = await db.request()
+      .input('cid', mssql.Int, cid(req))
+      .input('fid', mssql.Int, parseInt(faculty_master_id))
+      .query(`SELECT duration_years FROM faculty_master WHERE code_no=@fid AND college_id=@cid`)
+    if (!prog.recordset.length)
+      return res.status(404).json({ success: false, message: 'Program not found for this college.' })
+    const duration = parseInt(prog.recordset[0].duration_years) || 3
+    if (yr > duration)
+      return res.status(422).json({
+        success: false,
+        message: `Year ${yr} is not valid for this program — its duration is ${duration} year${duration === 1 ? '' : 's'}.`,
+      })
+
     const r = await db.request()
       .input('cid', mssql.Int,      cid(req))
       .input('fid', mssql.Int,      parseInt(faculty_master_id))
-      .input('yr',  mssql.TinyInt,  parseInt(year_of_study))
+      .input('yr',  mssql.TinyInt,  yr)
       .input('lbl', mssql.NVarChar, label?.trim() || null)
       .input('ia',  mssql.Bit,      is_active ? 1 : 0)
       .query(`
@@ -1161,6 +1178,13 @@ router.post('/:collegeId/class', requirePerm('masters'), async (req, res) => {
   } catch (e) {
     if (e.number === 2627 || e.number === 2601)
       return res.status(409).json({ success: false, message: 'This program + year combination already exists.' })
+    // SQL Server CHECK constraint violation: surface a helpful hint pointing
+    // at the migration that relaxes year_of_study from (1,2,3) to (1..5).
+    if (e.number === 547 && /year_of_study/i.test(e.message || ''))
+      return res.status(500).json({
+        success: false,
+        message: 'The database still restricts year_of_study to 1-3. Please ask an administrator to run BackEnd/scripts/migrate_class_master_extended_years.js.',
+      })
     res.status(500).json({ success: false, message: e.message })
   }
 })
