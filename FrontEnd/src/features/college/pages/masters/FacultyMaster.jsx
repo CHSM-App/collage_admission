@@ -143,39 +143,41 @@ export default function FacultyMaster({ collegeId }) {
 
       {loading ? <SkeletonTable rows={5} cols={4} /> : (
         <>
-          {/* Desktop table */}
-          <div className="hidden sm:block overflow-x-auto rounded-xl border border-slate-500">
+          {/* Desktop table — styled to match the Application Inbox grid:
+              border-2/slate-400 outer, slate-100 header, bold uppercase tracked
+              titles, blue-50 row hover, slate-300 row dividers. */}
+          <div className="hidden sm:block overflow-x-auto rounded-lg border-2 border-slate-400">
             <table className="w-full text-sm border-collapse">
-              <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-500">
-                <tr className="divide-x divide-slate-500">
+              <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
+                <tr>
                   <Th col="degree_course_code" label="Code"      align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <Th col="degree_course_name" label="Name"      align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <Th col="duration_years"     label="Years"     align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
-                  <th className="px-4 py-3 text-left">Exam Seat Codes</th>
+                  <th className="px-4 py-2.5 text-left">Exam Seat Codes</th>
                   <Th col="is_active"          label="Status"    align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
-                  <th className="px-4 py-3" />
+                  <th className="px-4 py-2.5" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-500">
+              <tbody className="divide-y-2 divide-slate-300">
                 {filtered.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">No records found.</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">No records found.</td></tr>
                 )}
                 {filtered.map(r => (
-                  <tr key={r.code_no} className="divide-x divide-slate-500 hover:bg-slate-50">
-                    <td className="px-4 py-3 font-mono font-semibold text-slate-700">{r.degree_course_code}</td>
-                    <td className="px-4 py-3 text-slate-800">{r.degree_course_name}</td>
-                    <td className="px-4 py-3 text-center text-slate-600">{r.duration_years}</td>
-                    <td className="px-4 py-3 text-slate-500 text-xs">
+                  <tr key={r.code_no} className="hover:bg-blue-50 transition">
+                    <td className="px-4 py-2.5 font-mono font-semibold text-slate-900">{r.degree_course_code}</td>
+                    <td className="px-4 py-2.5 text-slate-700">{r.degree_course_name}</td>
+                    <td className="px-4 py-2.5 text-center text-slate-700">{r.duration_years}</td>
+                    <td className="px-4 py-2.5 text-slate-400 text-xs">
                       {[r.exam_seat_code_year1, r.exam_seat_code_year2, r.exam_seat_code_year3, r.exam_seat_code_year4, r.exam_seat_code_year5].filter(Boolean).join(' / ') || '—'}
                     </td>
-                    <td className="px-4 py-3 text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}>
+                    <td className="px-4 py-2.5 text-center">
+                      <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                         {r.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right space-x-2">
-                      {rw && <button onClick={() => openEdit(r)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>}
-                      {rw && r.is_active && <button onClick={() => softDelete(r)} className="text-xs text-red-400 hover:text-red-600 underline">Deactivate</button>}
+                    <td className="px-4 py-2.5 text-right space-x-3 whitespace-nowrap">
+                      {rw && <button onClick={() => openEdit(r)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>}
+                      {rw && r.is_active && <button onClick={() => softDelete(r)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Deactivate</button>}
                     </td>
                   </tr>
                 ))}
@@ -187,7 +189,7 @@ export default function FacultyMaster({ collegeId }) {
           <div className="sm:hidden space-y-2">
             {filtered.length === 0 && <p className="text-center text-slate-400 py-8 text-sm">No records found.</p>}
             {filtered.map(r => (
-              <div key={r.code_no} className="border border-slate-500 rounded-xl p-4 bg-white">
+              <div key={r.code_no} className="border-2 border-slate-400 rounded-lg p-4 bg-white">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="font-mono font-semibold text-slate-700">{r.degree_course_code}</p>
@@ -289,12 +291,12 @@ function Th({ col, label, align, sortCol, sortDir, onSort }) {
   const active = sortCol === col
   return (
     <th
-      className={`px-4 py-3 text-${align} cursor-pointer select-none hover:text-slate-800 transition`}
+      className={`px-4 py-2.5 text-${align} cursor-pointer select-none text-xs font-bold uppercase tracking-wide text-slate-600 hover:text-slate-900 transition`}
       onClick={() => onSort(col)}
     >
-      <span className="inline-flex items-center gap-1">
+      <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'ml-auto' : ''}`}>
         {label}
-        <span className="text-slate-500">
+        <span className="text-slate-300">
           {active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}
         </span>
       </span>
