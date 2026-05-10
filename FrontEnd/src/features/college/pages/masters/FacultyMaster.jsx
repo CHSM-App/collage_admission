@@ -144,10 +144,10 @@ export default function FacultyMaster({ collegeId }) {
       {loading ? <SkeletonTable rows={5} cols={4} /> : (
         <>
           {/* Desktop table */}
-          <div className="hidden sm:block overflow-x-auto rounded-xl border border-slate-100">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                <tr>
+          <div className="hidden sm:block overflow-x-auto rounded-xl border border-slate-300">
+            <table className="w-full text-sm border-collapse">
+              <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-300">
+                <tr className="divide-x divide-slate-300">
                   <Th col="degree_course_code" label="Code"      align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <Th col="degree_course_name" label="Name"      align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <Th col="duration_years"     label="Years"     align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
@@ -156,12 +156,12 @@ export default function FacultyMaster({ collegeId }) {
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50">
+              <tbody className="divide-y divide-slate-300">
                 {filtered.length === 0 && (
                   <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400">No records found.</td></tr>
                 )}
                 {filtered.map(r => (
-                  <tr key={r.code_no} className="hover:bg-slate-50">
+                  <tr key={r.code_no} className="divide-x divide-slate-300 hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono font-semibold text-slate-700">{r.degree_course_code}</td>
                     <td className="px-4 py-3 text-slate-800">{r.degree_course_name}</td>
                     <td className="px-4 py-3 text-center text-slate-600">{r.duration_years}</td>
@@ -187,7 +187,7 @@ export default function FacultyMaster({ collegeId }) {
           <div className="sm:hidden space-y-2">
             {filtered.length === 0 && <p className="text-center text-slate-400 py-8 text-sm">No records found.</p>}
             {filtered.map(r => (
-              <div key={r.code_no} className="border border-slate-100 rounded-xl p-4 bg-white">
+              <div key={r.code_no} className="border border-slate-300 rounded-xl p-4 bg-white">
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="font-mono font-semibold text-slate-700">{r.degree_course_code}</p>
