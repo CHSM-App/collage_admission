@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import api from '../../../services/api.js'
 import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
+import { SkeletonLine } from '../../../shared/components/Skeleton.jsx'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
 
@@ -65,7 +66,7 @@ export default function RollNumbers({ collegeId }) {
         <div>
           <label className="block text-xs font-semibold text-slate-600 mb-1">Course</label>
           {loading
-            ? <p className="text-sm text-slate-400">Loading…</p>
+            ? <SkeletonLine className="h-9 w-full rounded-md" />
             : (
               <select
                 required

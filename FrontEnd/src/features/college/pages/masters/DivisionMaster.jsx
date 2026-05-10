@@ -1,10 +1,16 @@
 import { useEffect, useState, useCallback } from 'react'
 import api from '../../../../services/api.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
+import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 
-const YEAR_LEVELS  = ['FY', 'SY', 'TY']
+const YEAR_LEVEL_LABELS = ['FY', 'SY', 'TY', '4Y', '5Y']
 const DIVISIONS    = ['A','B','C','D','E','F','G','H','I','J']
 const FUNDING_OPTS = ['Granted','NonGranted','Both']
+
+function yearLevelsFor(durationYears) {
+  const n = Math.max(1, Math.min(5, parseInt(durationYears) || 3))
+  return YEAR_LEVEL_LABELS.slice(0, n)
+}
 
 export default function DivisionMaster({ collegeId }) {
   const { canWrite } = usePermissions()
@@ -74,7 +80,14 @@ export default function DivisionMaster({ collegeId }) {
     finally { setSaving(false) }
   }
 
-  const selFacultyName = faculty.find(f => f.code_no == selFaculty)?.degree_course_name || ''
+  const selFacultyRow  = faculty.find(f => f.code_no == selFaculty)
+  const selFacultyName = selFacultyRow?.degree_course_name || ''
+  const yearLevels     = yearLevelsFor(selFacultyRow?.duration_years)
+
+  // Snap selYear back to FY when switching to a shorter program
+  useEffect(() => {
+    if (yearLevels.length && !yearLevels.includes(selYear)) setSelYear(yearLevels[0])
+  }, [yearLevels, selYear])
 
   return (
     <div>
@@ -98,7 +111,7 @@ export default function DivisionMaster({ collegeId }) {
         <div className="flex flex-col gap-1">
           <label className="text-xs font-semibold text-slate-500">Year</label>
           <div className="flex gap-1">
-            {YEAR_LEVELS.map(y => (
+            {yearLevels.map(y => (
               <button key={y} onClick={() => setSelYear(y)}
                 className={`px-4 h-9 rounded-lg text-sm font-medium border transition ${selYear === y ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
                 {y}
@@ -121,7 +134,7 @@ export default function DivisionMaster({ collegeId }) {
       {error && <p className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
       {saved && <p className="mb-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">Saved successfully.</p>}
 
-      {loading ? <p className="text-sm text-slate-400">Loading…</p> : (
+      {loading ? <SkeletonTable rows={4} cols={3} /> : (
         <div className="overflow-x-auto">
           <div className="min-w-[640px]">
             <table className="text-sm border-collapse w-full">

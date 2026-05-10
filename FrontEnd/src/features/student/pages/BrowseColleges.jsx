@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../../services/api.js'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
@@ -10,12 +10,16 @@ export default function BrowseColleges() {
   const { user } = useAuthContext()
   const navigate  = useNavigate()
   const inputRef  = useRef(null)
+  const debounceRef = useRef(null)
 
-  const [code, setCode]       = useState('')
-  const [result, setResult]   = useState(null)   // { college, periods }
-  const [myApps, setMyApps]   = useState([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError]     = useState('')
+  const [query, setQuery]         = useState('')
+  const [suggestions, setSuggestions] = useState([])
+  const [showDrop, setShowDrop]   = useState(false)
+  const [result, setResult]       = useState(null)   // { college, periods }
+  const [myApps, setMyApps]       = useState([])
+  const [loading, setLoading]     = useState(false)
+  const [sugLoading, setSugLoading] = useState(false)
+  const [error, setError]         = useState('')
 
   useEffect(() => {
     if (user?.id) {
@@ -25,19 +29,78 @@ export default function BrowseColleges() {
     }
   }, [user?.id])
 
-  async function handleSearch(e) {
-    e.preventDefault()
-    const trimmed = code.trim()
-    if (!trimmed) return
+  const fetchSuggestions = useCallback((q) => {
+    clearTimeout(debounceRef.current)
+    if (!q.trim()) { setSuggestions([]); setShowDrop(false); return }
+    debounceRef.current = setTimeout(async () => {
+      setSugLoading(true)
+      try {
+        const res = await api.get(`colleges/search?q=${encodeURIComponent(q)}`)
+        setSuggestions(res.data.data || [])
+        setShowDrop(true)
+      } catch {
+        setSuggestions([])
+      } finally {
+        setSugLoading(false)
+      }
+    }, 280)
+  }, [])
+
+  function handleInputChange(e) {
+    const val = e.target.value
+    setQuery(val)
+    setError('')
+    setResult(null)
+    fetchSuggestions(val)
+  }
+
+  async function loadCollege(collegeCode) {
+    setShowDrop(false)
     setError('')
     setResult(null)
     setLoading(true)
     try {
-      const res = await api.get(`colleges/by-code/${encodeURIComponent(trimmed)}`)
+      const res = await api.get(`colleges/by-code/${encodeURIComponent(collegeCode)}`)
       setResult(res.data.data)
     } catch (err) {
       setError(err?.response?.data?.message || 'Something went wrong. Please try again.')
     } finally {
+      setLoading(false)
+    }
+  }
+
+  function handleSelectSuggestion(college) {
+    setQuery(college.name)
+    setSuggestions([])
+    loadCollege(college.college_code)
+  }
+
+  async function handleSearch(e) {
+    e.preventDefault()
+    const trimmed = query.trim()
+    if (!trimmed) return
+    setShowDrop(false)
+    // If it looks like a code try by-code directly, else search first
+    setError('')
+    setResult(null)
+    setLoading(true)
+    try {
+      // Try search first to get the code, then load
+      const res = await api.get(`colleges/search?q=${encodeURIComponent(trimmed)}`)
+      const matches = res.data.data || []
+      if (matches.length === 1) {
+        setQuery(matches[0].name)
+        await loadCollege(matches[0].college_code)
+      } else if (matches.length > 1) {
+        setSuggestions(matches)
+        setShowDrop(true)
+        setLoading(false)
+      } else {
+        setError('No college found matching that name or code.')
+        setLoading(false)
+      }
+    } catch {
+      setError('Something went wrong. Please try again.')
       setLoading(false)
     }
   }
@@ -49,9 +112,11 @@ export default function BrowseColleges() {
   }
 
   function handleReset() {
-    setCode('')
+    setQuery('')
     setResult(null)
     setError('')
+    setSuggestions([])
+    setShowDrop(false)
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
@@ -61,25 +126,49 @@ export default function BrowseColleges() {
         <p className="text-sm font-semibold uppercase tracking-wide text-emerald-600">Student portal</p>
         <h1 className="mt-2 text-2xl sm:text-3xl font-bold text-slate-950">Find Your College</h1>
         <p className="mt-1 text-slate-600">
-          Enter the college code provided by your college to view open admissions.
+          Enter your college name or code to view open admissions.
         </p>
       </div>
 
-      {/* Code entry form */}
-      <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-3 max-w-md">
-        <input
-          ref={inputRef}
-          type="text"
-          value={code}
-          onChange={e => { setCode(e.target.value.toUpperCase()); setError('') }}
-          placeholder="e.g. CL001"
-          maxLength={20}
-          className="flex-1 rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-mono font-semibold tracking-widest uppercase focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          autoFocus
-        />
+      {/* Search form */}
+      <form onSubmit={handleSearch} className="flex flex-col sm:flex-row gap-3 max-w-lg">
+        <div className="relative flex-1">
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onChange={handleInputChange}
+            onBlur={() => setTimeout(() => setShowDrop(false), 150)}
+            onFocus={() => suggestions.length > 0 && setShowDrop(true)}
+            placeholder="College name or code e.g. CL001"
+            className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            autoFocus
+            autoComplete="off"
+          />
+          {sugLoading && (
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">…</span>
+          )}
+          {showDrop && suggestions.length > 0 && (
+            <ul className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg overflow-hidden">
+              {suggestions.map(c => (
+                <li key={c.id}>
+                  <button
+                    type="button"
+                    onMouseDown={() => handleSelectSuggestion(c)}
+                    className="w-full text-left px-4 py-2.5 hover:bg-emerald-50 transition"
+                  >
+                    <span className="font-semibold text-sm text-slate-900">{c.name}</span>
+                    <span className="ml-2 text-xs text-slate-400 font-mono">{c.college_code}</span>
+                    {c.city && <span className="ml-1 text-xs text-slate-400">· {c.city}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         <button
           type="submit"
-          disabled={loading || !code.trim()}
+          disabled={loading || !query.trim()}
           className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50 transition"
         >
           {loading ? 'Searching…' : 'Find College'}
@@ -96,7 +185,7 @@ export default function BrowseColleges() {
       </form>
 
       {error && (
-        <div className="max-w-md rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="max-w-lg rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       )}

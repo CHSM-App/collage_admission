@@ -20,6 +20,7 @@ import { useAuthContext } from '../../../context/AuthContext.jsx'
 import api from '../../../services/api.js'
 import StepIndicator from '../../../shared/components/StepIndicator.jsx'
 import Button from '../../../shared/components/Button.jsx'
+import { SkeletonForm } from '../../../shared/components/Skeleton.jsx'
 
 import Step1Context      from './wizard/Step1Context.jsx'
 import Step2Personal     from './wizard/Step2Personal.jsx'
@@ -245,11 +246,8 @@ export default function ApplyWizard() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <div className="text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-800" />
-          <p className="mt-3 text-sm text-slate-500">Loading application…</p>
-        </div>
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+        <div className="w-full max-w-2xl"><SkeletonForm fields={8} /></div>
       </div>
     )
   }

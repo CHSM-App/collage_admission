@@ -4,6 +4,7 @@ import api from '../../../services/api.js'
 import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
 import { useRazorpay } from '../../../shared/hooks/useRazorpay.js'
+import { SkeletonDetail, SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000/').replace(/\/$/, '')
 
@@ -103,7 +104,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
     }
   }
 
-  if (loading) return <p className="text-slate-500 p-6">Loading…</p>
+  if (loading) return <div className="p-6"><SkeletonDetail /></div>
   if (!app)    return <p className="text-red-500 p-6">{error || 'Application not found.'}</p>
 
   const flowInfo = STATUS_FLOW[app.status] || { label: app.status }
@@ -589,7 +590,7 @@ function SelectedSubjectsSection({ appId }) {
       </div>
       <div className="px-4 py-3">
         {loading ? (
-          <p className="text-sm text-slate-400">Loading…</p>
+          <SkeletonLines rows={3} />
         ) : !hasAny ? (
           <p className="text-sm text-slate-400">No subjects selected yet.</p>
         ) : (

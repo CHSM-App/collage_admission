@@ -3,6 +3,7 @@ import api from '../../../services/api.js'
 import PaymentReceipts from '../../student/pages/PaymentReceipts.jsx'
 import { useRazorpay } from '../../../shared/hooks/useRazorpay.js'
 import Pagination from '../../../shared/components/Pagination.jsx'
+import { SkeletonTable, SkeletonCards } from '../../../shared/components/Skeleton.jsx'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
 
@@ -72,7 +73,22 @@ export default function FeeReceipts({ collegeId }) {
 
   const paid    = rows.filter(r => Number(r.fee_total_amount) > 0 && Number(r.amount_paid) >= Number(r.fee_total_amount) - 0.01)
   const pending = rows.filter(r => !(Number(r.fee_total_amount) > 0 && Number(r.amount_paid) >= Number(r.fee_total_amount) - 0.01))
-  const summary = rows
+
+  const [sortCol, setSortCol] = useState('student_name')
+  const [sortDir, setSortDir] = useState('asc')
+
+  function toggleSort(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('asc') }
+  }
+
+  const summary = [...rows].sort((a, b) => {
+    let av = a[sortCol], bv = b[sortCol]
+    if (av == null) av = ''; if (bv == null) bv = ''
+    const cmp = typeof av === 'number' && typeof bv === 'number'
+      ? av - bv : String(av).localeCompare(String(bv))
+    return sortDir === 'asc' ? cmp : -cmp
+  })
 
   function handleRowClick(row) {
     setSelected(row)
@@ -137,7 +153,7 @@ export default function FeeReceipts({ collegeId }) {
       )}
 
       {loading ? (
-        <p className="text-slate-400 text-sm">Loading…</p>
+        <SkeletonTable rows={5} cols={4} />
       ) : summary.length === 0 ? (
         <p className="text-slate-500 text-sm">No records found.</p>
       ) : (
@@ -147,14 +163,14 @@ export default function FeeReceipts({ collegeId }) {
             <table className="w-full text-sm">
               <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
                 <tr>
-                  <th className="px-4 py-2.5 text-left">Student</th>
-                  <th className="px-4 py-2.5 text-left">Course / Year</th>
-                  <th className="px-4 py-2.5 text-left">Reg. No.</th>
-                  <th className="px-4 py-2.5 text-right">Total Fee</th>
-                  <th className="px-4 py-2.5 text-right">Paid</th>
+                  <SortTh col="student_name"        label="Student"      align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTh col="course_name"         label="Course / Year" align="left"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTh col="registration_number" label="Reg. No."     align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTh col="fee_total_amount"    label="Total Fee"    align="right"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <SortTh col="amount_paid"         label="Paid"         align="right"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <th className="px-4 py-2.5 text-right">Remaining</th>
                   <th className="px-4 py-2.5 text-center">Status</th>
-                  <th className="px-4 py-2.5 text-left">Last Paid</th>
+                  <SortTh col="completed_at"        label="Last Paid"    align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                 </tr>
               </thead>
               <tbody className="divide-y-2 divide-slate-300">
@@ -376,7 +392,7 @@ function CollegeFeePanel({ row, collegeId, onClose }) {
       </div>
 
       <div className="px-5 py-4 space-y-5">
-        {loading && <p className="text-slate-400 text-sm">Loading…</p>}
+        {loading && <SkeletonCards count={2} />}
         {error   && <p className="text-red-500 text-sm">{error}</p>}
 
         {fs && (
@@ -584,6 +600,18 @@ function CollegeFeePanel({ row, collegeId, onClose }) {
         )}
       </div>
     </div>
+  )
+}
+
+function SortTh({ col, label, align, sortCol, sortDir, onSort }) {
+  const active = sortCol === col
+  return (
+    <th className={`px-4 py-2.5 text-${align} cursor-pointer select-none hover:text-slate-900 transition`} onClick={() => onSort(col)}>
+      <span className="inline-flex items-center gap-1">
+        {label}
+        <span className="text-slate-300">{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+      </span>
+    </th>
   )
 }
 

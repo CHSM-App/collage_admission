@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import api from '../../../../services/api.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
+import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 
 const SUBJECT_TYPES = ['Core','Elective','Practical','Project','Foundation','AbilityEnhancement']
 // Semester tabs are derived from the selected program's duration: tabs = years * 2
@@ -189,7 +190,7 @@ export default function CourseMaster({ collegeId }) {
       {error   && <p className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
       {success && <p className="mb-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{success}</p>}
 
-      {loading ? <p className="text-sm text-slate-400">Loading…</p> : (
+      {loading ? <SkeletonTable rows={4} cols={5} /> : (
         <div className="overflow-x-auto rounded-xl border border-slate-100 -mx-0">
           <div className="min-w-[860px]">
             <table className="w-full text-xs">

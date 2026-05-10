@@ -9,6 +9,7 @@ import {
   CertActionBar,
   CertFormShell,
 } from './shared.jsx'
+import { SkeletonLines } from '../../../../shared/components/Skeleton.jsx'
 
 const EMPTY = {
   bonafide_id:      null,
@@ -367,7 +368,7 @@ export default function BonafideCertificate({ collegeId, readOnly }) {
           )}
         </div>
         {loading ? (
-          <p className="px-5 py-6 text-sm text-slate-400">Loading…</p>
+          <div className="px-5 py-4"><SkeletonLines rows={3} /></div>
         ) : list.length === 0 ? (
           <p className="px-5 py-6 text-sm text-slate-400">No certificates issued yet.</p>
         ) : (

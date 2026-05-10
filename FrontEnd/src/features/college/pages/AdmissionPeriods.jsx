@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import api from '../../../services/api.js'
 import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
+import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
 
@@ -241,7 +242,7 @@ export default function AdmissionPeriods({ collegeId }) {
         </form>
       )}
 
-      {loading && <p className="text-slate-500">Loading…</p>}
+      {loading && <SkeletonTable rows={4} cols={5} />}
       {!loading && periods.length === 0 && (
         <p className="text-slate-500">No admission periods configured yet.</p>
       )}

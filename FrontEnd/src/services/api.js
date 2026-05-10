@@ -25,13 +25,19 @@ api.interceptors.response.use(
     if (status === 401) {
       try {
         const stored = localStorage.getItem('collegeAdmissionAuth')
-        const role   = stored ? JSON.parse(stored)?.role : null
-        localStorage.removeItem('collegeAdmissionAuth')
-        window.location.href = role === 'admin'   ? '/login/admin'   :
-                               role === 'college' ? '/login/college' :
-                               '/login/student'
+        const auth   = stored ? JSON.parse(stored) : null
+        // Only redirect if the user had an active session (token exists).
+        // A failed login attempt also returns 401 but has no stored token —
+        // in that case let the error propagate so the form can show the message.
+        if (auth?.token) {
+          const role = auth.role
+          localStorage.removeItem('collegeAdmissionAuth')
+          window.location.href = role === 'admin'   ? '/login/admin'   :
+                                 role === 'college' ? '/login/college' :
+                                 '/login/student'
+        }
       } catch {
-        window.location.href = '/login/student'
+        // ignore parse errors
       }
     }
     if (status === 403) {

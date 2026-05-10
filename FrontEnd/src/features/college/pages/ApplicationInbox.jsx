@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../../services/api.js'
 import Pagination from '../../../shared/components/Pagination.jsx'
+import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
 
@@ -93,18 +94,38 @@ export default function ApplicationInbox({ collegeId }) {
     return [...set].sort()
   }, [apps])
 
-  // Client-side search filter (only on the current page)
+  const [sortCol, setSortCol] = useState('submitted_at')
+  const [sortDir, setSortDir] = useState('desc')
+
+  function toggleSort(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('asc') }
+  }
+
+  // Client-side search filter + sort (only on the current page)
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return apps
-    return apps.filter(a => {
-      const haystack = [
-        a.student_name, a.student_email, a.phone,
-        a.registration_number, a.course_name, a.academic_year,
-      ].join(' ').toLowerCase()
-      return haystack.includes(q)
+    const base = q
+      ? apps.filter(a => {
+          const haystack = [
+            a.student_name, a.student_email, a.phone,
+            a.registration_number, a.course_name, a.academic_year,
+          ].join(' ').toLowerCase()
+          return haystack.includes(q)
+        })
+      : apps
+
+    return [...base].sort((a, b) => {
+      let av = a[sortCol], bv = b[sortCol]
+      if (sortCol === 'year_of_study') { av = Number(av); bv = Number(bv) }
+      if (av == null) av = ''
+      if (bv == null) bv = ''
+      const cmp = typeof av === 'number' && typeof bv === 'number'
+        ? av - bv
+        : String(av).localeCompare(String(bv))
+      return sortDir === 'asc' ? cmp : -cmp
     })
-  }, [apps, search])
+  }, [apps, search, sortCol, sortDir])
 
   const hasFilters = search || filterStatus || filterCourse || filterYear
 
@@ -202,7 +223,7 @@ export default function ApplicationInbox({ collegeId }) {
         </p>
       )}
 
-      {loading && <p className="text-slate-500">Loading…</p>}
+      {loading && <SkeletonTable rows={6} cols={5} />}
 
       {!loading && filtered.length === 0 && (
         <p className="text-slate-500">
@@ -217,11 +238,11 @@ export default function ApplicationInbox({ collegeId }) {
       {!loading && filtered.length > 0 && (
         <div className="rounded-lg border-2 border-slate-400 overflow-hidden">
           <div className="hidden sm:grid grid-cols-[1fr_1fr_10rem_12rem_6rem] bg-slate-100 border-b-2 border-slate-400 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-600">
-            <span>Student</span>
-            <span>Course / Year</span>
-            <span>Reg No.</span>
-            <span>Status</span>
-            <span className="text-right">Date</span>
+            <InboxTh col="student_name"       label="Student"       sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+            <InboxTh col="course_name"        label="Course / Year" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+            <InboxTh col="registration_number" label="Reg No."      sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+            <InboxTh col="status"             label="Status"        sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+            <InboxTh col="submitted_at"       label="Date"          sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
           </div>
 
           {filtered.map((app, i) => {
@@ -265,5 +286,19 @@ export default function ApplicationInbox({ collegeId }) {
         onPageChange={setPage}
       />
     </section>
+  )
+}
+
+function InboxTh({ col, label, sortCol, sortDir, onSort, align = 'left' }) {
+  const active = sortCol === col
+  return (
+    <button
+      type="button"
+      onClick={() => onSort(col)}
+      className={`flex items-center gap-1 text-xs font-bold uppercase tracking-wide text-slate-600 hover:text-slate-900 transition select-none ${align === 'right' ? 'ml-auto' : ''}`}
+    >
+      {label}
+      <span className="text-slate-300">{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+    </button>
   )
 }

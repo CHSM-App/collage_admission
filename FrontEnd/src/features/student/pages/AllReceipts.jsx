@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import api from '../../../services/api.js'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 import PaymentReceipts from './PaymentReceipts.jsx'
+import { SkeletonCards } from '../../../shared/components/Skeleton.jsx'
 
 export default function AllReceipts() {
   const { user } = useAuthContext()
@@ -29,10 +30,10 @@ export default function AllReceipts() {
       <div>
         <p className="text-sm font-semibold uppercase tracking-wide text-emerald-600">Student portal</p>
         <h1 className="mt-2 text-2xl sm:text-3xl font-bold text-slate-950">My Receipts</h1>
-        <p className="mt-1 text-slate-600">Download or share receipts for all your payments.</p>
+        <p className="mt-1 text-slate-600">Download or print receipts for all your payments.</p>
       </div>
 
-      {loading && <p className="text-slate-500">Loading…</p>}
+      {loading && <SkeletonCards count={3} />}
 
       {!loading && apps.length === 0 && (
         <p className="text-slate-500">No payment receipts found.</p>

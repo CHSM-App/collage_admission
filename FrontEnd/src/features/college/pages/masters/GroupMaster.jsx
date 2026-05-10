@@ -1,9 +1,10 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import api from '../../../../services/api.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
+import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 
-const SEMESTERS  = [1,2,3,4,5,6]
 const NUM_SLOTS  = 11
+const semCountFor = (yrs) => Math.max(1, Math.min(10, (parseInt(yrs) || 0) * 2))
 
 const EMPTY_GROUP = (facultyId, sem) => ({
   faculty_master_id: facultyId,
@@ -27,6 +28,21 @@ export default function GroupMaster({ collegeId }) {
   const [courseHints, setCourseHints] = useState([])   // autocomplete from course_master
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState('')
+  const [sortCol, setSortCol] = useState('group_code')
+  const [sortDir, setSortDir] = useState('asc')
+  function toggleSortGM(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('asc') }
+  }
+  const sortedGroups = useMemo(() => [...groups].sort((a, b) => {
+    let av = a[sortCol], bv = b[sortCol]
+    if (av == null) av = ''; if (bv == null) bv = ''
+    const cmp = sortCol === 'course_count' ? Number(av) - Number(bv)
+      : typeof av === 'boolean' || typeof bv === 'boolean'
+        ? (av === bv ? 0 : av ? -1 : 1)
+        : String(av).localeCompare(String(bv))
+    return sortDir === 'asc' ? cmp : -cmp
+  }), [groups, sortCol, sortDir])
 
   useEffect(() => {
     api.get(`masters/${collegeId}/faculty`)
@@ -36,6 +52,15 @@ export default function GroupMaster({ collegeId }) {
         if (active.length) setSelFaculty(active[0].code_no)
       })
   }, [collegeId])
+
+  const selFacultyRow = faculty.find(f => f.code_no == selFaculty)
+  const semCount      = semCountFor(selFacultyRow?.duration_years)
+  const semesters     = Array.from({ length: semCount }, (_, i) => i + 1)
+
+  // Snap selSem back to 1 when switching to a program with fewer semesters
+  useEffect(() => {
+    if (selFacultyRow && selSem > semCount) setSelSem(1)
+  }, [selFacultyRow, semCount, selSem])
 
   const loadGroups = useCallback(() => {
     if (!selFaculty) return
@@ -143,7 +168,7 @@ export default function GroupMaster({ collegeId }) {
         <div className="flex flex-col gap-1">
           <label className="text-xs font-semibold text-slate-500">Semester</label>
           <div className="flex gap-1 flex-wrap">
-            {SEMESTERS.map(s => (
+            {semesters.map(s => (
               <button key={s} onClick={() => setSelSem(s)}
                 className={`w-9 h-9 rounded-lg text-sm font-medium border transition ${selSem === s ? 'bg-slate-800 text-white border-slate-800' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
                 {s}
@@ -159,23 +184,23 @@ export default function GroupMaster({ collegeId }) {
         Currently treated as supplemental (Course Master holds all subjects; Group Master defines valid combinations).
       </p>
 
-      {loading ? <p className="text-sm text-slate-400">Loading…</p> : (
+      {loading ? <SkeletonTable rows={4} cols={3} /> : (
         <>
           {/* Desktop table */}
           <div className="hidden sm:block overflow-x-auto rounded-xl border border-slate-100">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                 <tr>
-                  <th className="px-4 py-3 text-left">Group Code</th>
-                  <th className="px-4 py-3 text-left">Description</th>
-                  <th className="px-4 py-3 text-center">Subjects</th>
-                  <th className="px-4 py-3 text-center">Status</th>
+                  <GMTh col="group_code"        label="Group Code"  align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortGM} />
+                  <GMTh col="group_description" label="Description" align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortGM} />
+                  <GMTh col="course_count"      label="Subjects"    align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortGM} />
+                  <GMTh col="is_active"         label="Status"      align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortGM} />
                   <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {groups.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">No groups defined.</td></tr>}
-                {groups.map(g => (
+                {sortedGroups.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">No groups defined.</td></tr>}
+                {sortedGroups.map(g => (
                   <tr key={g.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono font-semibold text-slate-700">{g.group_code}</td>
                     <td className="px-4 py-3 text-slate-700">{g.group_description}</td>
@@ -197,8 +222,8 @@ export default function GroupMaster({ collegeId }) {
 
           {/* Mobile card list */}
           <div className="sm:hidden space-y-2">
-            {groups.length === 0 && <p className="text-center text-slate-400 py-8 text-sm">No groups defined.</p>}
-            {groups.map(g => (
+            {sortedGroups.length === 0 && <p className="text-center text-slate-400 py-8 text-sm">No groups defined.</p>}
+            {sortedGroups.map(g => (
               <div key={g.id} className="border border-slate-100 rounded-xl p-4 bg-white">
                 <div className="flex items-start justify-between gap-2">
                   <div>
@@ -296,3 +321,15 @@ export default function GroupMaster({ collegeId }) {
 }
 
 const inp = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300'
+
+function GMTh({ col, label, align = 'left', sortCol, sortDir, onSort }) {
+  const active = sortCol === col
+  return (
+    <th className={`px-4 py-3 text-${align} cursor-pointer select-none hover:text-slate-800 transition`} onClick={() => onSort(col)}>
+      <span className="inline-flex items-center gap-1">
+        {label}
+        <span className="text-slate-300">{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+      </span>
+    </th>
+  )
+}

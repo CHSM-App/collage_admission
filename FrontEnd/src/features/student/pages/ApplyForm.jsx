@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '../../../services/api.js'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 import Button from '../../../shared/components/Button.jsx'
+import { SkeletonForm } from '../../../shared/components/Skeleton.jsx'
 
 const YEAR_LABEL = { 1: 'FY (First Year)', 2: 'SY (Second Year)', 3: 'TY (Third Year)' }
 
@@ -70,7 +71,7 @@ export default function ApplyForm({ periodId, collegeId }) {
   if (loading) {
     return (
       <PageShell>
-        <p className="text-slate-500">Loading admission details…</p>
+        <SkeletonForm fields={6} />
       </PageShell>
     )
   }

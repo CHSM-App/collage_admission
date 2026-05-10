@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 import api from '../../../../services/api.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
+import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 
 const FEES_TYPES = ['Student','Misc','ExamFees']
 const YEAR_LEVELS = ['FY','SY','TY']
@@ -24,6 +25,23 @@ export default function FeesMaster({ collegeId }) {
   const [form, setForm]           = useState(EMPTY_FEE)
   const [saving, setSaving]       = useState(false)
   const [error, setError]         = useState('')
+  const [sortCol, setSortCol] = useState('sequence_auto_fees')
+  const [sortDir, setSortDir] = useState('asc')
+  function toggleSortFM(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('asc') }
+  }
+  const sorted = useMemo(() => [...rows].sort((a, b) => {
+    let av = a[sortCol], bv = b[sortCol]
+    if (av == null) av = ''; if (bv == null) bv = ''
+    const numCols = ['sequence_auto_fees','fees_cat1_amount','fees_cat2_amount','fees_cat3_amount','fees_cat4_amount']
+    const cmp = numCols.includes(sortCol)
+      ? Number(av) - Number(bv)
+      : typeof av === 'boolean' || typeof bv === 'boolean'
+        ? (av === bv ? 0 : av ? -1 : 1)
+        : String(av).localeCompare(String(bv))
+    return sortDir === 'asc' ? cmp : -cmp
+  }), [rows, sortCol, sortDir])
   // Classwise fees modal
   const [cwModal, setCwModal]     = useState(false)
   const [cwFaculty, setCwFaculty] = useState([])
@@ -138,29 +156,29 @@ export default function FeesMaster({ collegeId }) {
         </div>
       </div>
 
-      {loading ? <p className="text-sm text-slate-400">Loading…</p> : (
+      {loading ? <SkeletonTable rows={4} cols={4} /> : (
         <>
           {/* Desktop table */}
           <div className="hidden sm:block overflow-x-auto rounded-xl border border-slate-100">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                 <tr>
-                  <th className="px-3 py-2 text-left w-8">Seq</th>
-                  <th className="px-3 py-2 text-left">Fees Head</th>
-                  <th className="px-3 py-2 text-left w-20">Short</th>
-                  <th className="px-3 py-2 text-center w-20">Type</th>
-                  <th className="px-3 py-2 text-right w-20">Cat-1</th>
-                  <th className="px-3 py-2 text-right w-20">Cat-2</th>
-                  <th className="px-3 py-2 text-right w-20">Cat-3</th>
-                  <th className="px-3 py-2 text-right w-20">Cat-4</th>
+                  <FMTh col="sequence_auto_fees"  label="Seq"     align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-8" />
+                  <FMTh col="fees_head"           label="Fees Head" align="left" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} />
+                  <FMTh col="short_name"          label="Short"   align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
+                  <FMTh col="fees_type"           label="Type"    align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
+                  <FMTh col="fees_cat1_amount"    label="Cat-1"   align="right"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
+                  <FMTh col="fees_cat2_amount"    label="Cat-2"   align="right"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
+                  <FMTh col="fees_cat3_amount"    label="Cat-3"   align="right"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
+                  <FMTh col="fees_cat4_amount"    label="Cat-4"   align="right"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
                   <th className="px-3 py-2 text-center w-20">Refund.</th>
-                  <th className="px-3 py-2 text-center w-16">Status</th>
+                  <FMTh col="is_active"           label="Status"  align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-16" />
                   <th className="px-3 py-2 w-20" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {rows.length === 0 && <tr><td colSpan={11} className="px-4 py-8 text-center text-slate-400">No fee heads configured.</td></tr>}
-                {rows.map(r => (
+                {sorted.length === 0 && <tr><td colSpan={11} className="px-4 py-8 text-center text-slate-400">No fee heads configured.</td></tr>}
+                {sorted.map(r => (
                   <tr key={r.fees_code} className="hover:bg-slate-50">
                     <td className="px-3 py-2 text-slate-400 text-center">{r.sequence_auto_fees}</td>
                     <td className="px-3 py-2">
@@ -419,3 +437,15 @@ function F({ label, children }) {
   return <div className="flex flex-col gap-1"><label className="text-xs font-semibold text-slate-600">{label}</label>{children}</div>
 }
 const inp = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300'
+
+function FMTh({ col, label, align = 'left', sortCol, sortDir, onSort, className = '' }) {
+  const active = sortCol === col
+  return (
+    <th className={`px-3 py-2 text-${align} cursor-pointer select-none hover:text-slate-800 transition ${className}`} onClick={() => onSort(col)}>
+      <span className="inline-flex items-center gap-1 justify-inherit">
+        {label}
+        <span className="text-slate-300">{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+      </span>
+    </th>
+  )
+}

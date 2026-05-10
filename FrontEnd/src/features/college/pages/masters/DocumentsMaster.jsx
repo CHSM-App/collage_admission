@@ -1,12 +1,20 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import api from '../../../../services/api.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
+import { SkeletonForm } from '../../../../shared/components/Skeleton.jsx'
 
-const YEAR_LEVELS = [
-  { value: 1, label: 'FY (First Year)' },
-  { value: 2, label: 'SY (Second Year)' },
-  { value: 3, label: 'TY (Third Year)' },
+const ALL_yearLevels = [
+  { value: 1, label: 'FY (First Year)'    },
+  { value: 2, label: 'SY (Second Year)'   },
+  { value: 3, label: 'TY (Third Year)'    },
+  { value: 4, label: '4Y (Fourth Year)'   },
+  { value: 5, label: '5Y (Fifth Year)'    },
 ]
+
+function yearLevelsFor(durationYears) {
+  const n = Math.max(1, Math.min(5, parseInt(durationYears) || 3))
+  return ALL_yearLevels.slice(0, n)
+}
 
 // Maps a Document Type name to the admission year it should accompany.
 // Returns null if the type is year-agnostic (10th/12th Marksheet, Photo, etc.)
@@ -45,6 +53,20 @@ export default function DocumentsMaster({ collegeId }) {
   const [loading, setLoading]         = useState(true)
   const [adding, setAdding]           = useState(false)
   const [error, setError]             = useState('')
+  const [sortCol, setSortCol] = useState('document_type_name')
+  const [sortDir, setSortDir] = useState('asc')
+  function toggleSortDM(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('asc') }
+  }
+  const sortedRows = useMemo(() => [...rows].sort((a, b) => {
+    let av = a[sortCol], bv = b[sortCol]
+    if (av == null) av = ''; if (bv == null) bv = ''
+    const cmp = typeof av === 'boolean' || typeof bv === 'boolean'
+      ? (av === bv ? 0 : av ? -1 : 1)
+      : String(av).localeCompare(String(bv))
+    return sortDir === 'asc' ? cmp : -cmp
+  }), [rows, sortCol, sortDir])
 
   useEffect(() => {
     Promise.all([
@@ -109,6 +131,16 @@ export default function DocumentsMaster({ collegeId }) {
     }
   }
 
+  const selFacultyRow = faculty.find(f => f.code_no == selFaculty)
+  const yearLevels    = yearLevelsFor(selFacultyRow?.duration_years)
+
+  // Snap selYear back to 1 when switching to a shorter program
+  useEffect(() => {
+    if (yearLevels.length && !yearLevels.find(y => y.value === selYear)) {
+      setSelYear(yearLevels[0].value)
+    }
+  }, [yearLevels, selYear])
+
   const alreadyAdded = new Set(rows.map(r => r.document_type_id))
   // Step 1: drop already-added types. Step 2: drop year-tied marksheets that
   // don't belong to the currently selected Year of Study.
@@ -129,7 +161,9 @@ export default function DocumentsMaster({ collegeId }) {
     if (expected !== null && expected !== selYear) setSelDocType('')
   }, [selYear, selDocType, docTypes])
 
-  if (loading) return <p className="text-sm text-slate-400">Loading…</p>
+  if (loading) return <SkeletonForm fields={4} />
+
+
 
   return (
     <div>
@@ -159,7 +193,7 @@ export default function DocumentsMaster({ collegeId }) {
         <div className="flex flex-col gap-1">
           <label className="text-xs font-semibold text-slate-500">Year of Study</label>
           <div className="flex gap-1">
-            {YEAR_LEVELS.map(y => (
+            {yearLevels.map(y => (
               <button
                 key={y.value}
                 onClick={() => setSelYear(y.value)}
@@ -183,7 +217,7 @@ export default function DocumentsMaster({ collegeId }) {
             Required Documents ({rows.length})
           </p>
           <p className="text-xs text-slate-400">
-            {YEAR_LEVELS.find(y => y.value === selYear)?.label}
+            {yearLevels.find(y => y.value === selYear)?.label}
           </p>
         </div>
 
@@ -195,13 +229,13 @@ export default function DocumentsMaster({ collegeId }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-100">
-                <th className="px-4 py-2 text-left text-xs font-semibold text-slate-500">Document</th>
-                <th className="px-4 py-2 text-center text-xs font-semibold text-slate-500">Mandatory</th>
+                <DMTh col="document_type_name" label="Document"  align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortDM} />
+                <DMTh col="is_mandatory"       label="Mandatory" align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortDM} />
                 {rw && <th className="px-4 py-2 text-right text-xs font-semibold text-slate-500">Actions</th>}
               </tr>
             </thead>
             <tbody>
-              {rows.map(row => (
+              {sortedRows.map(row => (
                 <tr key={row.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
                   <td className="px-4 py-2.5 text-slate-800 font-medium">{row.document_type_name}</td>
                   <td className="px-4 py-2.5 text-center">
@@ -291,5 +325,20 @@ export default function DocumentsMaster({ collegeId }) {
         </form>
       )}
     </div>
+  )
+}
+
+function DMTh({ col, label, align = 'left', sortCol, sortDir, onSort }) {
+  const active = sortCol === col
+  return (
+    <th
+      className={`px-4 py-2 text-${align} text-xs font-semibold text-slate-500 cursor-pointer select-none hover:text-slate-800 transition`}
+      onClick={() => onSort(col)}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        <span className="text-slate-300">{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+      </span>
+    </th>
   )
 }

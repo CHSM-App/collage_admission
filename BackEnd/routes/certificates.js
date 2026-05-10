@@ -84,10 +84,13 @@ router.get('/:collegeId/student-lookup', requirePerm('certificates'), async (req
           a.year_of_study,
           a.academic_year,
           a.roll_number,
-          a.app_surname,
-          a.app_first_name,
-          a.app_middle_name,
-          a.app_category,
+          NULLIF(LTRIM(RTRIM(
+            ISNULL(a.app_surname,'') + ' ' + ISNULL(a.app_first_name,'') + ' ' + ISNULL(a.app_middle_name,'')
+          )), '') AS app_full_name,
+          a.app_sex,
+          a.app_birth_date,
+          a.app_caste,
+          a.app_prn,
           s.full_name  AS student_full_name,
           s.gender     AS student_gender,
           s.dob        AS student_dob,
