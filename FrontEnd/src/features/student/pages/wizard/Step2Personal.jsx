@@ -139,6 +139,10 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
   }
 
   function handleNext() {
+    // Validate caste selection
+    if (!data.category) {
+      setLocalError('Caste / Community Category is required.'); return
+    }
     // Validate mobile
     if (data.mobile && !/^[6-9]\d{9}$/.test(data.mobile.trim())) {
       setLocalError('Mobile number must be 10 digits starting with 6–9.'); return
@@ -224,14 +228,14 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
 
 
         {/* Caste Category */}
-        <FormField label="Caste / Community Category">
+        <FormField label={<span>Caste / Community Category <span className="text-red-500">*</span></span>}>
           <RadioGroup
             name="category"
             options={CASTE_OPTIONS}
             value={data.category}
             onChange={v => onChange({ target: { name: 'category', value: v } })}
-            clearable
           />
+          {!data.category && <p className="mt-1 text-xs text-slate-400">This field is mandatory — please select one.</p>}
           {e.category && <p className="mt-1 text-xs font-medium text-red-600">{e.category}</p>}
         </FormField>
 

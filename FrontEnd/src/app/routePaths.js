@@ -20,6 +20,8 @@ export const REGISTER_PATHS = {
   student: '/register/student',
 }
 
+export const FORGOT_PASSWORD_PATH = '/forgot-password'
+
 export const getDashboardPath = (role) => DASHBOARD_PATHS[role] || LOGIN_PATHS.student
 
 export const getLoginPath = (role) => LOGIN_PATHS[role] || LOGIN_PATHS.student

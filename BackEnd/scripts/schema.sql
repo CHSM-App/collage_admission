@@ -17,7 +17,7 @@ CREATE TABLE colleges (
     admin_email         NVARCHAR(150)  UNIQUE NOT NULL,
     admin_password_hash NVARCHAR(255)  NOT NULL,
     college_code        NVARCHAR(20)   UNIQUE,
-    application_fee     DECIMAL(10,2)  NULL,        -- per-application fee charged to students
+    application_fee     DECIMAL(12,2)  NULL,        -- per-application fee charged to students
     bank_account_name   NVARCHAR(200),
     bank_account_number NVARCHAR(50),
     bank_ifsc           NVARCHAR(20),
@@ -258,7 +258,7 @@ CREATE TABLE class_master (
     id                INT IDENTITY(1,1) PRIMARY KEY,
     college_id        INT          NOT NULL REFERENCES colleges(id),
     faculty_master_id INT          NOT NULL REFERENCES faculty_master(code_no),
-    year_of_study     TINYINT      NOT NULL CHECK (year_of_study IN (1,2,3)),
+    year_of_study     TINYINT      NOT NULL CHECK (year_of_study IN (1,2,3,4,5)),
     label             NVARCHAR(50) NULL,
     is_active         BIT          NOT NULL DEFAULT 1,
     CONSTRAINT uq_class_master UNIQUE (college_id, faculty_master_id, year_of_study)
@@ -281,7 +281,7 @@ CREATE TABLE college_required_documents (
     id                INT IDENTITY(1,1) PRIMARY KEY,
     college_id        INT NOT NULL REFERENCES colleges(id),
     faculty_master_id INT NOT NULL REFERENCES faculty_master(code_no),
-    year_of_study     INT NOT NULL CHECK (year_of_study IN (1,2,3)),
+    year_of_study     INT NOT NULL CHECK (year_of_study IN (1,2,3,4,5)),
     document_type_id  INT NOT NULL REFERENCES document_types(id),
     is_mandatory      BIT NOT NULL DEFAULT 1,
     CONSTRAINT uq_college_req_doc UNIQUE (college_id, faculty_master_id, year_of_study, document_type_id)
@@ -294,7 +294,7 @@ CREATE TABLE admission_periods (
     id              INT IDENTITY(1,1) PRIMARY KEY,
     college_id      INT           NOT NULL REFERENCES colleges(id),
     course_id       INT           NOT NULL REFERENCES faculty_master(code_no),
-    year_of_study   INT           NOT NULL CHECK (year_of_study IN (1,2,3)),
+    year_of_study   INT           NOT NULL CHECK (year_of_study IN (1,2,3,4,5)),
     academic_year   NVARCHAR(10)  NOT NULL,   -- e.g. 2026-27
     start_date      DATE          NOT NULL,
     end_date        DATE          NOT NULL,
@@ -366,7 +366,7 @@ CREATE TABLE applications (
     student_id              INT            NOT NULL REFERENCES students(id),
     college_id              INT            NOT NULL REFERENCES colleges(id),
     course_id               INT            NOT NULL REFERENCES faculty_master(code_no),
-    year_of_study           INT            NOT NULL CHECK (year_of_study IN (1,2,3)),
+    year_of_study           INT            NOT NULL CHECK (year_of_study IN (1,2,3,4,5)),
     academic_year           NVARCHAR(10)   NOT NULL,
     admission_period_id     INT            NOT NULL REFERENCES admission_periods(id),
 
@@ -375,7 +375,7 @@ CREATE TABLE applications (
                             CONSTRAINT chk_applications_status CHECK (status IN (
                                 'draft','payment_pending','submitted','under_review',
                                 'correction_requested','correction_done',
-                                'doc_verified',
+                                'scrutiny_accepted','doc_verification_pending','doc_verified',
                                 'confirmed','fees_paid','roll_assigned','enrolled',
                                 'rejected','cancelled'
                             )),
@@ -403,6 +403,7 @@ CREATE TABLE applications (
     app_category            NVARCHAR(30)   NULL,   -- caste category for fee slab
     fees_category           NVARCHAR(30)   NULL,
     app_division            NVARCHAR(5)    NULL,   -- division letter for fee determination
+    app_university_app_no   NVARCHAR(50)   NULL,   -- university application number (assigned externally)
 
     -- Timestamps
     submitted_at            DATETIME2 NULL,
@@ -472,12 +473,18 @@ CREATE TABLE application_activity_log (
 
 -- ============================================================
 -- APPLICATION SUBJECTS (subject selections after roll assignment)
+-- Rebuilt in migrate_application_subjects_v2.js to use
+-- code-based selection instead of FK to legacy subjects table.
 -- ============================================================
 CREATE TABLE application_subjects (
-    id              INT IDENTITY(1,1) PRIMARY KEY,
-    application_id  INT       NOT NULL REFERENCES applications(id),
-    subject_id      INT       NOT NULL,        -- references subjects table if used
-    created_at      DATETIME2 DEFAULT GETDATE()
+    id             INT IDENTITY(1,1) PRIMARY KEY,
+    application_id INT           NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+    semester       INT           NOT NULL,        -- 1 or 2
+    subject_code   NVARCHAR(30)  NOT NULL,
+    subject_title  NVARCHAR(200) NOT NULL,
+    display_order  INT           NOT NULL DEFAULT 0,
+    created_at     DATETIME2     NOT NULL DEFAULT GETDATE(),
+    CONSTRAINT uq_app_subject UNIQUE (application_id, semester, subject_code)
 );
 
 -- ============================================================
@@ -517,7 +524,7 @@ CREATE TABLE courses (
 CREATE TABLE subjects (
     id              INT IDENTITY(1,1) PRIMARY KEY,
     course_id       INT           NOT NULL REFERENCES courses(id),
-    year_of_study   INT           NOT NULL CHECK (year_of_study IN (1,2,3)),
+    year_of_study   INT           NOT NULL CHECK (year_of_study IN (1,2,3,4,5)),
     name            NVARCHAR(200) NOT NULL,
     subject_type    NVARCHAR(20)  NOT NULL CHECK (subject_type IN ('core','elective')),
     elective_group  NVARCHAR(10)  NULL,
@@ -529,7 +536,7 @@ CREATE TABLE fee_structures (
     id              INT IDENTITY(1,1) PRIMARY KEY,
     college_id      INT           NOT NULL REFERENCES colleges(id),
     course_id       INT           NOT NULL REFERENCES courses(id),
-    year_of_study   INT           NOT NULL CHECK (year_of_study IN (1,2,3)),
+    year_of_study   INT           NOT NULL CHECK (year_of_study IN (1,2,3,4,5)),
     category        NVARCHAR(20)  NOT NULL CHECK (category IN ('grant','non-grant')),
     tuition_fee     DECIMAL(10,2) NOT NULL DEFAULT 0,
     exam_fee        DECIMAL(10,2) NOT NULL DEFAULT 0,
@@ -542,7 +549,7 @@ CREATE TABLE required_documents (
     id               INT IDENTITY(1,1) PRIMARY KEY,
     college_id       INT NOT NULL REFERENCES colleges(id),
     course_id        INT NOT NULL REFERENCES courses(id),
-    year_of_study    INT NOT NULL CHECK (year_of_study IN (1,2,3)),
+    year_of_study    INT NOT NULL CHECK (year_of_study IN (1,2,3,4,5)),
     document_type_id INT NOT NULL REFERENCES document_types(id),
     is_mandatory     BIT NOT NULL DEFAULT 1,
     created_at       DATETIME2 DEFAULT GETDATE()
@@ -644,3 +651,46 @@ CREATE INDEX ix_cert_noc_reg_no
     ON certificate_noc (college_id, reg_no);
 CREATE INDEX ix_cert_noc_prn_no
     ON certificate_noc (college_id, prn_no);
+
+-- ============================================================
+-- OTP STORE
+-- Persists OTPs for registration and password reset.
+-- otp_hash is bcrypt-hashed so raw OTP is never stored.
+-- pending_data stores JSON registration fields for the
+-- registration purpose only.
+-- ============================================================
+CREATE TABLE otp_store (
+    id           INT IDENTITY(1,1) PRIMARY KEY,
+    phone        NVARCHAR(20)  NOT NULL,
+    otp_hash     NVARCHAR(255) NOT NULL,
+    purpose      NVARCHAR(30)  NOT NULL
+                 CHECK (purpose IN ('registration', 'password_reset')),
+    pending_data NVARCHAR(MAX) NULL,
+    expires_at   DATETIME2     NOT NULL,
+    used         BIT           NOT NULL DEFAULT 0,
+    created_at   DATETIME2     DEFAULT GETDATE()
+);
+CREATE INDEX IX_otp_store_phone_purpose ON otp_store (phone, purpose);
+
+-- ============================================================
+-- WHATSAPP MESSAGE LOG
+-- Audit trail for every WhatsApp message attempt (sent,
+-- failed, or skipped).  application_id is nullable so OTP
+-- and other non-application messages can also be recorded.
+-- ============================================================
+CREATE TABLE whatsapp_message_log (
+    id             INT IDENTITY(1,1) PRIMARY KEY,
+    phone          NVARCHAR(20)  NOT NULL,
+    campaign_name  NVARCHAR(100) NOT NULL,
+    template_id    NVARCHAR(50)  NULL,
+    sample         NVARCHAR(500) NULL,
+    status         NVARCHAR(20)  NOT NULL DEFAULT 'sent'
+                   CHECK (status IN ('sent', 'failed', 'skipped')),
+    campaign_id    NVARCHAR(50)  NULL,
+    error_detail   NVARCHAR(500) NULL,
+    application_id INT           NULL REFERENCES applications(id),
+    created_at     DATETIME2     DEFAULT GETDATE()
+);
+CREATE INDEX IX_wamsglog_phone      ON whatsapp_message_log (phone);
+CREATE INDEX IX_wamsglog_app        ON whatsapp_message_log (application_id);
+CREATE INDEX IX_wamsglog_created_at ON whatsapp_message_log (created_at);

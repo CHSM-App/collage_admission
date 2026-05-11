@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { getDashboardPath, LOGIN_PATHS, REGISTER_PATHS } from '../../../app/routePaths.js'
+import { getDashboardPath, LOGIN_PATHS, REGISTER_PATHS, FORGOT_PASSWORD_PATH } from '../../../app/routePaths.js'
 import AuthLayout from '../../../layouts/AuthLayout.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import Input from '../../../shared/components/Input.jsx'
@@ -198,12 +198,19 @@ export default function RoleLoginForm({ role }) {
         </Button>
 
         {role === 'student' && (
-          <p className="text-center text-sm text-slate-500">
-            New student?{' '}
-            <Link to={REGISTER_PATHS.student} className="font-semibold text-slate-950 hover:underline">
-              Create an account
-            </Link>
-          </p>
+          <div className="space-y-2 text-center text-sm text-slate-500">
+            <p>
+              <Link to={FORGOT_PASSWORD_PATH} className="font-semibold text-slate-950 hover:underline">
+                Forgot password?
+              </Link>
+            </p>
+            <p>
+              New student?{' '}
+              <Link to={REGISTER_PATHS.student} className="font-semibold text-slate-950 hover:underline">
+                Create an account
+              </Link>
+            </p>
+          </div>
         )}
       </form>
     </AuthLayout>

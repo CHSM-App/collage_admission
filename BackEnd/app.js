@@ -62,8 +62,10 @@ app.use(function(err, req, res, next) {
 });
 
 const PORT = process.env.PORT || 8000;
-app.listen(PORT, function () {
-  console.log('Server listening on :' + PORT);
+const PORTLOCAL = 5000;
+
+app.listen(PORTLOCAL, function () {
+  console.log('Server listening on :' + PORTLOCAL);
 });
 
 module.exports = app;

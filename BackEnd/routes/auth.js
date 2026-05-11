@@ -10,6 +10,56 @@ const jwt       = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const router    = express.Router();
 const db        = require('./db');
+const whatsapp  = require('../services/whatsapp');
+const mssql     = require('mssql');
+
+// ── DB OTP helpers ───────────────────────────────────────────
+
+async function saveOtp(normPhone, otp, purpose, pendingData) {
+  const hash      = await bcrypt.hash(otp, 8);           // lighter cost — OTPs are short-lived
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  // Invalidate any previous unused OTP for same phone+purpose
+  await db.request()
+    .input('phone',   mssql.NVarChar, normPhone)
+    .input('purpose', mssql.NVarChar, purpose)
+    .query(`UPDATE otp_store SET used = 1 WHERE phone = @phone AND purpose = @purpose AND used = 0`);
+  await db.request()
+    .input('phone',       mssql.NVarChar,  normPhone)
+    .input('hash',        mssql.NVarChar,  hash)
+    .input('purpose',     mssql.NVarChar,  purpose)
+    .input('pendingData', mssql.NVarChar,  pendingData ? JSON.stringify(pendingData) : null)
+    .input('expiresAt',   mssql.DateTime2, expiresAt)
+    .query(`
+      INSERT INTO otp_store (phone, otp_hash, purpose, pending_data, expires_at)
+      VALUES (@phone, @hash, @purpose, @pendingData, @expiresAt)
+    `);
+}
+
+async function verifyAndConsumeOtp(normPhone, otp, purpose) {
+  const result = await db.request()
+    .input('phone',   mssql.NVarChar, normPhone)
+    .input('purpose', mssql.NVarChar, purpose)
+    .query(`
+      SELECT TOP 1 id, otp_hash, pending_data, expires_at
+      FROM otp_store
+      WHERE phone = @phone AND purpose = @purpose AND used = 0
+      ORDER BY created_at DESC
+    `);
+
+  const row = result.recordset[0];
+  if (!row) return { valid: false, reason: 'No OTP found for this number. Please request a new one.' };
+  if (new Date() > new Date(row.expires_at)) {
+    await db.request().input('id', mssql.Int, row.id).query('UPDATE otp_store SET used = 1 WHERE id = @id');
+    return { valid: false, reason: 'OTP has expired. Please request a new one.' };
+  }
+
+  const match = await bcrypt.compare(String(otp).trim(), row.otp_hash);
+  if (!match) return { valid: false, reason: 'Incorrect OTP. Please try again.' };
+
+  // Mark used
+  await db.request().input('id', mssql.Int, row.id).query('UPDATE otp_store SET used = 1 WHERE id = @id');
+  return { valid: true, pendingData: row.pending_data ? JSON.parse(row.pending_data) : null };
+}
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_in_prod';
 
@@ -294,6 +344,102 @@ router.post('/login/college-user', loginLimiter, async (req, res) => {
   }
 });
 
+// ── OTP rate limiter: 3 sends per 10 min per IP ─────────────
+const otpLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  max: 3,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many OTP requests. Please wait 10 minutes.' },
+});
+
+// ── Send OTP for phone verification ─────────────────────────
+// POST /auth/otp/send   body: { phone, ...registrationFields }
+router.post('/otp/send', otpLimiter, async (req, res) => {
+  const { phone, full_name, email, password, confirm_password, city, category } = req.body;
+
+  if (!full_name || !email || !password || !phone) {
+    return res.status(400).json({ message: 'Name, email, password and phone are required.' });
+  }
+  if (!/^[6-9]\d{9}$/.test(phone.trim())) {
+    return res.status(400).json({ message: 'Phone number must be 10 digits starting with 6–9.' });
+  }
+  if (password !== confirm_password) {
+    return res.status(400).json({ message: 'Passwords do not match.' });
+  }
+
+  try {
+    const exists = await db.request()
+      .input('email', email.trim().toLowerCase())
+      .input('phone', phone.trim())
+      .query('SELECT id, email, phone FROM students WHERE email = @email OR phone = @phone');
+
+    if (exists.recordset.length > 0) {
+      const dup = exists.recordset[0];
+      if (dup.email.toLowerCase() === email.trim().toLowerCase()) {
+        return res.status(409).json({ message: 'An account with this email already exists.' });
+      }
+      return res.status(409).json({ message: 'An account with this phone number already exists.' });
+    }
+
+    const otp       = String(Math.floor(100000 + Math.random() * 900000));
+    const normPhone = whatsapp.normalisePhone(phone.trim());
+
+    await whatsapp.sendOtp(normPhone, otp);
+    await saveOtp(normPhone, otp, 'registration', {
+      full_name, email: email.trim().toLowerCase(), password, phone: phone.trim(), city, category,
+    });
+
+    return res.json({ message: 'OTP sent to your WhatsApp number. Valid for 10 minutes.' });
+  } catch (err) {
+    console.error('OTP send error:', err);
+    return res.status(500).json({ message: err.message || 'Failed to send OTP. Please try again.' });
+  }
+});
+
+// ── Verify OTP and complete registration ─────────────────────
+// POST /auth/otp/verify   body: { phone, otp }
+router.post('/otp/verify', async (req, res) => {
+  const { phone, otp } = req.body;
+
+  if (!phone || !otp) {
+    return res.status(400).json({ message: 'Phone and OTP are required.' });
+  }
+
+  const normPhone = whatsapp.normalisePhone(phone.trim());
+
+  try {
+    const { valid, reason, pendingData } = await verifyAndConsumeOtp(normPhone, otp, 'registration');
+    if (!valid) return res.status(400).json({ message: reason });
+
+    const { full_name, email, password, phone: rawPhone, city, category } = pendingData;
+    const hash = await bcrypt.hash(password, 10);
+
+    const result = await db.request()
+      .input('full_name', full_name)
+      .input('email',     email)
+      .input('hash',      hash)
+      .input('phone',     rawPhone || null)
+      .input('city',      city     || null)
+      .input('category',  category || 'general')
+      .query(`
+        INSERT INTO students (full_name, email, password_hash, phone, city, category)
+        OUTPUT INSERTED.id, INSERTED.full_name, INSERTED.email
+        VALUES (@full_name, @email, @hash, @phone, @city, @category)
+      `);
+
+    const newStudent = result.recordset[0];
+    return res.status(201).json({
+      message: 'Phone verified and registration successful.',
+      role: 'student',
+      user: { id: newStudent.id, name: newStudent.full_name, email: newStudent.email },
+    });
+  } catch (err) {
+    console.error('Registration after OTP verify error:', err);
+    return res.status(500).json({ message: 'Server error. Please try again.' });
+  }
+});
+
 // ── Student registration ────────────────────────────────────
 router.post('/register/student', registerLimiter, async (req, res) => {
   const { full_name, email, password, phone, dob, gender, address, city, category } = req.body;
@@ -347,6 +493,70 @@ router.post('/register/student', registerLimiter, async (req, res) => {
     });
   } catch (err) {
     console.error('Student registration error:', err);
+    return res.status(500).json({ message: 'Server error. Please try again.' });
+  }
+});
+
+// ── Forgot password — send OTP ───────────────────────────────
+// POST /auth/forgot-password/send-otp   body: { phone }
+router.post('/forgot-password/send-otp', otpLimiter, async (req, res) => {
+  const { phone } = req.body;
+  if (!phone || !/^[6-9]\d{9}$/.test(phone.trim())) {
+    return res.status(400).json({ message: 'A valid 10-digit phone number is required.' });
+  }
+
+  try {
+    const found = await db.request()
+      .input('phone', phone.trim())
+      .query('SELECT id FROM students WHERE phone = @phone');
+
+    if (found.recordset.length === 0) {
+      return res.json({ message: 'If this number is registered, an OTP has been sent.' });
+    }
+
+    const otp       = String(Math.floor(100000 + Math.random() * 900000));
+    const normPhone = whatsapp.normalisePhone(phone.trim());
+
+    await whatsapp.sendOtp(normPhone, otp);
+    await saveOtp(normPhone, otp, 'password_reset', { phone: phone.trim() });
+
+    return res.json({ message: 'OTP sent to your WhatsApp number. Valid for 10 minutes.' });
+  } catch (err) {
+    console.error('Forgot password OTP error:', err);
+    return res.status(500).json({ message: err.message || 'Failed to send OTP. Please try again.' });
+  }
+});
+
+// ── Forgot password — verify OTP + reset password ────────────
+// POST /auth/forgot-password/reset   body: { phone, otp, new_password }
+router.post('/forgot-password/reset', async (req, res) => {
+  const { phone, otp, new_password } = req.body;
+
+  if (!phone || !otp || !new_password) {
+    return res.status(400).json({ message: 'Phone, OTP and new password are required.' });
+  }
+  if (new_password.length < 6) {
+    return res.status(400).json({ message: 'Password must be at least 6 characters.' });
+  }
+
+  const normPhone = whatsapp.normalisePhone(phone.trim());
+
+  try {
+    const { valid, reason, pendingData } = await verifyAndConsumeOtp(normPhone, otp, 'password_reset');
+    if (!valid) return res.status(400).json({ message: reason });
+
+    const hash   = await bcrypt.hash(new_password, 10);
+    const result = await db.request()
+      .input('phone', pendingData.phone)
+      .input('hash',  hash)
+      .query('UPDATE students SET password_hash = @hash WHERE phone = @phone');
+
+    if (!result.rowsAffected[0]) {
+      return res.status(404).json({ message: 'Account not found.' });
+    }
+    return res.json({ message: 'Password reset successful. You can now log in.' });
+  } catch (err) {
+    console.error('Password reset error:', err);
     return res.status(500).json({ message: 'Server error. Please try again.' });
   }
 });

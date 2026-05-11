@@ -25,6 +25,7 @@ const db      = require('./db');
 const mssqlShared = require('mssql');
 const { authenticate, requireCollegeAccess, requirePerm } = require('../middleware/auth');
 const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
+const whatsapp = require('../services/whatsapp');
 
 // All routes in this file require authentication and college ownership
 router.use(authenticate, requireCollegeAccess);
@@ -43,6 +44,26 @@ async function logActivity(appId, action, actorRole, note = null) {
       `);
   } catch (e) {
     console.warn('logActivity failed:', e.message);
+  }
+}
+
+// ── WhatsApp student info helper ────────────────────────────
+async function getStudentForNotification(appId) {
+  try {
+    const r = await db.request()
+      .input('id', mssqlShared.Int, parseInt(appId))
+      .query(`
+        SELECT s.full_name AS name, s.phone,
+               COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name
+        FROM applications a
+        JOIN students s ON s.id = a.student_id
+        LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+        WHERE a.id = @id
+      `);
+    return r.recordset[0] || null;
+  } catch (e) {
+    console.warn('getStudentForNotification failed:', e.message);
+    return null;
   }
 }
 
@@ -369,6 +390,7 @@ router.post('/:collegeId/applications/:appId/request-correction', requirePerm('r
       `);
 
     await logActivity(req.params.appId, 'correction_requested', 'college', note.trim());
+    getStudentForNotification(req.params.appId).then(s => s && whatsapp.notifyCorrectionRequested(s));
 
     return res.json({ success: true, message: 'Correction requested. Student has been notified.' });
   } catch (err) {
@@ -417,6 +439,7 @@ router.post('/:collegeId/applications/:appId/approve', requirePerm('review_appli
     }
 
     await logActivity(req.params.appId, 'accepted', 'college', null);
+    getStudentForNotification(req.params.appId).then(s => s && whatsapp.notifyApplicationAccepted(s));
 
     return res.json({ success: true, message: 'Application accepted. Student has been notified to visit the college.' });
   } catch (err) {
@@ -452,6 +475,7 @@ router.post('/:collegeId/applications/:appId/reject', requirePerm('review_applic
       `);
 
     await logActivity(req.params.appId, 'rejected', 'college', reason || null);
+    getStudentForNotification(req.params.appId).then(s => s && whatsapp.notifyApplicationRejected(s));
 
     return res.json({ success: true, message: 'Application rejected.' });
   } catch (err) {
@@ -530,6 +554,7 @@ router.post('/:collegeId/applications/:appId/confirm', requirePerm('review_appli
     }
 
     await logActivity(req.params.appId, 'confirmed', 'college', `Total fee: ₹${total}, Pay now: ₹${payNow}`);
+    getStudentForNotification(req.params.appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, payNow));
 
     return res.json({ success: true, message: 'Admission confirmed. Student can now pay the college fee.' });
   } catch (err) {
@@ -729,8 +754,10 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
     const noteText = note ? ` — ${note}` : '';
     if (fullyPaid) {
       await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${newTotalPaid.toLocaleString('en-IN')} (full)${noteText}`);
+      getStudentForNotification(appId).then(s => s && whatsapp.notifyFeesPaid(s, newTotalPaid));
     } else if (firstPaid) {
       await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${newTotalPaid.toLocaleString('en-IN')} paid, ₹${newRemaining.toLocaleString('en-IN')} remaining${noteText}`);
+      getStudentForNotification(appId).then(s => s && whatsapp.notifyFeesPaid(s, newTotalPaid));
     } else {
       await logActivity(appId, 'fee_instalment_paid', 'college', `Cash: ₹${amt.toLocaleString('en-IN')}, ₹${newRemaining.toLocaleString('en-IN')} remaining${noteText}`);
     }
@@ -791,6 +818,7 @@ router.post('/:collegeId/roll-numbers/generate', requirePerm('assign_subjects'),
     const pool4 = await db;
     const tx4   = pool4.transaction();
     await tx4.begin();
+    const assignedRolls = []; // track id→roll for post-commit notifications
     try {
       for (const app of pending.recordset) {
         await tx4.request()
@@ -801,12 +829,19 @@ router.post('/:collegeId/roll-numbers/generate', requirePerm('assign_subjects'),
             SET roll_number = @roll, status = 'roll_assigned', updated_at = GETDATE()
             WHERE id = @id
           `);
+        await logActivity(app.id, 'roll_assigned', 'college', `Roll number: ${nextRoll}`);
+        assignedRolls.push({ id: app.id, roll: String(nextRoll) });
         nextRoll++;
       }
       await tx4.commit();
     } catch (txErr) {
       await tx4.rollback();
       throw txErr;
+    }
+
+    // Fire WhatsApp notifications after commit (non-blocking)
+    for (const { id, roll } of assignedRolls) {
+      getStudentForNotification(id).then(s => s && whatsapp.notifyRollAssigned(s, roll));
     }
 
     return res.json({

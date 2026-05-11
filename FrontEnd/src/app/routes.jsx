@@ -3,6 +3,7 @@ import AdminLogin       from '../features/auth/pages/AdminLogin.jsx'
 import CollegeLogin     from '../features/auth/pages/CollegeLogin.jsx'
 import StudentLogin     from '../features/auth/pages/StudentLogin.jsx'
 import StudentRegister  from '../features/auth/pages/StudentRegister.jsx'
+import ForgotPassword   from '../features/auth/pages/ForgotPassword.jsx'
 import AdminDashboard   from '../features/admin/pages/AdminDashboard.jsx'
 import CollegeDashboard from '../features/college/pages/CollegeDashboard.jsx'
 import StudentDashboard from '../features/student/pages/StudentDashboard.jsx'
@@ -34,6 +35,7 @@ export default function AppRoutes() {
       <Route path={LOGIN_PATHS.college}  element={<CollegeLogin />} />
       <Route path={LOGIN_PATHS.admin}    element={<AdminLogin />} />
       <Route path="/register/student"    element={<StudentRegister />} />
+      <Route path="/forgot-password"     element={<ForgotPassword />} />
 
       {/* Multi-step application wizard — full-screen, no sidebar */}
       <Route element={<ProtectedRoute allowedRoles={['student']} />}>

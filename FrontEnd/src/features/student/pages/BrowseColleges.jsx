@@ -138,33 +138,11 @@ export default function BrowseColleges() {
             type="text"
             value={query}
             onChange={handleInputChange}
-            onBlur={() => setTimeout(() => setShowDrop(false), 150)}
-            onFocus={() => suggestions.length > 0 && setShowDrop(true)}
             placeholder="College name or code e.g. CL001"
             className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             autoFocus
             autoComplete="off"
           />
-          {sugLoading && (
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs">…</span>
-          )}
-          {showDrop && suggestions.length > 0 && (
-            <ul className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg overflow-hidden">
-              {suggestions.map(c => (
-                <li key={c.id}>
-                  <button
-                    type="button"
-                    onMouseDown={() => handleSelectSuggestion(c)}
-                    className="w-full text-left px-4 py-2.5 hover:bg-emerald-50 transition"
-                  >
-                    <span className="font-semibold text-sm text-slate-900">{c.name}</span>
-                    <span className="ml-2 text-xs text-slate-400 font-mono">{c.college_code}</span>
-                    {c.city && <span className="ml-1 text-xs text-slate-400">· {c.city}</span>}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
         </div>
         <button
           type="submit"

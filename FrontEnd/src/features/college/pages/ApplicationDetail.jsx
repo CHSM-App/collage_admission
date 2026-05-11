@@ -308,14 +308,6 @@ export default function ApplicationDetail({ collegeId, appId }) {
         />
       )}
 
-      {/* ── Collect Fee (cash or online) ── */}
-      {['confirmed', 'fees_paid'].includes(d.status) && canFees && d.fee_total_amount && parseFloat(d.fee_total_amount) > 0 && (
-        <CollegePayPanel
-          collegeId={collegeId}
-          appId={appId}
-          onPaid={fetchApp}
-        />
-      )}
 
       {/* ── Actions ── */}
 
@@ -516,7 +508,12 @@ function ActivityTimeline({ app }) {
 
   const entries = activity.map(a => {
     const meta = ACTION_META[a.action] || { label: a.action, color: 'bg-slate-400', actor: a.actor_role }
-    return { label: meta.label, color: meta.color, actor: meta.actor, date: a.created_at, note: a.action === 'subject_selected' ? null : a.note }
+    let label = meta.label
+    if (a.action === 'fees_paid') {
+      const isPartial = a.note && /remaining/i.test(a.note)
+      label = isPartial ? 'College Fee Partially Paid' : 'College Fee Fully Paid'
+    }
+    return { label, color: meta.color, actor: meta.actor, date: a.created_at, note: a.action === 'subject_selected' ? null : a.note }
   })
 
   return (
