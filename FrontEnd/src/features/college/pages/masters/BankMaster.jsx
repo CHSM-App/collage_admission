@@ -71,10 +71,10 @@ export default function BankMaster({ collegeId }) {
 
       {loading ? <SkeletonTable rows={4} cols={3} /> : (
         <>
-          {/* Desktop table */}
-          <div className="hidden sm:block overflow-x-auto rounded-xl border border-slate-100">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+          {/* Desktop table — matches Program Master grid styling. */}
+          <div className="hidden sm:block overflow-x-auto rounded-lg border-2 border-slate-400">
+            <table className="w-full text-sm border-collapse">
+              <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
                 <tr>
                   <MSTh col="bank_name"           label="Bank Name"   align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortBM} />
                   <MSTh col="bank_account_number" label="Account No." align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortBM} />
@@ -82,26 +82,26 @@ export default function BankMaster({ collegeId }) {
                   <MSTh col="ifsc_code"           label="IFSC"        align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortBM} />
                   <MSTh col="account_type"        label="Type"        align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortBM} />
                   <MSTh col="is_active"           label="Status"      align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortBM} />
-                  <th className="px-4 py-3" />
+                  <th className="px-4 py-2.5" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50">
-                {sorted.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400">No bank accounts configured.</td></tr>}
+              <tbody className="divide-y-2 divide-slate-300">
+                {sorted.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">No bank accounts configured.</td></tr>}
                 {sorted.map(r => (
-                  <tr key={r.ledger_code} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium text-slate-800">{r.bank_name}</td>
-                    <td className="px-4 py-3 font-mono text-slate-600">{r.bank_account_number}</td>
-                    <td className="px-4 py-3 text-slate-500">{r.branch || '—'}</td>
-                    <td className="px-4 py-3 font-mono text-slate-500">{r.ifsc_code || '—'}</td>
-                    <td className="px-4 py-3 text-center text-slate-600">{r.account_type || '—'}</td>
-                    <td className="px-4 py-3 text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}>
+                  <tr key={r.ledger_code} className="hover:bg-blue-50 transition">
+                    <td className="px-4 py-2.5 font-medium text-slate-900">{r.bank_name}</td>
+                    <td className="px-4 py-2.5 font-mono text-slate-700">{r.bank_account_number}</td>
+                    <td className="px-4 py-2.5 text-slate-700">{r.branch || '—'}</td>
+                    <td className="px-4 py-2.5 font-mono text-slate-700">{r.ifsc_code || '—'}</td>
+                    <td className="px-4 py-2.5 text-center text-slate-700">{r.account_type || '—'}</td>
+                    <td className="px-4 py-2.5 text-center">
+                      <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                         {r.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right space-x-2">
-                      {rw && <button onClick={() => openEdit(r)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>}
-                      {rw && r.is_active && <button onClick={() => softDelete(r)} className="text-xs text-red-400 hover:text-red-600 underline">Deactivate</button>}
+                    <td className="px-4 py-2.5 text-right space-x-3 whitespace-nowrap">
+                      {rw && <button onClick={() => openEdit(r)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>}
+                      {rw && r.is_active && <button onClick={() => softDelete(r)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Deactivate</button>}
                     </td>
                   </tr>
                 ))}
@@ -111,24 +111,24 @@ export default function BankMaster({ collegeId }) {
 
           {/* Mobile card list */}
           <div className="sm:hidden space-y-2">
-            {sorted.length === 0 && <p className="text-center text-slate-400 py-8 text-sm">No bank accounts configured.</p>}
+            {sorted.length === 0 && <p className="text-center text-slate-500 py-8 text-sm">No bank accounts configured.</p>}
             {sorted.map(r => (
-              <div key={r.ledger_code} className="border border-slate-100 rounded-xl p-4 bg-white">
+              <div key={r.ledger_code} className="border-2 border-slate-400 rounded-lg p-4 bg-white">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="font-medium text-slate-800">{r.bank_name}</p>
-                    <p className="font-mono text-sm text-slate-600 mt-0.5 truncate">{r.bank_account_number}</p>
+                    <p className="font-medium text-slate-900">{r.bank_name}</p>
+                    <p className="font-mono text-sm text-slate-700 mt-0.5 truncate">{r.bank_account_number}</p>
                     <p className="text-xs text-slate-400 mt-1">
                       {r.branch || '—'} · IFSC: {r.ifsc_code || '—'} · {r.account_type || '—'}
                     </p>
                   </div>
-                  <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}>
+                  <span className={`shrink-0 inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                     {r.is_active ? 'Active' : 'Inactive'}
                   </span>
                 </div>
                 <div className="flex gap-3 mt-3">
-                  <button onClick={() => openEdit(r)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>
-                  {r.is_active && <button onClick={() => softDelete(r)} className="text-xs text-red-400 hover:text-red-600 underline">Deactivate</button>}
+                  <button onClick={() => openEdit(r)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>
+                  {r.is_active && <button onClick={() => softDelete(r)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Deactivate</button>}
                 </div>
               </div>
             ))}
@@ -183,8 +183,11 @@ const inp = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:o
 function MSTh({ col, label, align = 'left', sortCol, sortDir, onSort }) {
   const active = sortCol === col
   return (
-    <th className={`px-4 py-3 text-${align} cursor-pointer select-none hover:text-slate-800 transition`} onClick={() => onSort(col)}>
-      <span className="inline-flex items-center gap-1">
+    <th
+      className={`px-4 py-2.5 text-${align} cursor-pointer select-none text-xs font-bold uppercase tracking-wide text-slate-600 hover:text-slate-900 transition`}
+      onClick={() => onSort(col)}
+    >
+      <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'ml-auto' : ''}`}>
         {label}
         <span className="text-slate-300">{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
       </span>

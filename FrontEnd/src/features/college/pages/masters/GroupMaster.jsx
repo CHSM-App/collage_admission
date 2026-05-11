@@ -186,33 +186,33 @@ export default function GroupMaster({ collegeId }) {
 
       {loading ? <SkeletonTable rows={4} cols={3} /> : (
         <>
-          {/* Desktop table */}
-          <div className="hidden sm:block overflow-x-auto rounded-xl border border-slate-100">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+          {/* Desktop table — matches Program Master grid styling. */}
+          <div className="hidden sm:block overflow-x-auto rounded-lg border-2 border-slate-400">
+            <table className="w-full text-sm border-collapse">
+              <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
                 <tr>
                   <GMTh col="group_code"        label="Group Code"  align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortGM} />
                   <GMTh col="group_description" label="Description" align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortGM} />
                   <GMTh col="course_count"      label="Subjects"    align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortGM} />
                   <GMTh col="is_active"         label="Status"      align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortGM} />
-                  <th className="px-4 py-3" />
+                  <th className="px-4 py-2.5" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50">
-                {sortedGroups.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-400">No groups defined.</td></tr>}
+              <tbody className="divide-y-2 divide-slate-300">
+                {sortedGroups.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">No groups defined.</td></tr>}
                 {sortedGroups.map(g => (
-                  <tr key={g.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-mono font-semibold text-slate-700">{g.group_code}</td>
-                    <td className="px-4 py-3 text-slate-700">{g.group_description}</td>
-                    <td className="px-4 py-3 text-center text-slate-500">{g.course_count}</td>
-                    <td className="px-4 py-3 text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${g.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}>
+                  <tr key={g.id} className="hover:bg-blue-50 transition">
+                    <td className="px-4 py-2.5 font-mono font-semibold text-slate-900">{g.group_code}</td>
+                    <td className="px-4 py-2.5 text-slate-700">{g.group_description}</td>
+                    <td className="px-4 py-2.5 text-center text-slate-700">{g.course_count}</td>
+                    <td className="px-4 py-2.5 text-center">
+                      <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${g.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                         {g.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right space-x-2">
-                      {rw && <button onClick={() => openEdit(g)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>}
-                      {rw && g.is_active && <button onClick={() => softDelete(g)} className="text-xs text-red-400 hover:text-red-600 underline">Deactivate</button>}
+                    <td className="px-4 py-2.5 text-right space-x-3 whitespace-nowrap">
+                      {rw && <button onClick={() => openEdit(g)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>}
+                      {rw && g.is_active && <button onClick={() => softDelete(g)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Deactivate</button>}
                     </td>
                   </tr>
                 ))}
@@ -222,22 +222,22 @@ export default function GroupMaster({ collegeId }) {
 
           {/* Mobile card list */}
           <div className="sm:hidden space-y-2">
-            {sortedGroups.length === 0 && <p className="text-center text-slate-400 py-8 text-sm">No groups defined.</p>}
+            {sortedGroups.length === 0 && <p className="text-center text-slate-500 py-8 text-sm">No groups defined.</p>}
             {sortedGroups.map(g => (
-              <div key={g.id} className="border border-slate-100 rounded-xl p-4 bg-white">
+              <div key={g.id} className="border-2 border-slate-400 rounded-lg p-4 bg-white">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <p className="font-mono font-semibold text-slate-700">{g.group_code}</p>
+                    <p className="font-mono font-semibold text-slate-900">{g.group_code}</p>
                     <p className="text-sm text-slate-700 mt-0.5">{g.group_description}</p>
                     <p className="text-xs text-slate-400 mt-1">{g.course_count} subjects</p>
                   </div>
-                  <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${g.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}>
+                  <span className={`shrink-0 inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${g.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                     {g.is_active ? 'Active' : 'Inactive'}
                   </span>
                 </div>
                 <div className="flex gap-3 mt-3">
-                  <button onClick={() => openEdit(g)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>
-                  {g.is_active && <button onClick={() => softDelete(g)} className="text-xs text-red-400 hover:text-red-600 underline">Deactivate</button>}
+                  <button onClick={() => openEdit(g)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>
+                  {g.is_active && <button onClick={() => softDelete(g)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Deactivate</button>}
                 </div>
               </div>
             ))}
@@ -325,8 +325,11 @@ const inp = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:o
 function GMTh({ col, label, align = 'left', sortCol, sortDir, onSort }) {
   const active = sortCol === col
   return (
-    <th className={`px-4 py-3 text-${align} cursor-pointer select-none hover:text-slate-800 transition`} onClick={() => onSort(col)}>
-      <span className="inline-flex items-center gap-1">
+    <th
+      className={`px-4 py-2.5 text-${align} cursor-pointer select-none text-xs font-bold uppercase tracking-wide text-slate-600 hover:text-slate-900 transition`}
+      onClick={() => onSort(col)}
+    >
+      <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'ml-auto' : ''}`}>
         {label}
         <span className="text-slate-300">{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
       </span>

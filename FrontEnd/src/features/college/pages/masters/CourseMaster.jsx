@@ -191,33 +191,33 @@ export default function CourseMaster({ collegeId }) {
       {success && <p className="mb-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{success}</p>}
 
       {loading ? <SkeletonTable rows={4} cols={5} /> : (
-        <div className="overflow-x-auto rounded-xl border border-slate-100 -mx-0">
+        <div className="overflow-x-auto rounded-lg border-2 border-slate-400 -mx-0">
           <div className="min-w-[860px]">
-            <table className="w-full text-xs">
-              <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+            <table className="w-full text-xs border-collapse">
+              <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
                 <tr>
-                  <th className="px-3 py-2 text-left w-28">Subject Code</th>
-                  <th className="px-3 py-2 text-left">Subject Title</th>
-                  <th className="px-3 py-2 text-center w-16">Credits</th>
-                  <th className="px-3 py-2 text-center w-20">Type</th>
-                  <th className="px-3 py-2 text-center w-20">Max Int.</th>
-                  <th className="px-3 py-2 text-center w-20">Min Int.</th>
-                  <th className="px-3 py-2 text-center w-20">Max SE</th>
-                  <th className="px-3 py-2 text-center w-20">Min SE</th>
-                  <th className="px-3 py-2 text-center w-20">Max Tot.</th>
-                  <th className="px-3 py-2 text-center w-20">Min Tot.</th>
-                  <th className="px-3 py-2 text-center w-16">Order</th>
-                  <th className="px-3 py-2 w-8" />
+                  <th className="px-3 py-2.5 text-left w-28">Subject Code</th>
+                  <th className="px-3 py-2.5 text-left">Subject Title</th>
+                  <th className="px-3 py-2.5 text-center w-16">Credits</th>
+                  <th className="px-3 py-2.5 text-center w-20">Type</th>
+                  <th className="px-3 py-2.5 text-center w-20">Max Int.</th>
+                  <th className="px-3 py-2.5 text-center w-20">Min Int.</th>
+                  <th className="px-3 py-2.5 text-center w-20">Max SE</th>
+                  <th className="px-3 py-2.5 text-center w-20">Min SE</th>
+                  <th className="px-3 py-2.5 text-center w-20">Max Tot.</th>
+                  <th className="px-3 py-2.5 text-center w-20">Min Tot.</th>
+                  <th className="px-3 py-2.5 text-center w-16">Order</th>
+                  <th className="px-3 py-2.5 w-8" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50">
+              <tbody className="divide-y-2 divide-slate-300">
                 {rows.length === 0 && (
-                  <tr><td colSpan={12} className="px-4 py-8 text-center text-slate-400">
+                  <tr><td colSpan={12} className="px-4 py-8 text-center text-slate-500">
                     No subjects yet. Click "+ Add Row" to begin.
                   </td></tr>
                 )}
                 {rows.map(r => (
-                  <tr key={r._key} className={r.is_new ? 'bg-blue-50/40' : 'hover:bg-slate-50'}>
+                  <tr key={r._key} className={r.is_new ? 'bg-blue-50/40' : 'hover:bg-blue-50 transition'}>
                     <td className="px-2 py-1.5">
                       <input value={r.course_code} onChange={e => updateRow(r._key,'course_code',e.target.value.toUpperCase())}
                         className={cell} placeholder="UBIFSI.1" />
