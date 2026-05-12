@@ -173,10 +173,10 @@ export default function FeesMaster({ collegeId }) {
 
       {loading ? <SkeletonTable rows={4} cols={4} /> : (
         <>
-          {/* Desktop table */}
-          <div className="hidden sm:block overflow-x-auto rounded-xl border border-slate-100">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+          {/* Desktop table — matches Program Master grid styling. */}
+          <div className="hidden sm:block overflow-x-auto rounded-lg border-2 border-slate-400">
+            <table className="w-full text-sm border-collapse">
+              <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
                 <tr>
                   <FMTh col="sequence_auto_fees"  label="Seq"     align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-8" />
                   <FMTh col="fees_head"           label="Fees Head" align="left" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} />
@@ -186,41 +186,41 @@ export default function FeesMaster({ collegeId }) {
                   <FMTh col="fees_cat2_amount"    label="Cat-2"   align="right"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
                   <FMTh col="fees_cat3_amount"    label="Cat-3"   align="right"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
                   <FMTh col="fees_cat4_amount"    label="Cat-4"   align="right"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
-                  <th className="px-3 py-2 text-center w-20">Refund.</th>
+                  <th className="px-3 py-2.5 text-center w-20">Refund.</th>
                   <FMTh col="is_active"           label="Status"  align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-16" />
-                  <th className="px-3 py-2 w-20" />
+                  <th className="px-3 py-2.5 w-20" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50">
-                {sorted.length === 0 && <tr><td colSpan={11} className="px-4 py-8 text-center text-slate-400">No fee heads configured.</td></tr>}
+              <tbody className="divide-y-2 divide-slate-300">
+                {sorted.length === 0 && <tr><td colSpan={11} className="px-4 py-8 text-center text-slate-500">No fee heads configured.</td></tr>}
                 {sorted.map(r => (
-                  <tr key={r.fees_code} className="hover:bg-slate-50">
-                    <td className="px-3 py-2 text-slate-400 text-center">{r.sequence_auto_fees}</td>
-                    <td className="px-3 py-2">
-                      <p className="font-medium text-slate-800">{r.fees_head}</p>
+                  <tr key={r.fees_code} className="hover:bg-blue-50 transition">
+                    <td className="px-3 py-2.5 text-slate-500 text-center">{r.sequence_auto_fees}</td>
+                    <td className="px-3 py-2.5">
+                      <p className="font-medium text-slate-900">{r.fees_head}</p>
                       {r.bank_name && <p className="text-xs text-slate-400">{r.bank_name}</p>}
                     </td>
-                    <td className="px-3 py-2 text-slate-500 text-xs">{r.short_name}</td>
-                    <td className="px-3 py-2 text-center">
+                    <td className="px-3 py-2.5 text-slate-700 text-xs">{r.short_name}</td>
+                    <td className="px-3 py-2.5 text-center">
                       <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{r.fees_type}</span>
                       {r.is_other_misc ? <span className="ml-1 text-xs text-amber-500">Misc</span> : null}
                     </td>
                     {['fees_cat1_amount','fees_cat2_amount','fees_cat3_amount','fees_cat4_amount'].map(k => (
-                      <td key={k} className="px-3 py-2 text-right font-mono text-slate-700">
+                      <td key={k} className="px-3 py-2.5 text-right font-mono text-slate-700">
                         ₹{parseFloat(r[k] || 0).toLocaleString('en-IN')}
                       </td>
                     ))}
-                    <td className="px-3 py-2 text-center">
+                    <td className="px-3 py-2.5 text-center">
                       {r.is_refundable ? <span className="text-green-600 text-xs font-medium">Yes</span> : <span className="text-slate-300 text-xs">No</span>}
                     </td>
-                    <td className="px-3 py-2 text-center">
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}>
+                    <td className="px-3 py-2.5 text-center">
+                      <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                         {r.is_active ? 'Active' : 'Off'}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-right space-x-1">
-                      {rw && <button onClick={() => openEdit(r)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>}
-                      {rw && r.is_active && <button onClick={() => softDelete(r)} className="text-xs text-red-400 hover:text-red-600 underline">Off</button>}
+                    <td className="px-3 py-2.5 text-right space-x-3 whitespace-nowrap">
+                      {rw && <button onClick={() => openEdit(r)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>}
+                      {rw && r.is_active && <button onClick={() => softDelete(r)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Off</button>}
                     </td>
                   </tr>
                 ))}
@@ -230,18 +230,18 @@ export default function FeesMaster({ collegeId }) {
 
           {/* Mobile card list */}
           <div className="sm:hidden space-y-2">
-            {rows.length === 0 && <p className="text-center text-slate-400 py-8 text-sm">No fee heads configured.</p>}
+            {rows.length === 0 && <p className="text-center text-slate-500 py-8 text-sm">No fee heads configured.</p>}
             {rows.map(r => (
-              <div key={r.fees_code} className="border border-slate-100 rounded-xl p-4 bg-white">
+              <div key={r.fees_code} className="border-2 border-slate-400 rounded-lg p-4 bg-white">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-medium text-slate-800">{r.fees_head}</p>
+                      <p className="font-medium text-slate-900">{r.fees_head}</p>
                       <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{r.fees_type}</span>
                       {r.is_other_misc && <span className="text-xs text-amber-500">Misc</span>}
                     </div>
                     {r.bank_name && <p className="text-xs text-slate-400 mt-0.5">{r.bank_name}</p>}
-                    <div className="grid grid-cols-2 gap-x-4 mt-2 text-xs text-slate-500">
+                    <div className="grid grid-cols-2 gap-x-4 mt-2 text-xs text-slate-700">
                       <span>Cat-1: ₹{parseFloat(r.fees_cat1_amount || 0).toLocaleString('en-IN')}</span>
                       <span>Cat-2: ₹{parseFloat(r.fees_cat2_amount || 0).toLocaleString('en-IN')}</span>
                       <span>Cat-3: ₹{parseFloat(r.fees_cat3_amount || 0).toLocaleString('en-IN')}</span>
@@ -249,13 +249,13 @@ export default function FeesMaster({ collegeId }) {
                     </div>
                     {r.is_refundable && <p className="text-xs text-green-600 mt-1">Refundable</p>}
                   </div>
-                  <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}>
+                  <span className={`shrink-0 inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                     {r.is_active ? 'Active' : 'Off'}
                   </span>
                 </div>
                 <div className="flex gap-3 mt-3">
-                  {rw && <button onClick={() => openEdit(r)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>}
-                  {rw && r.is_active && <button onClick={() => softDelete(r)} className="text-xs text-red-400 hover:text-red-600 underline">Deactivate</button>}
+                  {rw && <button onClick={() => openEdit(r)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>}
+                  {rw && r.is_active && <button onClick={() => softDelete(r)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Deactivate</button>}
                 </div>
               </div>
             ))}
@@ -456,8 +456,11 @@ const inp = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:o
 function FMTh({ col, label, align = 'left', sortCol, sortDir, onSort, className = '' }) {
   const active = sortCol === col
   return (
-    <th className={`px-3 py-2 text-${align} cursor-pointer select-none hover:text-slate-800 transition ${className}`} onClick={() => onSort(col)}>
-      <span className="inline-flex items-center gap-1 justify-inherit">
+    <th
+      className={`px-3 py-2.5 text-${align} cursor-pointer select-none text-xs font-bold uppercase tracking-wide text-slate-600 hover:text-slate-900 transition ${className}`}
+      onClick={() => onSort(col)}
+    >
+      <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'ml-auto' : ''}`}>
         {label}
         <span className="text-slate-300">{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
       </span>

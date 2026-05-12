@@ -309,36 +309,38 @@ export default function ClassMaster({ collegeId }) {
         <SkeletonTable rows={4} cols={4} />
       ) : (
         <>
-          {/* Desktop table */}
-          <div className="hidden sm:block overflow-x-auto rounded-xl border border-slate-100">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+          {/* Desktop table — styled to match the Program Master grid:
+              border-2/slate-400 outer, slate-100 header, bold uppercase tracked
+              titles, blue-50 row hover, slate-300 row dividers. */}
+          <div className="hidden sm:block overflow-x-auto rounded-lg border-2 border-slate-400">
+            <table className="w-full text-sm border-collapse">
+              <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
                 <tr>
                   <MSTh col="degree_course_code" label="Program" align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortCM} />
                   <MSTh col="year_of_study"      label="Year"    align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortCM} />
                   <MSTh col="label"              label="Label"   align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortCM} />
                   <MSTh col="is_active"          label="Status"  align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortCM} />
-                  <th className="px-4 py-3" />
+                  <th className="px-4 py-2.5" />
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-50">
+              <tbody className="divide-y-2 divide-slate-300">
                 {sorted.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-slate-400">
+                    <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
                       {hasFilters ? 'No classes match your filters.' : 'No classes configured yet.'}
                     </td>
                   </tr>
                 )}
                 {sorted.map(row => (
-                  <tr key={row.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 text-slate-800">
-                      <span className="font-mono font-semibold text-slate-700">{row.degree_course_code}</span>
+                  <tr key={row.id} className="hover:bg-blue-50 transition">
+                    <td className="px-4 py-2.5 text-slate-700">
+                      <span className="font-mono font-semibold text-slate-900">{row.degree_course_code}</span>
                       <span className="text-slate-400 ml-1 text-xs">— {row.degree_course_name}</span>
                     </td>
-                    <td className="px-4 py-3 text-center font-semibold text-slate-700">
+                    <td className="px-4 py-2.5 text-center font-semibold text-slate-700">
                       {yearShort(row.year_of_study)}
                     </td>
-                    <td className="px-4 py-3 text-slate-500">
+                    <td className="px-4 py-2.5 text-slate-700">
                       {editId === row.id ? (
                         <input
                           value={editLabel}
@@ -347,10 +349,10 @@ export default function ClassMaster({ collegeId }) {
                           placeholder="Optional label"
                         />
                       ) : (
-                        row.label || <span className="text-slate-300">—</span>
+                        row.label || <span className="text-slate-400">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-center">
+                    <td className="px-4 py-2.5 text-center">
                       {editId === row.id ? (
                         <label className="flex items-center justify-center gap-1 text-xs text-slate-700">
                           <input
@@ -362,29 +364,29 @@ export default function ClassMaster({ collegeId }) {
                           Active
                         </label>
                       ) : (
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${row.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}>
+                        <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${row.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                           {row.is_active ? 'Active' : 'Inactive'}
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right space-x-2">
+                    <td className="px-4 py-2.5 text-right space-x-3 whitespace-nowrap">
                       {rw && editId === row.id ? (
                         <>
                           <button
                             onClick={() => saveEdit(row)}
                             disabled={editSaving}
-                            className="text-xs text-slate-700 hover:text-slate-900 underline disabled:opacity-50"
+                            className="text-xs font-medium text-slate-700 hover:text-slate-900 underline disabled:opacity-50"
                           >
                             {editSaving ? 'Saving…' : 'Save'}
                           </button>
-                          <button onClick={cancelEdit} className="text-xs text-slate-400 hover:text-slate-600 underline">
+                          <button onClick={cancelEdit} className="text-xs font-medium text-slate-400 hover:text-slate-600 underline">
                             Cancel
                           </button>
                         </>
                       ) : rw ? (
                         <>
-                          <button onClick={() => startEdit(row)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>
-                          <button onClick={() => handleDelete(row)} className="text-xs text-red-400 hover:text-red-600 underline">Delete</button>
+                          <button onClick={() => startEdit(row)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>
+                          <button onClick={() => handleDelete(row)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Delete</button>
                         </>
                       ) : null}
                     </td>
@@ -400,21 +402,21 @@ export default function ClassMaster({ collegeId }) {
               <p className="text-center text-slate-400 py-8 text-sm">{hasFilters ? 'No classes match your filters.' : 'No classes configured yet.'}</p>
             )}
             {rows.map(row => (
-              <div key={row.id} className="border border-slate-100 rounded-xl p-4 bg-white">
+              <div key={row.id} className="border-2 border-slate-400 rounded-lg p-4 bg-white">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <p className="font-mono font-semibold text-slate-700">{row.degree_course_code} — {yearShort(row.year_of_study)}</p>
-                    <p className="text-sm text-slate-500 mt-0.5">{row.degree_course_name}</p>
+                    <p className="font-mono font-semibold text-slate-900">{row.degree_course_code} — {yearShort(row.year_of_study)}</p>
+                    <p className="text-sm text-slate-700 mt-0.5">{row.degree_course_name}</p>
                     {row.label && <p className="text-xs text-slate-400 mt-1">{row.label}</p>}
                   </div>
-                  <span className={`shrink-0 px-2 py-0.5 rounded-full text-xs font-medium ${row.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}>
+                  <span className={`shrink-0 inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${row.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                     {row.is_active ? 'Active' : 'Inactive'}
                   </span>
                 </div>
                 {rw && (
                   <div className="flex gap-3 mt-3">
-                    <button onClick={() => startEdit(row)} className="text-xs text-slate-500 hover:text-slate-800 underline">Edit</button>
-                    <button onClick={() => handleDelete(row)} className="text-xs text-red-400 hover:text-red-600 underline">Delete</button>
+                    <button onClick={() => startEdit(row)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>
+                    <button onClick={() => handleDelete(row)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Delete</button>
                   </div>
                 )}
               </div>
@@ -431,8 +433,11 @@ const inp = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:o
 function MSTh({ col, label, align = 'left', sortCol, sortDir, onSort }) {
   const active = sortCol === col
   return (
-    <th className={`px-4 py-3 text-${align} cursor-pointer select-none hover:text-slate-800 transition`} onClick={() => onSort(col)}>
-      <span className="inline-flex items-center gap-1">
+    <th
+      className={`px-4 py-2.5 text-${align} cursor-pointer select-none text-xs font-bold uppercase tracking-wide text-slate-600 hover:text-slate-900 transition`}
+      onClick={() => onSort(col)}
+    >
+      <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'ml-auto' : ''}`}>
         {label}
         <span className="text-slate-300">{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
       </span>
