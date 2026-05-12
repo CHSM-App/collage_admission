@@ -6,4 +6,9 @@ export default defineConfig({
   build: {
     sourcemap: false,  // never expose source in production bundle
   },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test/setup.js'],
+  },
 })

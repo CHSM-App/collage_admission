@@ -82,7 +82,7 @@ export default function DocumentsMaster({ collegeId }) {
 
   const loadRows = useCallback(() => {
     if (!selFaculty) return
-    getRequiredDocumentsMaster(collegeId, selFaculty, selYear)
+    getRequiredDocumentsMaster(collegeId, { faculty_master_id: selFaculty, year_of_study: selYear })
       .then(r => setRows(r.data.data || []))
   }, [collegeId, selFaculty, selYear])
 
