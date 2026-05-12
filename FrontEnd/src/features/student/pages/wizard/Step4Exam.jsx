@@ -6,6 +6,8 @@ const EXAM_ROWS = {
   1: ['SSC', 'HSC'],
   2: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2'],
   3: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2'],
+  4: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2', 'TY_SEM1', 'TY_SEM2'],
+  5: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2', 'TY_SEM1', 'TY_SEM2', '4Y_SEM1', '4Y_SEM2'],
 }
 
 const ROW_LABEL = {
@@ -15,12 +17,18 @@ const ROW_LABEL = {
   FY_SEM2: 'F.Y. Sem II',
   SY_SEM1: 'S.Y. Sem I',
   SY_SEM2: 'S.Y. Sem II',
+  TY_SEM1: 'T.Y. Sem I',
+  TY_SEM2: 'T.Y. Sem II',
+  '4Y_SEM1': '4Y Sem I',
+  '4Y_SEM2': '4Y Sem II',
 }
 
 const MANDATORY = {
   1: ['SSC', 'HSC'],
   2: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2'],
   3: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2'],
+  4: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2', 'TY_SEM1', 'TY_SEM2'],
+  5: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2', 'TY_SEM1', 'TY_SEM2', '4Y_SEM1', '4Y_SEM2'],
 }
 
 function emptyRow() {

@@ -21,10 +21,11 @@ function Field({ label, required, children }) {
 }
 
 export default function CreateCollege({ onCreated }) {
-  const [form, setForm]       = useState(EMPTY)
-  const [saving, setSaving]   = useState(false)
-  const [success, setSuccess] = useState(null)
-  const [error, setError]     = useState('')
+  const [form, setForm]         = useState(EMPTY)
+  const [saving, setSaving]     = useState(false)
+  const [success, setSuccess]   = useState(null)
+  const [error, setError]       = useState('')
+  const [showPass, setShowPass] = useState(false)
 
   function handleChange(e) {
     let value = e.target.value
@@ -122,8 +123,23 @@ export default function CreateCollege({ onCreated }) {
               placeholder="admin@college.edu.in" className={inputCls} />
           </Field>
           <Field label="Admin Password" required>
-            <input name="admin_password" type="password" value={form.admin_password} onChange={handleChange} required
-              placeholder="Min 8 characters" minLength={8} className={inputCls} />
+            <div className="relative">
+              <input name="admin_password" type={showPass ? 'text' : 'password'} value={form.admin_password} onChange={handleChange} required
+                placeholder="Min 8 characters" minLength={8} className={`${inputCls} pr-10`} />
+              <button type="button" onClick={() => setShowPass(v => !v)}
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-400 hover:text-slate-600">
+                {showPass ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.875 18.825A10.05 10.05 0 0112 19c-5 0-9-4-9-7s4-7 9-7a9.97 9.97 0 016.364 2.273M15 12a3 3 0 11-4.243-4.243M3 3l18 18" />
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </Field>
         </fieldset>
 

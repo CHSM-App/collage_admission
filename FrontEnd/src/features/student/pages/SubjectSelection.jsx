@@ -3,7 +3,7 @@ import api from '../../../services/api.js'
 import Button from '../../../shared/components/Button.jsx'
 import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 
-const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year' }
+const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year', 4: '4Y — Fourth Year', 5: '5Y — Fifth Year' }
 
 export default function SubjectSelection({ application, onDone, onCancel }) {
   const [info, setInfo]           = useState(null)

@@ -14,6 +14,7 @@ const router  = express.Router();
 const db      = require('./db');
 const mssql   = require('mssql');
 const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
+const { authenticate, requireAdmin } = require('../middleware/auth');
 const logger  = require('../config/logger');
 
 // ── Generate next college code (CL001, CL002, …) ────────────
@@ -29,8 +30,8 @@ async function generateCollegeCode() {
   return `CL${String(num).padStart(3, '0')}`
 }
 
-// Create a new college (admin onboarding)
-router.post('/', async (req, res) => {
+// Create a new college (admin onboarding) — requires super-admin auth
+router.post('/', authenticate, requireAdmin, async (req, res) => {
   const { name, address, city, phone, email, admin_email, admin_password, college_code, application_fee } = req.body
 
   if (!name || !email || !admin_email || !admin_password) {

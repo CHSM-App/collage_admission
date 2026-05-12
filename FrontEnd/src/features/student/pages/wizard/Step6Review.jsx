@@ -4,8 +4,14 @@ import { StepHeader } from './Step1Context.jsx'
 import Button from '../../../../shared/components/Button.jsx'
 import { useRazorpay } from '../../../../shared/hooks/useRazorpay.js'
 
-const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year' }
-const EXAM_ROWS  = { 1: ['SSC', 'HSC'], 2: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2'], 3: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2'] }
+const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year', 4: '4Y — Fourth Year', 5: '5Y — Fifth Year' }
+const EXAM_ROWS  = {
+  1: ['SSC', 'HSC'],
+  2: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2'],
+  3: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2'],
+  4: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2', 'TY_SEM1', 'TY_SEM2'],
+  5: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2', 'TY_SEM1', 'TY_SEM2', '4Y_SEM1', '4Y_SEM2'],
+}
 
 export default function Step6Review({ data, errors, globalError, saving, appId, applicationFeePaid, onBack, onEditStep, onDone }) {
   const [accepted, setAccepted]         = useState(!!data.declaration_accepted)
@@ -188,7 +194,7 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
                   {(EXAM_ROWS[data.year_of_study] || EXAM_ROWS[1]).filter(type => data.exams[type]).map(type => { const row = data.exams[type]; return (
                     <tr key={type} className="even:bg-slate-50 hover:bg-blue-50 transition">
                       <td className="border border-slate-200 px-2 py-1 font-semibold text-slate-700 whitespace-nowrap">
-                        {{'SSC':'SSC','HSC':'HSC','FY_SEM1':'F.Y. Sem I','FY_SEM2':'F.Y. Sem II','SY_SEM1':'S.Y. Sem I','SY_SEM2':'S.Y. Sem II'}[type] || type}
+                        {{'SSC':'SSC','HSC':'HSC','FY_SEM1':'F.Y. Sem I','FY_SEM2':'F.Y. Sem II','SY_SEM1':'S.Y. Sem I','SY_SEM2':'S.Y. Sem II','TY_SEM1':'T.Y. Sem I','TY_SEM2':'T.Y. Sem II','4Y_SEM1':'4Y Sem I','4Y_SEM2':'4Y Sem II'}[type] || type}
                       </td>
                       <td className="border border-slate-200 px-2 py-1">{row.institute || '—'}</td>
                       <td className="border border-slate-200 px-2 py-1">{row.board || '—'}</td>

@@ -4,6 +4,7 @@ var path        = require('path');
 var cookieParser= require('cookie-parser');
 var logger      = require('morgan');
 var cors        = require('cors');
+var helmet      = require('helmet');
 var pinoLogger  = require('./config/logger');
 
 var authRouter           = require('./routes/auth');
@@ -25,6 +26,9 @@ var app = express();
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'pug');
 
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' }, // allow static uploads to be fetched cross-origin
+}));
 app.use(cors({
   origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(o => o.trim()) : false,
   credentials: true,

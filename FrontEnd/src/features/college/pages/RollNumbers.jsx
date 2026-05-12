@@ -4,7 +4,7 @@ import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
 import { SkeletonLine } from '../../../shared/components/Skeleton.jsx'
 
-const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
+const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 
 export default function RollNumbers({ collegeId }) {
   const { canWrite } = usePermissions()

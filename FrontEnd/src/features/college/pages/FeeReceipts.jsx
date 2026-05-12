@@ -5,7 +5,7 @@ import { useRazorpay } from '../../../shared/hooks/useRazorpay.js'
 import Pagination from '../../../shared/components/Pagination.jsx'
 import { SkeletonTable, SkeletonCards } from '../../../shared/components/Skeleton.jsx'
 
-const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
+const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 
 function parseLocalDate(str) {
   if (!str) return null

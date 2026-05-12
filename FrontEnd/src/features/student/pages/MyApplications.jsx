@@ -8,7 +8,7 @@ import PaymentReceipts from './PaymentReceipts.jsx'
 import ApplicationPrintView from './ApplicationPrintView.jsx'
 import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
 
-const YEAR_LABEL  = { 1: 'FY', 2: 'SY', 3: 'TY' }
+const YEAR_LABEL  = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 const STATUS_META = {
   draft:                { label: 'Draft',               color: 'bg-slate-100 text-slate-600' },
   payment_pending:      { label: 'Payment Pending',     color: 'bg-yellow-100 text-yellow-700' },

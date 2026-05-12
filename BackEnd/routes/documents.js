@@ -188,19 +188,28 @@ router.delete('/student-documents/:id', async (req, res) => {
 })
 
 // ── GET /student-documents/:id/file ─────────────────────────
-// Serves the actual file. In production add auth check here.
+// Serves the actual file. Caller must own the document (student)
+// or be a college/admin user (for application review).
 router.get('/student-documents/:id/file', async (req, res) => {
   const docId = parseInt(req.params.id)
   try {
     const docRes = await db.request()
       .input('id', mssql.Int, docId)
-      .query('SELECT file_path, file_name FROM student_documents WHERE id=@id')
+      .query('SELECT file_path, file_name, student_id FROM student_documents WHERE id=@id')
 
     if (!docRes.recordset.length) {
       return res.status(404).json({ success: false, message: 'Not found.' })
     }
 
-    const { file_path, file_name } = docRes.recordset[0]
+    const { file_path, file_name, student_id } = docRes.recordset[0]
+    const u = req.user
+
+    // Ownership check: student can only fetch their own docs;
+    // college and admin users can fetch any (for application review)
+    if (u.role === 'student' && u.id !== student_id) {
+      return res.status(403).json({ success: false, message: 'Access denied.' })
+    }
+
     const absPath = path.join(__dirname, '..', 'public', file_path)
 
     if (!fs.existsSync(absPath)) {

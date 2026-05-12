@@ -4,7 +4,7 @@ import api from '../../../services/api.js'
 import Pagination from '../../../shared/components/Pagination.jsx'
 import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
 
-const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
+const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 
 const STATUS_META = {
   submitted:                { label: 'Review Pending',           color: 'bg-blue-100 text-blue-700' },

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '../../../services/api.js'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 
-const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
+const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 const ACTIVE_STATUSES = ['draft','submitted','under_review','correction_requested','correction_done','scrutiny_accepted','doc_verification_pending','confirmed','fees_paid','roll_assigned','enrolled']
 
 export default function BrowseColleges() {

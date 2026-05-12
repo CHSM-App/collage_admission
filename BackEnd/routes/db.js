@@ -9,7 +9,7 @@ const sqlConfig = {
     port: parseInt(process.env.DB_PORT),
     options: {
         encrypt: true,
-        trustServerCertificate: true
+        trustServerCertificate: process.env.NODE_ENV !== 'production'
     },
     pool: {
         max: 30,                       // match max concurrent VUs in load test
@@ -80,6 +80,13 @@ const db = {
     transaction() {
         if (!pool) throw new Error('[DB] Pool is not available — reconnect in progress.');
         return pool.transaction();
+    },
+
+    async close() {
+        if (pool) {
+            try { await pool.close(); } catch (_) {}
+            pool = null;
+        }
     },
 };
 

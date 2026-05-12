@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react'
 import api from '../../../services/api.js'
 import { SkeletonDetail } from '../../../shared/components/Skeleton.jsx'
 
-const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year' }
+const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year', 4: '4Y — Fourth Year', 5: '5Y — Fifth Year' }
 
 export default function ApplicationPrintView({ appId, regNumber, onClose }) {
   const [data, setData]       = useState(null)

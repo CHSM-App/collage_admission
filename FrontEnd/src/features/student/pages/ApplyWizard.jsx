@@ -455,4 +455,4 @@ function formatDate(d) {
   return date.toISOString().slice(0, 10)
 }
 
-const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
+const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
