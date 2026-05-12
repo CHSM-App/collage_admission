@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import api from '../../../../services/api.js'
+import { getFaculty, getClasses, createClass, updateClass, deleteClass } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 
@@ -80,7 +80,7 @@ export default function ClassMaster({ collegeId }) {
   const hasFilters = search || filterProgram || filterYear
 
   useEffect(() => {
-    api.get(`masters/${collegeId}/faculty`)
+    getFaculty(collegeId)
       .then(r => {
         const active = (r.data.data || []).filter(f => f.is_active)
         setPrograms(active)
@@ -91,7 +91,7 @@ export default function ClassMaster({ collegeId }) {
 
   const load = useCallback(() => {
     setLoading(true)
-    api.get(`masters/${collegeId}/class`)
+    getClasses(collegeId)
       .then(r => setRows(r.data.data || []))
       .catch(() => setError('Failed to load classes.'))
       .finally(() => setLoading(false))
@@ -106,7 +106,7 @@ export default function ClassMaster({ collegeId }) {
     if (!form.faculty_master_id) return setFormError('Select a program.')
     setSaving(true); setFormError('')
     try {
-      await api.post(`masters/${collegeId}/class`, {
+      await createClass(collegeId, {
         faculty_master_id: form.faculty_master_id,
         year_of_study:     form.year_of_study,
         label:             form.label || null,
@@ -131,7 +131,7 @@ export default function ClassMaster({ collegeId }) {
   async function saveEdit(row) {
     setEditSaving(true)
     try {
-      await api.put(`masters/${collegeId}/class/${row.id}`, {
+      await updateClass(collegeId, row.id, {
         label:     editLabel || null,
         is_active: editActive,
       })
@@ -145,7 +145,7 @@ export default function ClassMaster({ collegeId }) {
   async function handleDelete(row) {
     if (!confirm(`Delete class "${row.degree_course_code} — ${yearShort(row.year_of_study)}"? This cannot be undone.`)) return
     try {
-      await api.delete(`masters/${collegeId}/class/${row.id}`)
+      await deleteClass(collegeId, row.id)
       load()
     } catch (err) {
       alert(err?.response?.data?.message || 'Delete failed.')

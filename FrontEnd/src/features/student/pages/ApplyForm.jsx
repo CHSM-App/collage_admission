@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import api from '../../../services/api.js'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
+import { getCollege, getAdmissionPeriods, getAdmissionPeriodFee } from '../../../services/collegeService.js'
+import { createApplication, submitApplication } from '../../../services/applicationService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { SkeletonForm } from '../../../shared/components/Skeleton.jsx'
 import { useToast } from '../../../context/ToastContext.jsx'
@@ -23,9 +24,9 @@ export default function ApplyForm({ periodId, collegeId }) {
 
   useEffect(() => {
     Promise.all([
-      api.get(`colleges/${collegeId}`),
-      api.get(`colleges/${collegeId}/admission-periods`),
-      api.get(`colleges/${collegeId}/admission-periods/${periodId}/fee`),
+      getCollege(collegeId),
+      getAdmissionPeriods(collegeId),
+      getAdmissionPeriodFee(collegeId, periodId),
     ])
       .then(([colRes, periodsRes, feeRes]) => {
         setCollege(colRes.data.data)
@@ -45,7 +46,7 @@ export default function ApplyForm({ periodId, collegeId }) {
 
     try {
       // 1. Create draft application
-      const createRes = await api.post('applications', {
+      const createRes = await createApplication({
         student_id:         user.id,
         college_id:         parseInt(collegeId),
         course_id:          period.course_id,
@@ -57,7 +58,7 @@ export default function ApplyForm({ periodId, collegeId }) {
       const appId = createRes.data.data.id
 
       // 2. Simulate payment → submit
-      const submitRes = await api.post(`applications/${appId}/submit`)
+      const submitRes = await submitApplication(appId)
 
       toast.success('Application submitted successfully!')
       setSuccess({

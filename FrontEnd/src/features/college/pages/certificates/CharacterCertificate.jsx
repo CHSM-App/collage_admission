@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import api from '../../../../services/api.js'
+import { getCharacterList, getCharacterNextNo, createCharacter, updateCharacter, lookupStudent } from '../../../../services/certificateService.js'
 import FormField from '../../../../shared/components/FormField.jsx'
 import {
   GenderRadio,
@@ -58,14 +58,14 @@ export default function CharacterCertificate({ collegeId, readOnly }) {
 
   const loadList = useCallback(() => {
     setLoading(true)
-    api.get(`certificates/${collegeId}/character`)
+    getCharacterList(collegeId)
       .then(r => setList(r.data.data || []))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [collegeId])
 
   const loadNextNo = useCallback(() => {
-    api.get(`certificates/${collegeId}/character/next-no`)
+    getCharacterNextNo(collegeId)
       .then(r => setForm(f => ({ ...f, certificate_no: r.data.data?.certificate_no || '' })))
       .catch(() => {})
   }, [collegeId])
@@ -86,7 +86,7 @@ export default function CharacterCertificate({ collegeId, readOnly }) {
     if (!reg) { setGlobalError('Enter a registration number to look up.'); return }
     setGlobalError(''); setLookingUp(true)
     try {
-      const r = await api.get(`certificates/${collegeId}/student-lookup`, { params: { reg_no: reg } })
+      const r = await lookupStudent(collegeId, reg)
       const d = r.data.data
       setForm(f => ({
         ...f,
@@ -174,10 +174,10 @@ export default function CharacterCertificate({ collegeId, readOnly }) {
     try {
       let saved
       if (mode === 'new') {
-        const r = await api.post(`certificates/${collegeId}/character`, payload)
+        const r = await createCharacter(collegeId, payload)
         saved = r.data.data
       } else {
-        const r = await api.put(`certificates/${collegeId}/character/${form.character_certificate_id}`, payload)
+        const r = await updateCharacter(collegeId, form.character_certificate_id, payload)
         saved = r.data.data
       }
       loadRecord(saved)

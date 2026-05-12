@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import api from '../../../../services/api.js'
+import { getApplicationForm, linkFormDocument, unlinkFormDocument } from '../../../../services/applicationService.js'
+import { uploadStudentDocument, getDocumentFile } from '../../../../services/documentService.js'
 import { StepHeader, StepFooter } from './Step1Context.jsx'
 
 const MAX_SIZE_MB = 5
@@ -32,7 +33,7 @@ export default function Step5Documents({
 
   async function refreshLinked() {
     try {
-      const res = await api.get(`api/applications/${appId}/form`)
+      const res = await getApplicationForm(appId)
       const formData = res.data.data
       // Pass back both linked docs and refreshed student docs list
       onDocumentsChange(formData.documents || [], formData.student_documents || [])
@@ -45,7 +46,7 @@ export default function Step5Documents({
     setUploading(u => ({ ...u, [dtId]: true }))
     clearUploadError(dtId)
     try {
-      await api.post(`api/applications/${appId}/form-documents`, {
+      await linkFormDocument(appId, {
         student_id:       studentId,
         document_type_id: dtId,
         file_name:        sd.file_name,
@@ -78,14 +79,10 @@ export default function Step5Documents({
       const fd = new FormData()
       fd.append('file', file)
       fd.append('document_type_id', dtId)
-      const uploadRes = await api.post(
-        `student-documents?student_id=${studentId}`,
-        fd,
-        { headers: { 'Content-Type': 'multipart/form-data' } }
-      )
+      const uploadRes = await uploadStudentDocument(studentId, fd)
       const { file_path, file_name } = uploadRes.data.data
 
-      await api.post(`api/applications/${appId}/form-documents`, {
+      await linkFormDocument(appId, {
         student_id:       studentId,
         document_type_id: dtId,
         file_name,
@@ -103,7 +100,7 @@ export default function Step5Documents({
     clearUploadError(dtId)
     setUploading(u => ({ ...u, [dtId]: true }))
     try {
-      await api.delete(`api/applications/${appId}/form-documents/${dtId}`)
+      await unlinkFormDocument(appId, dtId)
       refreshLinked()
     } catch (err) {
       setUploadError(dtId, err?.response?.data?.message || 'Remove failed.')
@@ -283,7 +280,7 @@ function DocPreviewModal({ doc, onClose }) {
 
   useEffect(() => {
     let url
-    api.get(doc.file_path, { responseType: 'blob' })
+    getDocumentFile(doc.file_path)
       .then(res => {
         url = URL.createObjectURL(new Blob([res.data], { type: mime }))
         setBlobUrl(url)

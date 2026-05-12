@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import api from '../../../services/api.js'
+import { generateRollNumbers } from '../../../services/collegeAdminService.js'
+import { getFaculty } from '../../../services/masterService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
 import { SkeletonLine } from '../../../shared/components/Skeleton.jsx'
@@ -17,7 +18,7 @@ export default function RollNumbers({ collegeId }) {
   const [form, setForm] = useState({ course_id: '' })
 
   useEffect(() => {
-    api.get(`masters/${collegeId}/faculty`)
+    getFaculty(collegeId)
       .then(r => setCourses((r.data.data || []).filter(f => f.is_active)))
       .catch(() => setError('Failed to load courses.'))
       .finally(() => setLoading(false))
@@ -30,7 +31,7 @@ export default function RollNumbers({ collegeId }) {
     setResult(null)
     setError('')
     try {
-      const res = await api.post(`college-admin/${collegeId}/roll-numbers/generate`, form)
+      const res = await generateRollNumbers(collegeId, form)
       setResult(res.data)
     } catch (err) {
       setError(err?.response?.data?.message || 'Failed to generate roll numbers.')

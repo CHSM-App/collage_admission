@@ -4,8 +4,8 @@
  * no dependency on the React DOM or Tailwind classes in the print output.
  */
 import { useEffect, useState } from 'react'
-import api from '../../../services/api.js'
 import { SkeletonDetail } from '../../../shared/components/Skeleton.jsx'
+import { getApplicationForm } from '../../../services/applicationService.js'
 
 const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year', 4: '4Y — Fourth Year', 5: '5Y — Fifth Year' }
 
@@ -15,7 +15,7 @@ export default function ApplicationPrintView({ appId, regNumber, onClose }) {
   const [error, setError]     = useState('')
 
   useEffect(() => {
-    api.get(`api/applications/${appId}/form`)
+    getApplicationForm(appId)
       .then(r => setData(r.data.data))
       .catch(() => setError('Failed to load application details.'))
       .finally(() => setLoading(false))

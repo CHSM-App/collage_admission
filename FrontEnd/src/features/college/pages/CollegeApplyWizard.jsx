@@ -15,7 +15,8 @@
 import { useEffect, useReducer, useCallback, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
-import api from '../../../services/api.js'
+import { initApplicationByCollege, getApplicationForm, updateApplicationStep, acceptDeclaration, submitApplication, getRequiredDocuments, getStudentAutofill } from '../../../services/applicationService.js'
+import { getStudentDocuments } from '../../../services/documentService.js'
 import StepIndicator from '../../../shared/components/StepIndicator.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import { SkeletonForm } from '../../../shared/components/Skeleton.jsx'
@@ -107,7 +108,7 @@ export default function CollegeApplyWizard() {
           const academic_year = searchParams.get('academic_year')
           const year_of_study = searchParams.get('year_of_study') || undefined
 
-          const initRes = await api.post('api/applications/init-by-college', {
+          const initRes = await initApplicationByCollege({
             student_id:          studentId,
             college_id:          user.id,
             course_id,
@@ -121,24 +122,22 @@ export default function CollegeApplyWizard() {
         }
 
         // Fetch form data
-        const formRes = await api.get(`api/applications/${appId}/form`)
+        const formRes = await getApplicationForm(appId)
         const { application: app, previous_exam, previous_exams, documents } = formRes.data.data
 
         if (!studentId) studentId = app.student_id
 
         // Autofill from student profile
-        const fillRes = await api.get(`api/student-profile/autofill?student_id=${studentId}`)
+        const fillRes = await getStudentAutofill(studentId)
         const { profile, last_application } = fillRes.data.data
         const merged = buildAutofill(app, last_application || {}, profile || {})
 
         // Student's existing documents
-        const sdRes = await api.get(`student-documents?student_id=${studentId}`)
+        const sdRes = await getStudentDocuments(studentId)
         const studentDocs = sdRes.data.data || []
 
         // Required documents
-        const rdRes = await api.get(
-          `api/required-documents?college_id=${app.college_id}&course_id=${app.course_id}&year=${app.year_of_study}`
-        )
+        const rdRes = await getRequiredDocuments(app.college_id, app.course_id, app.year_of_study)
         const requiredDocs = rdRes.data.data || []
 
         const examsData = {}
@@ -204,7 +203,7 @@ export default function CollegeApplyWizard() {
     dispatch({ type: 'CLEAR_ERRORS' })
     try {
       if (endpoint) {
-        await api.patch(`api/applications/${state.applicationId}/${endpoint}`, body)
+        await updateApplicationStep(state.applicationId, endpoint, body)
       }
       dispatch({ type: 'SET_MAX_STEP', step: nextStep })
       dispatch({ type: 'SET_STEP', step: nextStep })
@@ -227,8 +226,8 @@ export default function CollegeApplyWizard() {
     setSubmitError('')
     dispatch({ type: 'SET_SAVING', value: true })
     try {
-      await api.post(`api/applications/${state.applicationId}/declaration`, { accepted: true })
-      const submitRes = await api.post(`applications/${state.applicationId}/submit`)
+      await acceptDeclaration(state.applicationId, { accepted: true })
+      const submitRes = await submitApplication(state.applicationId)
       setRegistrationNumber(submitRes.data.data?.registration_number || '')
     } catch (err) {
       const resp = err?.response?.data

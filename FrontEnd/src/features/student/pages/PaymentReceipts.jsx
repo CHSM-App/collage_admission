@@ -3,8 +3,8 @@
  * Each receipt is printable / downloadable as PDF.
  */
 import { useEffect, useRef, useState } from 'react'
-import api from '../../../services/api.js'
 import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
+import { getPaymentReceipts } from '../../../services/paymentService.js'
 
 const YEAR_LABEL = { 1: 'First Year (FY)', 2: 'Second Year (SY)', 3: 'Third Year (TY)', 4: 'Fourth Year (4Y)', 5: 'Fifth Year (5Y)' }
 const TYPE_LABEL = {
@@ -41,7 +41,7 @@ export default function PaymentReceipts({ applicationId, onClose }) {
   const [activeId, setActiveId] = useState(null)
 
   useEffect(() => {
-    api.get(`payments/receipts/${applicationId}`)
+    getPaymentReceipts(applicationId)
       .then(r => {
         const d = r.data.data
         setData(d)

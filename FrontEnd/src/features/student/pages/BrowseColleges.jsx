@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import api from '../../../services/api.js'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
+import { getApplications } from '../../../services/applicationService.js'
+import { searchColleges, getCollegeByCode } from '../../../services/collegeService.js'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 const ACTIVE_STATUSES = ['draft','submitted','under_review','correction_requested','correction_done','scrutiny_accepted','doc_verification_pending','confirmed','fees_paid','roll_assigned','enrolled']
@@ -23,7 +24,7 @@ export default function BrowseColleges() {
 
   useEffect(() => {
     if (user?.id) {
-      api.get(`applications?student_id=${user.id}&limit=100`)
+      getApplications(user.id)
         .then(r => setMyApps(r.data.data || []))
         .catch(() => {})
     }
@@ -35,7 +36,7 @@ export default function BrowseColleges() {
     debounceRef.current = setTimeout(async () => {
       setSugLoading(true)
       try {
-        const res = await api.get(`colleges/search?q=${encodeURIComponent(q)}`)
+        const res = await searchColleges(q)
         setSuggestions(res.data.data || [])
         setShowDrop(true)
       } catch {
@@ -59,7 +60,7 @@ export default function BrowseColleges() {
     setResult(null)
     setLoading(true)
     try {
-      const res = await api.get(`colleges/by-code/${encodeURIComponent(collegeCode)}`)
+      const res = await getCollegeByCode(collegeCode)
       setResult(res.data.data)
     } catch (err) {
       setError(err?.response?.data?.message || 'Something went wrong. Please try again.')
@@ -85,7 +86,7 @@ export default function BrowseColleges() {
     setLoading(true)
     try {
       // Try search first to get the code, then load
-      const res = await api.get(`colleges/search?q=${encodeURIComponent(trimmed)}`)
+      const res = await searchColleges(trimmed)
       const matches = res.data.data || []
       if (matches.length === 1) {
         setQuery(matches[0].name)

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import api from '../../../../services/api.js'
+import { getFaculty, createFaculty, updateFaculty, deleteFaculty } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 
@@ -37,7 +37,7 @@ export default function FacultyMaster({ collegeId }) {
 
   function load() {
     setLoading(true)
-    api.get(`masters/${collegeId}/faculty`)
+    getFaculty(collegeId)
       .then(r => setRows(r.data.data || []))
       .catch(() => setError('Failed to load.'))
       .finally(() => setLoading(false))
@@ -78,9 +78,9 @@ export default function FacultyMaster({ collegeId }) {
     setSaving(true); setError('')
     try {
       if (modal === 'new') {
-        await api.post(`masters/${collegeId}/faculty`, form)
+        await createFaculty(collegeId, form)
       } else {
-        await api.put(`masters/${collegeId}/faculty/${modal.code_no}`, form)
+        await updateFaculty(collegeId, modal.code_no, form)
       }
       closeModal(); load()
     } catch (e) {
@@ -106,7 +106,7 @@ export default function FacultyMaster({ collegeId }) {
   async function softDelete(row) {
     if (!confirm(`Deactivate "${row.degree_course_name}"?`)) return
     try {
-      await api.delete(`masters/${collegeId}/faculty/${row.code_no}`)
+      await deleteFaculty(collegeId, row.code_no)
       load()
     } catch { alert('Delete failed.') }
   }

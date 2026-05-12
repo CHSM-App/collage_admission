@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState, useCallback } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import api from '../../../services/api.js'
+import { useApplicationsList } from '../hooks/useApplicationsList.js'
+import { useSortableTable } from '../../../shared/hooks/useSortableTable.js'
 import Pagination from '../../../shared/components/Pagination.jsx'
 import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
 
@@ -47,37 +48,18 @@ function useStatusCounts(apps) {
 export default function ApplicationInbox({ collegeId }) {
   const navigate = useNavigate()
 
-  const [apps, setApps]         = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 })
-  const [page, setPage]         = useState(1)
-  const LIMIT = 20
-
-  // Filters
+  const [page, setPage]                 = useState(1)
   const [search, setSearch]             = useState('')
   const [filterStatus, setFilterStatus] = useState('')
   const [filterCourse, setFilterCourse] = useState('')
   const [filterYear, setFilterYear]     = useState('')
 
-  const fetchApps = useCallback(() => {
-    setLoading(true)
-    const params = new URLSearchParams({ page, limit: LIMIT })
-    if (filterStatus) params.set('status', filterStatus)
-    if (filterCourse) params.set('course_id', filterCourse)
-    if (filterYear)   params.set('year_of_study', filterYear)
-    api.get(`college-admin/${collegeId}/applications?${params}`)
-      .then(r => {
-        setApps(r.data.data || [])
-        setPagination(r.data.pagination || { page: 1, totalPages: 1, total: 0 })
-      })
-      .catch(() => setApps([]))
-      .finally(() => setLoading(false))
-  }, [collegeId, page, filterStatus, filterCourse, filterYear])
-
-  useEffect(() => { fetchApps() }, [fetchApps])
-
   // Reset to page 1 whenever filters change
   useEffect(() => { setPage(1) }, [filterStatus, filterCourse, filterYear])
+
+  const { apps, loading, pagination, fetchApps } = useApplicationsList(collegeId, {
+    page, filterStatus, filterCourse, filterYear,
+  })
 
   const statusCounts = useStatusCounts(apps)
 
@@ -92,38 +74,22 @@ export default function ApplicationInbox({ collegeId }) {
     return [...set].sort()
   }, [apps])
 
-  const [sortCol, setSortCol] = useState('submitted_at')
-  const [sortDir, setSortDir] = useState('desc')
-
-  function toggleSort(col) {
-    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortCol(col); setSortDir('asc') }
-  }
-
-  // Client-side search filter + sort (only on the current page)
-  const filtered = useMemo(() => {
+  // Client-side search filter (haystack join) then sort via shared hook
+  const searched = useMemo(() => {
     const q = search.trim().toLowerCase()
-    const base = q
-      ? apps.filter(a => {
-          const haystack = [
-            a.student_name, a.student_email, a.phone,
-            a.registration_number, a.course_name, a.academic_year,
-          ].join(' ').toLowerCase()
-          return haystack.includes(q)
-        })
-      : apps
-
-    return [...base].sort((a, b) => {
-      let av = a[sortCol], bv = b[sortCol]
-      if (sortCol === 'year_of_study') { av = Number(av); bv = Number(bv) }
-      if (av == null) av = ''
-      if (bv == null) bv = ''
-      const cmp = typeof av === 'number' && typeof bv === 'number'
-        ? av - bv
-        : String(av).localeCompare(String(bv))
-      return sortDir === 'asc' ? cmp : -cmp
+    if (!q) return apps
+    return apps.filter(a => {
+      const haystack = [
+        a.student_name, a.student_email, a.phone,
+        a.registration_number, a.course_name, a.academic_year,
+      ].join(' ').toLowerCase()
+      return haystack.includes(q)
     })
-  }, [apps, search, sortCol, sortDir])
+  }, [apps, search])
+
+  const { sorted: filtered, sortCol, sortDir, toggleSort } = useSortableTable(
+    searched, 'submitted_at', 'desc', { numericCols: ['year_of_study'] }
+  )
 
   const hasFilters = search || filterStatus || filterCourse || filterYear
 

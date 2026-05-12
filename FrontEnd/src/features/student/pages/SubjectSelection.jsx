@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import api from '../../../services/api.js'
 import Button from '../../../shared/components/Button.jsx'
+import { getSubjectSelections, getSubjectsList, saveSubjectSelections } from '../../../services/applicationService.js'
 import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 
 const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year', 4: '4Y — Fourth Year', 5: '5Y — Fifth Year' }
@@ -21,7 +21,7 @@ export default function SubjectSelection({ application, onDone, onCancel }) {
   useEffect(() => {
     async function load() {
       try {
-        const selRes = await api.get(`api/applications/${application.id}/subject-selections`)
+        const selRes = await getSubjectSelections(application.id)
         const d = selRes.data.data
         setInfo(d)
 
@@ -33,8 +33,8 @@ export default function SubjectSelection({ application, onDone, onCancel }) {
 
         // Fetch available subject lists for both semesters in parallel
         const [r1, r2] = await Promise.all([
-          api.get('api/subjects-list', { params: { college_id: d.college_id, course_id: d.course_id, semester: 1 } }),
-          api.get('api/subjects-list', { params: { college_id: d.college_id, course_id: d.course_id, semester: 2 } }),
+          getSubjectsList(d.college_id, d.course_id, 1),
+          getSubjectsList(d.college_id, d.course_id, 2),
         ])
         setList1(r1.data.data || [])
         setList2(r2.data.data || [])
@@ -69,7 +69,7 @@ export default function SubjectSelection({ application, onDone, onCancel }) {
     setSaving(true)
     setError('')
     try {
-      await api.post(`api/applications/${application.id}/subject-selections`, { semester, subjects })
+      await saveSubjectSelections(application.id, { semester, subjects })
       setSaved(true)
     } catch (err) {
       setError(err?.response?.data?.message || 'Failed to save. Please try again.')

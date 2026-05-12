@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
-import api from '../../../services/api.js'
+import { getCollegeAdminAdmissionPeriods, createAdmissionPeriod, updateAdmissionPeriod } from '../../../services/collegeAdminService.js'
+import { getFaculty } from '../../../services/masterService.js'
+import { getAllAdminColleges } from '../../../services/adminService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
@@ -33,8 +35,8 @@ export default function AdmissionPeriods({ collegeId }) {
 
   function fetchData() {
     Promise.all([
-      api.get(`college-admin/${collegeId}/admission-periods`),
-      api.get(`masters/${collegeId}/faculty`),
+      getCollegeAdminAdmissionPeriods(collegeId),
+      getFaculty(collegeId),
     ])
       .then(([pRes, cRes]) => {
         setPeriods(pRes.data.data || [])
@@ -44,7 +46,7 @@ export default function AdmissionPeriods({ collegeId }) {
       .finally(() => setLoading(false))
 
     // College fee fetch is optional — failure should not block the page
-    api.get(`admin/colleges`)
+    getAllAdminColleges()
       .then(res => {
         const col = (res.data.data || []).find(c => String(c.id) === String(collegeId))
         setCollegeFee(col?.application_fee ?? null)
@@ -104,7 +106,7 @@ export default function AdmissionPeriods({ collegeId }) {
     }
     setSaving(true)
     try {
-      await api.post(`college-admin/${collegeId}/admission-periods`, form)
+      await createAdmissionPeriod(collegeId, form)
       setShowForm(false)
       setForm({ course_id: '', year_of_study: '1', academic_year: '2026-27', start_date: '', end_date: '', total_seats: '' })
       fetchData()
@@ -121,7 +123,7 @@ export default function AdmissionPeriods({ collegeId }) {
     if (period.is_active) {
       // Closing
       try {
-        await api.put(`college-admin/${collegeId}/admission-periods/${period.id}`, { is_active: false })
+        await updateAdmissionPeriod(collegeId, period.id, { is_active: false })
         fetchData()
       } catch { alert('Failed to update.') }
     } else {
@@ -137,7 +139,7 @@ export default function AdmissionPeriods({ collegeId }) {
         return
       }
       try {
-        await api.put(`college-admin/${collegeId}/admission-periods/${period.id}`, { is_active: true })
+        await updateAdmissionPeriod(collegeId, period.id, { is_active: true })
         fetchData()
       } catch { alert('Failed to update.') }
     }
@@ -147,7 +149,7 @@ export default function AdmissionPeriods({ collegeId }) {
   async function disablePeriod(period) {
     if (!confirm(`Disable "${period.course_name} — ${YEAR_LABEL[period.year_of_study]} · ${period.academic_year}"?\nThis will permanently close admissions for this period. It cannot be reopened.`)) return
     try {
-      await api.put(`college-admin/${collegeId}/admission-periods/${period.id}`, { is_active: false, is_disabled: true })
+      await updateAdmissionPeriod(collegeId, period.id, { is_active: false, is_disabled: true })
       fetchData()
     } catch { alert('Failed to disable.') }
   }
@@ -178,7 +180,7 @@ export default function AdmissionPeriods({ collegeId }) {
     }
     setEditSaving(true)
     try {
-      await api.put(`college-admin/${collegeId}/admission-periods/${period.id}`, { end_date: editEndDate })
+      await updateAdmissionPeriod(collegeId, period.id, { end_date: editEndDate })
       setEditingId(null)
       fetchData()
     } catch (err) {

@@ -1,7 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import api from '../../../services/api.js'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
+import { deleteApplication } from '../../../services/applicationService.js'
+import { useMyApplications } from '../hooks/useMyApplications.js'
+import { useSortableTable } from '../../../shared/hooks/useSortableTable.js'
 import SubjectSelection from './SubjectSelection.jsx'
 import CollegeFeePayment from './CollegeFeePayment.jsx'
 import PaymentReceipts from './PaymentReceipts.jsx'
@@ -28,49 +30,24 @@ const STATUS_META = {
 export default function MyApplications() {
   const { user }    = useAuthContext()
   const navigate    = useNavigate()
-  const [apps, setApps]                     = useState([])
-  const [loading, setLoading]               = useState(true)
-  const [search, setSearch]                 = useState('')
   const [filterStatus, setFilterStatus]     = useState('')
-  const [sortCol, setSortCol]               = useState('submitted_at')
-  const [sortDir, setSortDir]               = useState('desc')
   const [feePayApp, setFeePayApp]           = useState(null)
   const [receiptsAppId, setReceiptsAppId]   = useState(null)
   const [selectSubjectsApp, setSelectSubjectsApp] = useState(null)
   const [expandedId, setExpandedId]         = useState(null)
 
-  function fetchApps() {
-    api.get(`applications?student_id=${user.id}&limit=100`)
-      .then(r => setApps(r.data.data || []))
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }
+  const { apps, loading, fetchApps } = useMyApplications(user.id)
 
-  useEffect(() => { fetchApps() }, [user.id])
+  const statusFiltered = useMemo(() => {
+    if (!filterStatus) return apps
+    return apps.filter(app => app.status === filterStatus)
+  }, [apps, filterStatus])
 
-  function toggleSort(col) {
-    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortCol(col); setSortDir('asc') }
-  }
-
-  const filtered = useMemo(() => {
-    const list = apps.filter(app => {
-      if (filterStatus && app.status !== filterStatus) return false
-      if (search) {
-        const q = search.toLowerCase()
-        if (!app.college_name?.toLowerCase().includes(q) &&
-            !app.course_name?.toLowerCase().includes(q) &&
-            !app.registration_number?.toLowerCase().includes(q)) return false
-      }
-      return true
-    })
-    return [...list].sort((a, b) => {
-      const av = a[sortCol] ?? ''
-      const bv = b[sortCol] ?? ''
-      const cmp = typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv))
-      return sortDir === 'asc' ? cmp : -cmp
-    })
-  }, [apps, search, filterStatus, sortCol, sortDir])
+  const { sorted: filtered, query: search, setQuery: setSearch, sortCol, sortDir, toggleSort } = useSortableTable(
+    statusFiltered, 'submitted_at', 'desc', {
+      searchFields: ['college_name', 'course_name', 'registration_number'],
+    }
+  )
 
   if (selectSubjectsApp) {
     return (
@@ -494,7 +471,7 @@ function DeleteDraftButton({ appId, onDeleted }) {
     if (!confirm('Delete this draft application? This cannot be undone.')) return
     setDeleting(true)
     try {
-      await api.delete(`applications/${appId}`)
+      await deleteApplication(appId)
       onDeleted()
     } catch (err) {
       alert(err?.response?.data?.message || 'Delete failed.')

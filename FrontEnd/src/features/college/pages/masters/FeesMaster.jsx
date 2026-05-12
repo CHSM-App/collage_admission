@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
-import api from '../../../../services/api.js'
+import { getFeesList, createFees, updateFees, deleteFees, getBankLedgers, getFaculty, getClasswiseFees, saveClasswiseFees } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 
@@ -61,8 +61,8 @@ export default function FeesMaster({ collegeId }) {
   function load() {
     setLoading(true)
     Promise.all([
-      api.get(`masters/${collegeId}/fees`),
-      api.get(`masters/${collegeId}/bank`),
+      getFeesList(collegeId),
+      getBankLedgers(collegeId),
     ]).then(([fRes, bRes]) => {
       setRows(fRes.data.data || [])
       setBanks((bRes.data.data || []).filter(b => b.is_active))
@@ -79,8 +79,8 @@ export default function FeesMaster({ collegeId }) {
     if (!form.short_name.trim()) return setError('Short Name is required.')
     setSaving(true); setError('')
     try {
-      if (modal === 'new') await api.post(`masters/${collegeId}/fees`, form)
-      else await api.put(`masters/${collegeId}/fees/${modal.fees_code}`, form)
+      if (modal === 'new') await createFees(collegeId, form)
+      else await updateFees(collegeId, modal.fees_code, form)
       setModal(null); load()
     } catch (e) { setError(e?.response?.data?.message || 'Save failed.') }
     finally { setSaving(false) }
@@ -88,14 +88,14 @@ export default function FeesMaster({ collegeId }) {
 
   async function softDelete(row) {
     if (!confirm(`Deactivate "${row.fees_head}"?`)) return
-    try { await api.delete(`masters/${collegeId}/fees/${row.fees_code}`); load() }
+    try { await deleteFees(collegeId, row.fees_code); load() }
     catch { alert('Failed.') }
   }
 
   // ── Classwise Fees ──────────────────────────────────────────
   async function openCw() {
     setCwModal(true); setCwError(''); setCwSuccess('')
-    const r = await api.get(`masters/${collegeId}/faculty`)
+    const r = await getFaculty(collegeId)
     const active = (r.data.data || []).filter(f => f.is_active)
     setCwFaculty(active)
     if (active.length) { setCwSelFac(active[0].code_no) }
@@ -112,7 +112,7 @@ export default function FeesMaster({ collegeId }) {
 
   useEffect(() => {
     if (!cwModal || !cwSelFac) return
-    api.get(`masters/${collegeId}/fees/classwise?faculty_id=${cwSelFac}&year_level=${cwSelYear}`)
+    getClasswiseFees(collegeId, cwSelFac, cwSelYear)
       .then(cwRes => {
         const existing = cwRes.data.data || []
         const merged = rows.filter(r => r.is_active).map(r => {
@@ -143,7 +143,7 @@ export default function FeesMaster({ collegeId }) {
   async function saveCw() {
     setCwSaving(true); setCwError(''); setCwSuccess('')
     try {
-      await api.post(`masters/${collegeId}/fees/classwise/save`, {
+      await saveClasswiseFees(collegeId, {
         faculty_master_id: cwSelFac,
         year_level: cwSelYear,
         rows: cwRows.map(r => ({

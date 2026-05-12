@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import api from '../../../../services/api.js'
+import { getFaculty, getGroups, getGroup, getCoursesForSemester, createGroup, updateGroup, deleteGroup } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 
@@ -45,7 +45,7 @@ export default function GroupMaster({ collegeId }) {
   }), [groups, sortCol, sortDir])
 
   useEffect(() => {
-    api.get(`masters/${collegeId}/faculty`)
+    getFaculty(collegeId)
       .then(r => {
         const active = (r.data.data || []).filter(f => f.is_active)
         setFaculty(active)
@@ -65,7 +65,7 @@ export default function GroupMaster({ collegeId }) {
   const loadGroups = useCallback(() => {
     if (!selFaculty) return
     setLoading(true)
-    api.get(`masters/${collegeId}/group?faculty_id=${selFaculty}&semester=${selSem}`)
+    getGroups(collegeId, selFaculty, selSem)
       .then(r => setGroups(r.data.data || []))
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -75,7 +75,7 @@ export default function GroupMaster({ collegeId }) {
 
   // Load course hints for ALL faculties at the selected semester (for elective autocomplete)
   useEffect(() => {
-    api.get(`masters/${collegeId}/course?semester=${selSem}`)
+    getCoursesForSemester(collegeId, selSem)
       .then(r => setCourseHints(r.data.data || []))
       .catch(() => {})
   }, [collegeId, selSem])
@@ -86,7 +86,7 @@ export default function GroupMaster({ collegeId }) {
   }
 
   async function openEdit(g) {
-    const r = await api.get(`masters/${collegeId}/group/${g.id}`)
+    const r = await getGroup(collegeId, g.id)
     const data = r.data.data
     const existing = data.courses || []
     const padded = Array.from({ length: NUM_SLOTS }, (_, i) => {
@@ -134,8 +134,8 @@ export default function GroupMaster({ collegeId }) {
       courses: form.courses.filter(c => c.course_code.trim()),
     }
     try {
-      if (modal === 'new') await api.post(`masters/${collegeId}/group`, payload)
-      else await api.put(`masters/${collegeId}/group/${modal.id}`, payload)
+      if (modal === 'new') await createGroup(collegeId, payload)
+      else await updateGroup(collegeId, modal.id, payload)
       setModal(null); loadGroups()
     } catch (e) { setError(e?.response?.data?.message || 'Save failed.') }
     finally { setSaving(false) }
@@ -143,7 +143,7 @@ export default function GroupMaster({ collegeId }) {
 
   async function softDelete(g) {
     if (!confirm(`Deactivate group "${g.group_code}"?`)) return
-    try { await api.delete(`masters/${collegeId}/group/${g.id}`); loadGroups() }
+    try { await deleteGroup(collegeId, g.id); loadGroups() }
     catch { alert('Failed.') }
   }
 

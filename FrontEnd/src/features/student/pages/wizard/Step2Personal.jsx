@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import FormField from '../../../../shared/components/FormField.jsx'
 import { StepHeader, StepFooter } from './Step1Context.jsx'
-import api from '../../../../services/api.js'
+import { getFaculty, getDivisions, computeFees } from '../../../../services/masterService.js'
 
 // ── Fee category determination (client-side preview, same logic as backend) ──
 const BCC_CASTES    = ['SC', 'ST', 'DT/VJ', 'NT(A)', 'NT(B)', 'NT(C)', 'SBC']
@@ -59,12 +59,12 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
     if (!collegeId || !courseId || !yearLevel) return
 
     // Fetch divisions for this program+year
-    api.get(`masters/${collegeId}/division?faculty_id=${courseId}&year_level=${yearLevel}`)
+    getDivisions(collegeId, courseId, yearLevel)
       .then(r => setDivisions((r.data.data || []).filter(d => d.is_active)))
       .catch(() => {})
 
     // Fetch degree course info (faculty_master)
-    api.get(`masters/${collegeId}/faculty`)
+    getFaculty(collegeId)
       .then(r => {
         const match = (r.data.data || []).find(f => f.code_no === courseId)
         setDegreeCourse(match || null)
@@ -103,7 +103,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
     feeDebounce.current = setTimeout(async () => {
       setFeeLoading(true)
       try {
-        const r = await api.post(`masters/${collegeId}/fees/compute`, {
+        const r = await computeFees(collegeId, {
           faculty_master_id: courseId,
           year_level:        yearLevel,
           division_letter:   data.division || null,

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import api from '../../../../services/api.js'
+import { getFaculty, getMasterDocumentTypes, getRequiredDocumentsMaster, createRequiredDocument, updateRequiredDocument, deleteRequiredDocument } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonForm } from '../../../../shared/components/Skeleton.jsx'
 
@@ -70,8 +70,8 @@ export default function DocumentsMaster({ collegeId }) {
 
   useEffect(() => {
     Promise.all([
-      api.get(`masters/${collegeId}/faculty`),
-      api.get('masters/document-types'),
+      getFaculty(collegeId),
+      getMasterDocumentTypes(),
     ]).then(([fRes, dtRes]) => {
       const active = (fRes.data.data || []).filter(f => f.is_active)
       setFaculty(active)
@@ -82,9 +82,8 @@ export default function DocumentsMaster({ collegeId }) {
 
   const loadRows = useCallback(() => {
     if (!selFaculty) return
-    api.get(`masters/${collegeId}/required-documents`, {
-      params: { faculty_master_id: selFaculty, year_of_study: selYear },
-    }).then(r => setRows(r.data.data || []))
+    getRequiredDocumentsMaster(collegeId, selFaculty, selYear)
+      .then(r => setRows(r.data.data || []))
   }, [collegeId, selFaculty, selYear])
 
   useEffect(() => { loadRows() }, [loadRows])
@@ -95,7 +94,7 @@ export default function DocumentsMaster({ collegeId }) {
     setAdding(true)
     setError('')
     try {
-      await api.post(`masters/${collegeId}/required-documents`, {
+      await createRequiredDocument(collegeId, {
         faculty_master_id: selFaculty,
         year_of_study:     selYear,
         document_type_id:  selDocType,
@@ -112,7 +111,7 @@ export default function DocumentsMaster({ collegeId }) {
 
   async function toggleMandatory(row) {
     try {
-      await api.put(`masters/${collegeId}/required-documents/${row.id}`, {
+      await updateRequiredDocument(collegeId, row.id, {
         is_mandatory: !row.is_mandatory,
       })
       loadRows()
@@ -124,7 +123,7 @@ export default function DocumentsMaster({ collegeId }) {
   async function handleDelete(id) {
     if (!confirm('Remove this document from the required list?')) return
     try {
-      await api.delete(`masters/${collegeId}/required-documents/${id}`)
+      await deleteRequiredDocument(collegeId, id)
       loadRows()
     } catch {
       alert('Failed to delete.')

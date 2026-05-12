@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import api from '../../../services/api.js'
+import { createCollege } from '../../../services/collegeService.js'
 import Button from '../../../shared/components/Button.jsx'
 
 const EMPTY = {
@@ -45,7 +45,7 @@ export default function CreateCollege({ onCreated }) {
     setError('')
     setSuccess(null)
     try {
-      const res = await api.post('colleges', form)
+      const res = await createCollege(form)
       setSuccess(res.data.data)
       setForm(EMPTY)
       setTimeout(() => onCreated?.(), 1500)

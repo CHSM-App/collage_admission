@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import api from '../../../services/api.js'
+import { getStudentNotifications } from '../../../services/notificationService.js'
 
 const SEEN_KEY    = 'notif_last_seen'
 const CLEARED_KEY = 'notif_cleared_at' // localStorage — persists across sessions
@@ -32,7 +32,7 @@ export function useNotifications(studentId) {
   const fetch = useCallback(() => {
     if (!studentId) return
     setLoading(true)
-    api.get(`notifications/student/${studentId}`)
+    getStudentNotifications(studentId)
       .then(r => computeState(r.data.data || []))
       .catch(() => {})
       .finally(() => setLoading(false))

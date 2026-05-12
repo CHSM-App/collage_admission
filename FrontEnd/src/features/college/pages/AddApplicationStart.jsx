@@ -5,7 +5,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
-import api from '../../../services/api.js'
+import { registerStudentByCollege } from '../../auth/services/authService.js'
+import { getCollegeAdminAdmissionPeriods, searchStudents } from '../../../services/collegeAdminService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 
@@ -43,7 +44,7 @@ export default function AddApplicationStart() {
 
   // ── Load all admission periods ──────────────────────────────
   useEffect(() => {
-    api.get(`college-admin/${collegeId}/admission-periods?active=1`)
+    getCollegeAdminAdmissionPeriods(collegeId, 1)
       .then(r => setPeriods(r.data.data || []))
       .catch(() => setError('Failed to load admission periods.'))
       .finally(() => setPeriodsLoad(false))
@@ -55,7 +56,7 @@ export default function AddApplicationStart() {
     if (query.trim().length < 2) { setStudents([]); return }
     const t = setTimeout(() => {
       setSearching(true)
-      api.get(`college-admin/${collegeId}/students/search?q=${encodeURIComponent(query.trim())}`)
+      searchStudents(collegeId, query.trim())
         .then(r => {
           const data = r.data.data || []
           setStudents(data)
@@ -102,7 +103,7 @@ export default function AddApplicationStart() {
 
     setRegistering(true)
     try {
-      const res = await api.post('auth/register/student', {
+      const res = await registerStudentByCollege({
         full_name: full_name.trim(),
         email:     email.trim().toLowerCase(),
         password,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import api from '../../../services/api.js'
+import { getRoles, createRole, updateRole, deleteRole as deleteRoleApi, createUser, updateUser, deleteUser as deleteUserApi } from '../../../services/adminService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 
@@ -81,7 +81,7 @@ export default function RolesPanel({ college }) {
 
   function fetchRoles() {
     setLoading(true)
-    api.get(`admin/colleges/${college.id}/roles`)
+    getRoles(college.id)
       .then(r => setRoles(r.data.data || []))
       .catch(() => {})
       .finally(() => setLoading(false))
@@ -118,10 +118,10 @@ export default function RolesPanel({ college }) {
     setRoleSaving(true); setRoleError('')
     try {
       if (editingRole) {
-        await api.put(`admin/colleges/${college.id}/roles/${editingRole.id}`, roleForm)
+        await updateRole(college.id, editingRole.id, roleForm)
         flash('Role updated.')
       } else {
-        await api.post(`admin/colleges/${college.id}/roles`, roleForm)
+        await createRole(college.id, roleForm)
         flash('Role created.')
       }
       setShowRoleForm(false)
@@ -134,7 +134,7 @@ export default function RolesPanel({ college }) {
   async function deleteRole(role) {
     if (!window.confirm(`Delete role "${role.role_name}"? This cannot be undone.`)) return
     try {
-      await api.delete(`admin/colleges/${college.id}/roles/${role.id}`)
+      await deleteRoleApi(college.id, role.id)
       flash('Role deleted.')
       fetchRoles()
     } catch (err) {
@@ -166,10 +166,10 @@ export default function RolesPanel({ college }) {
     setUserSaving(true); setUserError('')
     try {
       if (editingUser) {
-        await api.put(`admin/colleges/${college.id}/users/${editingUser.id}`, userForm)
+        await updateUser(college.id, editingUser.id, userForm)
         flash('Staff user updated.')
       } else {
-        await api.post(`admin/colleges/${college.id}/users`, userForm)
+        await createUser(college.id, userForm)
         flash('Staff user created.')
       }
       setShowUserForm(false)
@@ -181,7 +181,7 @@ export default function RolesPanel({ college }) {
 
   async function toggleUser(user) {
     try {
-      await api.put(`admin/colleges/${college.id}/users/${user.id}`, { is_active: !user.is_active })
+      await updateUser(college.id, user.id, { is_active: !user.is_active })
       flash(user.is_active ? 'User deactivated.' : 'User activated.')
       fetchRoles()
     } catch { flash('Failed to update user.', 'err') }
@@ -190,7 +190,7 @@ export default function RolesPanel({ college }) {
   async function deleteUser(user) {
     if (!window.confirm(`Delete user "${user.full_name}"? This cannot be undone.`)) return
     try {
-      await api.delete(`admin/colleges/${college.id}/users/${user.id}`)
+      await deleteUserApi(college.id, user.id)
       flash('User deleted.')
       fetchRoles()
     } catch { flash('Failed to delete user.', 'err') }

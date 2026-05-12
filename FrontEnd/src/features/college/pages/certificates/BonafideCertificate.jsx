@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import api from '../../../../services/api.js'
+import { getBonafideList, getBonafideNextNo, createBonafide, updateBonafide, lookupStudent } from '../../../../services/certificateService.js'
 import FormField from '../../../../shared/components/FormField.jsx'
 import {
   GenderRadio,
@@ -59,14 +59,14 @@ export default function BonafideCertificate({ collegeId, readOnly }) {
   // ─── Load list + next cert no ──────────────────────────────
   const loadList = useCallback(() => {
     setLoading(true)
-    api.get(`certificates/${collegeId}/bonafide`)
+    getBonafideList(collegeId)
       .then(r => setList(r.data.data || []))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [collegeId])
 
   const loadNextNo = useCallback(() => {
-    api.get(`certificates/${collegeId}/bonafide/next-no`)
+    getBonafideNextNo(collegeId)
       .then(r => setForm(f => ({ ...f, certificate_no: r.data.data?.certificate_no || '' })))
       .catch(() => {})
   }, [collegeId])
@@ -90,7 +90,7 @@ export default function BonafideCertificate({ collegeId, readOnly }) {
     if (!reg) { setGlobalError('Enter a registration number to look up.'); return }
     setGlobalError(''); setLookingUp(true)
     try {
-      const r = await api.get(`certificates/${collegeId}/student-lookup`, { params: { reg_no: reg } })
+      const r = await lookupStudent(collegeId, reg)
       const d = r.data.data
       setForm(f => ({
         ...f,
@@ -193,10 +193,10 @@ export default function BonafideCertificate({ collegeId, readOnly }) {
     try {
       let saved
       if (mode === 'new') {
-        const r = await api.post(`certificates/${collegeId}/bonafide`, payload)
+        const r = await createBonafide(collegeId, payload)
         saved = r.data.data
       } else {
-        const r = await api.put(`certificates/${collegeId}/bonafide/${form.bonafide_id}`, payload)
+        const r = await updateBonafide(collegeId, form.bonafide_id, payload)
         saved = r.data.data
       }
       loadRecord(saved)

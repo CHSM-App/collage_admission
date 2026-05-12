@@ -35,7 +35,27 @@ export async function registerStudent(fields) {
   return normalizeAuthResponse(data, 'student')
 }
 
+export const sendOtp = (data) =>
+  api.post('auth/otp/send', data)
+
+export const verifyOtp = (phone, otp) =>
+  api.post('auth/otp/verify', { phone, otp })
+
+export const forgotPasswordSendOtp = (phone) =>
+  api.post('auth/forgot-password/send-otp', { phone })
+
+export const forgotPasswordReset = (data) =>
+  api.post('auth/forgot-password/reset', data)
+
+export const registerStudentByCollege = (data) =>
+  api.post('auth/register/student', data)
+
 export const authService = {
   loginByRole,
   registerStudent,
+  sendOtp,
+  verifyOtp,
+  forgotPasswordSendOtp,
+  forgotPasswordReset,
+  registerStudentByCollege,
 }

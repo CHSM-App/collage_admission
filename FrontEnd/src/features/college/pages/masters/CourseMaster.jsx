@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import api from '../../../../services/api.js'
+import { getFaculty, getCourses, updateCourse, bulkSaveCourses, deleteCourse } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 
@@ -41,7 +41,7 @@ export default function CourseMaster({ collegeId }) {
   const [dirty, setDirty]         = useState(false)
 
   useEffect(() => {
-    api.get(`masters/${collegeId}/faculty`)
+    getFaculty(collegeId)
       .then(r => {
         const active = (r.data.data || []).filter(f => f.is_active)
         setFaculty(active)
@@ -52,7 +52,7 @@ export default function CourseMaster({ collegeId }) {
   const loadRows = useCallback(() => {
     if (!selFaculty) return
     setLoading(true); setError(''); setSuccess('')
-    api.get(`masters/${collegeId}/course?faculty_id=${selFaculty}&semester=${selSem}`)
+    getCourses(collegeId, selFaculty, selSem)
       .then(r => { setRows((r.data.data || []).filter(row => row.is_active !== false).map(row => ({ ...row, _key: row.id, is_new: false }))); setDirty(false) })
       .catch(() => setError('Failed to load subjects.'))
       .finally(() => setLoading(false))
@@ -99,7 +99,7 @@ export default function CourseMaster({ collegeId }) {
       const newRows      = valid.filter(r => r.is_new || !r.id)
 
       for (const r of existingRows) {
-        await api.put(`masters/${collegeId}/course/${r.id}`, {
+        await updateCourse(collegeId, r.id, {
           faculty_master_id: selFaculty, semester: selSem,
           course_code: r.course_code, course_title: r.course_title,
           credits: r.credits, subject_type: r.subject_type,
@@ -112,7 +112,7 @@ export default function CourseMaster({ collegeId }) {
 
       // New rows: use bulk-save (MERGE insert)
       if (newRows.length > 0) {
-        await api.post(`masters/${collegeId}/course/bulk-save`, {
+        await bulkSaveCourses(collegeId, {
           faculty_master_id: selFaculty,
           semester: selSem,
           rows: newRows,
@@ -131,7 +131,7 @@ export default function CourseMaster({ collegeId }) {
     if (row.is_new) { removeRow(row._key); return }
     if (!confirm(`Delete "${row.course_title}"? This cannot be undone.`)) return
     try {
-      await api.delete(`masters/${collegeId}/course/${row.id}`)
+      await deleteCourse(collegeId, row.id)
       setRows(rs => rs.filter(r => r._key !== row._key))
     } catch { alert('Delete failed.') }
   }

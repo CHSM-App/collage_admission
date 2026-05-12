@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import api from '../../../../services/api.js'
+import { getFaculty, getDivisions, saveDivisionGrid } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 
@@ -26,7 +26,7 @@ export default function DivisionMaster({ collegeId }) {
   const [error, setError]           = useState('')
 
   useEffect(() => {
-    api.get(`masters/${collegeId}/faculty`)
+    getFaculty(collegeId)
       .then(r => {
         const active = (r.data.data || []).filter(f => f.is_active)
         setFaculty(active)
@@ -42,7 +42,7 @@ export default function DivisionMaster({ collegeId }) {
   const loadGrid = useCallback(() => {
     if (!selFaculty) return
     setLoading(true)
-    api.get(`masters/${collegeId}/division?faculty_id=${selFaculty}&year_level=${selYear}`)
+    getDivisions(collegeId, selFaculty, selYear)
       .then(r => {
         const fresh = Object.fromEntries(DIVISIONS.map(d => [d, null]))
         for (const row of r.data.data || []) {
@@ -69,7 +69,7 @@ export default function DivisionMaster({ collegeId }) {
       is_active:       grid[d] !== null,
     }))
     try {
-      await api.post(`masters/${collegeId}/division/save-grid`, {
+      await saveDivisionGrid(collegeId, {
         faculty_master_id: selFaculty,
         year_level:        selYear,
         class_year_code:   classYearCode,

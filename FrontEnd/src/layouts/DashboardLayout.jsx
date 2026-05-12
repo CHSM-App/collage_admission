@@ -5,7 +5,7 @@ import { DASHBOARD_PATHS } from '../app/routePaths.js'
 import Button from '../shared/components/Button.jsx'
 import { useAuth } from '../features/auth/hooks/useAuth.js'
 import { useNotifications } from '../features/student/hooks/useNotifications.js'
-import api from '../services/api.js'
+import { studentHasPayments } from '../services/paymentService.js'
 
 const roleLabels = {
   student: 'Student Portal',
@@ -103,7 +103,7 @@ export default function DashboardLayout() {
 
   useEffect(() => {
     if (role === 'student' && user?.id) {
-      api.get(`payments/student-has-payments?student_id=${user.id}`)
+      studentHasPayments(user.id)
         .then(r => setHasPayments(r.data.data?.has_payments || false))
         .catch(() => {})
     }

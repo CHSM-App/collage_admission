@@ -1,7 +1,7 @@
 
 import { useEffect, useState } from 'react'
-import api from '../../../services/api.js'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
+import { getApplications } from '../../../services/applicationService.js'
 import PaymentReceipts from './PaymentReceipts.jsx'
 import { SkeletonCards } from '../../../shared/components/Skeleton.jsx'
 
@@ -12,7 +12,7 @@ export default function AllReceipts() {
   const [activeId, setActiveId] = useState(null)
 
   useEffect(() => {
-    api.get(`applications?student_id=${user.id}&limit=100`)
+    getApplications(user.id)
       .then(r => {
         const all = r.data.data || []
         // Only show apps that have had at least one payment (fee paid flag)

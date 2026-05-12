@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import api from '../../../services/api.js'
+import { getAdminColleges, updateAdminCollege } from '../../../services/adminService.js'
 import Pagination from '../../../shared/components/Pagination.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import RolesPanel      from './RolesPanel.jsx'
@@ -38,7 +38,7 @@ export default function CollegeList() {
   const [page,        setPage]        = useState(1)
 
   function fetchColleges() {
-    api.get(`admin/colleges?page=${page}&limit=${LIMIT}`)
+    getAdminColleges(page, LIMIT)
       .then(r => {
         const list = r.data.data || []
         setColleges(list)
@@ -74,7 +74,7 @@ export default function CollegeList() {
     if (isNaN(fee) || fee < 0) { showFeeMsg('Enter a valid amount.'); return }
     setFeeSaving(true); setFeeMsg('')
     try {
-      await api.put(`admin/colleges/${selected.id}`, { application_fee: fee })
+      await updateAdminCollege(selected.id, { application_fee: fee })
       showFeeMsg('Fee updated.')
       setFeeEdit(false)
       fetchColleges()

@@ -3,87 +3,33 @@
  * Student can pay any amount up to the remaining balance (partial payments allowed).
  * Shows total fee, amount due now (set by college), and paid/remaining amounts.
  */
-import { useEffect, useState } from 'react'
-import api from '../../../services/api.js'
-import { useRazorpay } from '../../../shared/hooks/useRazorpay.js'
+import { useState } from 'react'
+import { useCollegePayment } from '../../../shared/hooks/useCollegePayment.js'
 import Button from '../../../shared/components/Button.jsx'
 import PaymentReceipts from './PaymentReceipts.jsx'
-import { useToast } from '../../../context/ToastContext.jsx'
 
 export default function CollegeFeePayment({ application, onDone, onCancel }) {
-  const { openCheckout, scriptError } = useRazorpay()
-  const toast = useToast()
-
-  const [feeStatus, setFeeStatus] = useState(null)
-  const [loading, setLoading]       = useState(true)
-  const [paying, setPaying]         = useState(false)
-  const [payError, setPayError]     = useState('')
-  const [paidMsg, setPaidMsg]       = useState('')
   const [showReceipts, setShowReceipts] = useState(false)
 
-  function fetchStatus() {
-    api.get(`payments/college-fee-status/${application.id}`)
-      .then(r => setFeeStatus(r.data.data))
-      .catch(() => setPayError('Failed to load fee details.'))
-      .finally(() => setLoading(false))
-  }
+  const {
+    feeStatus,
+    loading,
+    paying,
+    payError,
+    paidMsg,
+    scriptError,
+    payOnline,
+  } = useCollegePayment(application.id)
 
-  useEffect(() => { fetchStatus() }, [application.id])
-
-  // ── Pay the college-set amount ───────────────────────────
   async function payCustomAmount() {
     const fs  = feeStatus
     const amt = parseFloat(fs?.total_paid > 0 ? fs?.remaining : (fs?.fee_pay_now_amount || fs?.remaining))
-    if (!amt || amt <= 0) {
-      setPayError('Invalid payment amount.')
-      return
-    }
-
-    setPayError('')
-    setPaidMsg('')
-    setPaying(true)
-
-    try {
-      const orderRes = await api.post('payments/create-order', {
-        application_id: application.id,
-        payment_type:   'college_fee',
-        amount:         amt,
-      })
-      const orderData = orderRes.data.data
-      setPaying(false)
-
-      openCheckout({
-        orderData,
-        onSuccess: async (rzpResponse) => {
-          setPaying(true)
-          try {
-            const verifyRes = await api.post('payments/verify', {
-              application_id:      application.id,
-              payment_type:        'college_fee',
-              razorpay_order_id:   rzpResponse.razorpay_order_id,
-              razorpay_payment_id: rzpResponse.razorpay_payment_id,
-              razorpay_signature:  rzpResponse.razorpay_signature,
-            })
-            toast.success(verifyRes.data.message)
-            setPaidMsg(verifyRes.data.message)
-            setShowReceipts(true)
-            fetchStatus()
-            if (verifyRes.data.data?.all_paid) setTimeout(onDone, 1500)
-          } catch (err) {
-            const msg = err?.response?.data?.message || 'Payment verification failed.'
-            setPayError(msg); toast.error(msg)
-          } finally { setPaying(false) }
-        },
-        onFailure: (err) => {
-          setPaying(false)
-          if (err.message !== 'Payment cancelled by user.') { setPayError(err.message); toast.error(err.message) }
-        },
-      })
-    } catch (err) {
-      const msg = err?.response?.data?.message || 'Could not initiate payment.'
-      setPayError(msg); toast.error(msg)
-      setPaying(false)
-    }
+    await payOnline(amt, {
+      onSuccess: (_msg, data) => {
+        setShowReceipts(true)
+        if (data?.all_paid) setTimeout(onDone, 1500)
+      },
+    })
   }
 
   if (loading) {

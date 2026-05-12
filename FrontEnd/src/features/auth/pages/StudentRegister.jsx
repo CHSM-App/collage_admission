@@ -1,113 +1,41 @@
-import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { LOGIN_PATHS } from '../../../app/routePaths.js'
+import { LOGIN_PATHS, getDashboardPath } from '../../../app/routePaths.js'
 import AuthLayout from '../../../layouts/AuthLayout.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import Input from '../../../shared/components/Input.jsx'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
-import { authService } from '../services/authService.js'
-import { getDashboardPath } from '../../../app/routePaths.js'
-import api from '../../../services/api.js'
-
-const STEPS = { FORM: 'form', OTP: 'otp' }
-
-function validatePassword(pwd) {
-  if (!pwd || pwd.length < 8)        return 'Password must be at least 8 characters.'
-  if (!/[A-Z]/.test(pwd))            return 'Password must contain at least one uppercase letter.'
-  if (!/[a-z]/.test(pwd))            return 'Password must contain at least one lowercase letter.'
-  if (!/[0-9]/.test(pwd))            return 'Password must contain at least one number.'
-  if (!/[^A-Za-z0-9]/.test(pwd))     return 'Password must contain at least one special character.'
-  return null
-}
+import { useStudentRegistration, REG_STEPS } from '../hooks/useStudentRegistration.js'
 
 export default function StudentRegister() {
   const navigate = useNavigate()
   const { saveSession } = useAuthContext()
 
-  const [step, setStep]     = useState(STEPS.FORM)
-  const [form, setForm]     = useState({
-    full_name: '', email: '', password: '', confirm_password: '',
-    phone: '', city: '', category: 'general',
-  })
-  const [otp, setOtp]       = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError]   = useState('')
-  const [info, setInfo]     = useState('')
+  const {
+    step,
+    form,
+    otp, setOtp,
+    loading,
+    error,
+    info,
+    handleChange,
+    handleSendOtp,
+    handleVerifyOtp,
+    handleResend,
+    goToFormStep,
+  } = useStudentRegistration()
 
-  function handleChange(e) {
-    setError('')
-    let value = e.target.value
-    if (e.target.name === 'phone') value = value.replace(/\D/g, '').slice(0, 10)
-    setForm(f => ({ ...f, [e.target.name]: value }))
-  }
-
-  // Step 1 — validate form and send OTP
-  async function handleSendOtp(e) {
-    e.preventDefault()
-    setError('')
-    if (!/^[6-9]\d{9}$/.test(form.phone.trim())) {
-      setError('Phone number must be 10 digits starting with 6–9.')
-      return
-    }
-    const pwdErr = validatePassword(form.password)
-    if (pwdErr) { setError(pwdErr); return }
-    if (form.password !== form.confirm_password) {
-      setError('Passwords do not match.')
-      return
-    }
-    setLoading(true)
-    try {
-      const { data } = await api.post('auth/otp/send', form)
-      setInfo(data.message)
-      setStep(STEPS.OTP)
-    } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to send OTP. Please try again.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // Step 2 — verify OTP and complete registration
-  async function handleVerifyOtp(e) {
-    e.preventDefault()
-    setError('')
-    if (otp.trim().length !== 6) {
-      setError('Please enter the 6-digit OTP.')
-      return
-    }
-    setLoading(true)
-    try {
-      const { data } = await api.post('auth/otp/verify', { phone: form.phone, otp: otp.trim() })
-      // Auto-login after registration
-      const session = await authService.loginByRole('student', { phone: form.phone, password: form.password })
+  async function onVerifyOtp(e) {
+    const session = await handleVerifyOtp(e)
+    if (session) {
       saveSession(session)
       navigate(getDashboardPath('student'), { replace: true })
-    } catch (err) {
-      setError(err?.response?.data?.message || 'Verification failed. Please try again.')
-    } finally {
-      setLoading(false)
     }
   }
 
-  // Resend OTP
-  async function handleResend() {
-    setError('')
-    setOtp('')
-    setLoading(true)
-    try {
-      const { data } = await api.post('auth/otp/send', form)
-      setInfo(data.message)
-    } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to resend OTP.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  if (step === STEPS.OTP) {
+  if (step === REG_STEPS.OTP) {
     return (
       <AuthLayout title="Verify your number" subtitle={`Enter the 6-digit OTP sent to +91 ${form.phone}`}>
-        <form className="space-y-4" onSubmit={handleVerifyOtp}>
+        <form className="space-y-4" onSubmit={onVerifyOtp}>
           {info && (
             <p className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
               {info}
@@ -117,7 +45,7 @@ export default function StudentRegister() {
           <Input
             id="otp" label="One-time password" name="otp" type="text"
             placeholder="6-digit OTP" inputMode="numeric" maxLength={6}
-            value={otp} onChange={e => { setError(''); setOtp(e.target.value.replace(/\D/g, '').slice(0, 6)) }}
+            value={otp} onChange={e => setOtp(e.target.value)}
             disabled={loading} required autoFocus
           />
 
@@ -143,7 +71,7 @@ export default function StudentRegister() {
             <button
               type="button"
               className="hover:underline"
-              onClick={() => { setStep(STEPS.FORM); setError(''); setOtp('') }}
+              onClick={goToFormStep}
             >
               Edit details
             </button>

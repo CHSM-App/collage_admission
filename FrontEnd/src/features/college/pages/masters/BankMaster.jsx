@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
-import api from '../../../../services/api.js'
+import { getBankLedgers, createBankLedger, updateBankLedger, deleteBankLedger } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 
@@ -31,7 +31,7 @@ export default function BankMaster({ collegeId }) {
 
   function load() {
     setLoading(true)
-    api.get(`masters/${collegeId}/bank`)
+    getBankLedgers(collegeId)
       .then(r => setRows(r.data.data || []))
       .catch(() => setError('Failed to load.'))
       .finally(() => setLoading(false))
@@ -49,8 +49,8 @@ export default function BankMaster({ collegeId }) {
     if (!form.ifsc_code.trim())           return setError('IFSC code is required.')
     setSaving(true); setError('')
     try {
-      if (modal === 'new') await api.post(`masters/${collegeId}/bank`, form)
-      else await api.put(`masters/${collegeId}/bank/${modal.ledger_code}`, form)
+      if (modal === 'new') await createBankLedger(collegeId, form)
+      else await updateBankLedger(collegeId, modal.ledger_code, form)
       closeModal(); load()
     } catch (e) { setError(e?.response?.data?.message || 'Save failed.') }
     finally { setSaving(false) }
@@ -58,7 +58,7 @@ export default function BankMaster({ collegeId }) {
 
   async function softDelete(row) {
     if (!confirm(`Deactivate "${row.bank_name}"?`)) return
-    try { await api.delete(`masters/${collegeId}/bank/${row.ledger_code}`); load() }
+    try { await deleteBankLedger(collegeId, row.ledger_code); load() }
     catch { alert('Failed.') }
   }
 

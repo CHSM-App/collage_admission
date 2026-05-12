@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import api from '../../../services/api.js'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
+import { getDocumentTypes, getStudentDocuments, uploadStudentDocument, deleteStudentDocument } from '../../../services/documentService.js'
 import { SkeletonCards } from '../../../shared/components/Skeleton.jsx'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000/').replace(/\/$/, '')
@@ -131,8 +131,8 @@ export default function StudentDocuments() {
 
   function fetchData() {
     Promise.all([
-      api.get('document-types'),
-      api.get(`student-documents?student_id=${user.id}`),
+      getDocumentTypes(),
+      getStudentDocuments(user.id),
     ])
       .then(([dtRes, sdRes]) => {
         setDocTypes(dtRes.data.data || [])
@@ -291,9 +291,7 @@ function UploadButton({ documentTypeId, documentName, studentId, isPhoto, isLock
     fd.append('document_type_id', documentTypeId)
 
     try {
-      await api.post(`student-documents?student_id=${studentId}`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      await uploadStudentDocument(studentId, fd)
       onSuccess()
     } catch (err) {
       setError(err?.response?.data?.message || 'Upload failed.')
@@ -342,7 +340,7 @@ function DeleteButton({ docId, onSuccess }) {
     setDeleting(true)
     setError('')
     try {
-      await api.delete(`student-documents/${docId}`)
+      await deleteStudentDocument(docId)
       onSuccess()
     } catch (err) {
       setError(err?.response?.data?.message || 'Delete failed.')

@@ -1,8 +1,7 @@
 import { useState } from 'react'
-import api from '../../../../services/api.js'
 import { StepHeader } from './Step1Context.jsx'
 import Button from '../../../../shared/components/Button.jsx'
-import { useRazorpay } from '../../../../shared/hooks/useRazorpay.js'
+import { useApplicationSubmit } from '../../hooks/useApplicationSubmit.js'
 
 const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year', 4: '4Y — Fourth Year', 5: '5Y — Fifth Year' }
 const EXAM_ROWS  = {
@@ -14,82 +13,20 @@ const EXAM_ROWS  = {
 }
 
 export default function Step6Review({ data, errors, globalError, saving, appId, applicationFeePaid, onBack, onEditStep, onDone }) {
-  const [accepted, setAccepted]         = useState(!!data.declaration_accepted)
-  const [processing, setProcessing]     = useState(false)
-  const [submitError, setSubmitError]   = useState('')
-  const [registrationNumber, setRegNum] = useState(null)
-  const [resubmitted, setResubmitted]   = useState(false)
+  const [accepted, setAccepted] = useState(!!data.declaration_accepted)
 
-  const { openCheckout, scriptError } = useRazorpay()
+  const {
+    processing,
+    submitError,
+    registrationNumber,
+    resubmitted,
+    scriptError,
+    handleSubmit: submitApplication,
+    handleResubmit: resubmitApp,
+  } = useApplicationSubmit(appId)
 
-  // ── Resubmit (correction flow — fee already paid) ────────
-  async function handleResubmit() {
-    if (!accepted) return
-    setProcessing(true)
-    setSubmitError('')
-    try {
-      await api.post(`api/applications/${appId}/declaration`, { accepted: true })
-      await api.post(`api/applications/${appId}/resubmit`)
-      setResubmitted(true)
-    } catch (err) {
-      setSubmitError(err?.response?.data?.message || 'Resubmit failed. Please try again.')
-    } finally {
-      setProcessing(false)
-    }
-  }
-
-  // ── New application submit (pay first) ───────────────────
-  async function handleSubmit() {
-    if (!accepted) return
-    setProcessing(true)
-    setSubmitError('')
-
-    try {
-      // 1. Accept declaration (validates mandatory docs)
-      await api.post(`api/applications/${appId}/declaration`, { accepted: true })
-
-      // 2. Create Razorpay order
-      const orderRes = await api.post('payments/create-order', {
-        application_id: appId,
-        payment_type:   'application_fee',
-      })
-      const orderData = orderRes.data.data
-
-      setProcessing(false)   // stop spinner while Razorpay modal is open
-
-      // 3. Open Razorpay checkout
-      openCheckout({
-        orderData,
-        onSuccess: async (rzpResponse) => {
-          setProcessing(true)
-          try {
-            // 4. Verify signature + submit application on backend
-            const verifyRes = await api.post('payments/verify', {
-              application_id:       appId,
-              payment_type:         'application_fee',
-              razorpay_order_id:    rzpResponse.razorpay_order_id,
-              razorpay_payment_id:  rzpResponse.razorpay_payment_id,
-              razorpay_signature:   rzpResponse.razorpay_signature,
-            })
-            setRegNum(verifyRes.data.data?.registration_number || '')
-          } catch (err) {
-            setSubmitError(err?.response?.data?.message || 'Payment verification failed.')
-          } finally {
-            setProcessing(false)
-          }
-        },
-        onFailure: (err) => {
-          if (err.message !== 'Payment cancelled by user.') {
-            setSubmitError(err.message || 'Payment failed.')
-          }
-        },
-      })
-    } catch (err) {
-      const resp = err?.response?.data
-      setSubmitError(resp?.message || 'Submission failed. Please try again.')
-      setProcessing(false)
-    }
-  }
+  function handleSubmit()   { submitApplication(accepted) }
+  function handleResubmit() { resubmitApp(accepted) }
 
   // ── Resubmit success screen ───────────────────────────────
   if (resubmitted) {

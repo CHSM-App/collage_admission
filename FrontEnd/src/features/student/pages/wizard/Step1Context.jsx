@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import Button from '../../../../shared/components/Button.jsx'
-import api from '../../../../services/api.js'
+import { getRequiredDocuments } from '../../../../services/applicationService.js'
 
 const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year', 4: '4Y — Fourth Year', 5: '5Y — Fifth Year' }
 
@@ -11,7 +11,7 @@ export default function Step1Context({ data, saving, onNext }) {
   useEffect(() => {
     if (!data.college_id || !data.course_id || !data.year_of_study) return
     setDocsLoading(true)
-    api.get(`api/required-documents?college_id=${data.college_id}&course_id=${data.course_id}&year=${data.year_of_study}`)
+    getRequiredDocuments(data.college_id, data.course_id, data.year_of_study)
       .then(r => setReqDocs(r.data.data || []))
       .catch(() => setReqDocs([]))
       .finally(() => setDocsLoading(false))
