@@ -15,6 +15,7 @@ const db      = require('./db');
 const mssql   = require('mssql');
 const { authenticate } = require('../middleware/auth');
 const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
+const logger  = require('../config/logger');
 
 // All student-facing application routes require authentication
 router.use(authenticate);
@@ -27,7 +28,7 @@ async function logActivity(appId, action, actorRole, note = null) {
       .input('actorRole', mssql.NVarChar, actorRole)
       .input('note',      mssql.NVarChar, note || null)
       .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
-  } catch (e) { console.warn('logActivity failed:', e.message); }
+  } catch (e) { logger.warn({ err: e }, 'logActivity failed'); }
 }
 
 // ── Helper: generate registration number ────────────────────
@@ -107,7 +108,7 @@ router.get('/', async (req, res) => {
 
     return res.json(paginatedResponse(dataRes.recordset, countRes.recordset[0].total, page, limit));
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -156,7 +157,7 @@ router.get('/:id', async (req, res) => {
       data: { ...result.recordset[0], documents: docs.recordset },
     });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -255,7 +256,7 @@ router.post('/', async (req, res) => {
       data: { id: result.recordset[0].id },
     });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -285,7 +286,7 @@ router.delete('/:id', async (req, res) => {
 
     return res.json({ success: true, message: 'Draft application deleted.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -365,7 +366,7 @@ router.post('/:id/submit', async (req, res) => {
       data: { registration_number: regNum },
     });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -447,7 +448,7 @@ router.post('/:id/pay-college-fee', async (req, res) => {
 
     return res.json({ success: true, message: 'College fee paid successfully.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -493,7 +494,7 @@ router.get('/:id/subjects', async (req, res) => {
       },
     });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -553,7 +554,7 @@ router.post('/:id/subjects', async (req, res) => {
 
     return res.json({ success: true, message: 'Subjects selected. Enrollment complete.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -621,7 +622,7 @@ router.post('/:id/documents', async (req, res) => {
 
     return res.json({ success: true, message: 'Document saved.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });

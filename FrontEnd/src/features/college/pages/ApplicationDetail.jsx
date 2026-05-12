@@ -5,6 +5,7 @@ import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
 import { useRazorpay } from '../../../shared/hooks/useRazorpay.js'
 import { SkeletonDetail, SkeletonLines } from '../../../shared/components/Skeleton.jsx'
+import { useToast } from '../../../context/ToastContext.jsx'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000/').replace(/\/$/, '')
 
@@ -32,6 +33,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
   const canReviewD  = canWrite('review_documents')
   const canFees     = canWrite('collect_fees')
   const canEditApp  = canWrite('edit_application')
+  const toast       = useToast()
   const [app, setApp]         = useState(null)
   const [loading, setLoading] = useState(true)
   const [acting, setActing]   = useState(false)
@@ -68,14 +70,17 @@ export default function ApplicationDetail({ collegeId, appId }) {
     }
   }, [app])
 
-  async function doAction(endpoint, body = {}) {
+  async function doAction(endpoint, body = {}, successMsg) {
     setActing(true)
     setError('')
     try {
       await api.post(`college-admin/${collegeId}/applications/${appId}/${endpoint}`, body)
+      if (successMsg) toast.success(successMsg)
       navigate('/college/dashboard?section=inbox')
     } catch (err) {
-      setError(err?.response?.data?.message || 'Action failed.')
+      const msg = err?.response?.data?.message || 'Action failed.'
+      setError(msg)
+      toast.error(msg)
     } finally {
       setActing(false)
     }
@@ -97,9 +102,12 @@ export default function ApplicationDetail({ collegeId, appId }) {
         division:           division || null,
         document_ids_verified: app?.documents?.map(d => d.id) || [],
       })
+      toast.success('Admission confirmed. Student can now pay the college fee.')
       navigate('/college/dashboard?section=inbox')
     } catch (err) {
-      setError(err?.response?.data?.message || 'Action failed.')
+      const msg = err?.response?.data?.message || 'Action failed.'
+      setError(msg)
+      toast.error(msg)
       setActing(false)
     }
   }
@@ -326,7 +334,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
             Review the application and either accept it (student will be notified to visit the college), request corrections, or reject.
           </p>
           <div className="flex flex-wrap gap-3">
-            <Button loading={acting} onClick={() => doAction('approve')}>
+            <Button loading={acting} onClick={() => doAction('approve', {}, 'Application accepted. Student has been notified to visit the college.')}>
               Accept Application
             </Button>
             <Button variant="secondary" onClick={() => { setShowCorrection(v => !v); setShowReject(false) }}>
@@ -446,7 +454,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
             placeholder="e.g. Please correct your Aadhaar number — the one entered appears to be invalid. Also update your father's occupation field."
             className="w-full rounded-md border border-orange-200 bg-white px-3 py-2 text-sm"
           />
-          <Button loading={acting} disabled={!correctionNote.trim()} onClick={() => doAction('request-correction', { note: correctionNote })}>
+          <Button loading={acting} disabled={!correctionNote.trim()} onClick={() => doAction('request-correction', { note: correctionNote }, 'Correction requested. Student has been notified.')}>
             Send Correction Request
           </Button>
         </div>
@@ -462,7 +470,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
             placeholder="Enter reason for rejection…"
             className="w-full rounded-md border border-red-200 px-3 py-2 text-sm"
           />
-          <Button loading={acting} onClick={() => doAction('reject', { reason })}>
+          <Button loading={acting} onClick={() => doAction('reject', { reason }, 'Application rejected.')}>
             Confirm Rejection
           </Button>
         </div>
@@ -478,7 +486,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
             placeholder="Enter reason…"
             className="w-full rounded-md border border-orange-200 px-3 py-2 text-sm"
           />
-          <Button loading={acting} onClick={() => doAction('cancel', { reason })}>
+          <Button loading={acting} onClick={() => doAction('cancel', { reason }, 'Application cancelled.')}>
             Confirm Cancellation
           </Button>
         </div>
@@ -789,6 +797,7 @@ function FeeAmountPanel({ collegeId, appId, initialTotal, initialPayNow, readonl
 // ── Collect fee: cash or Razorpay ────────────────────────────
 function CollegePayPanel({ collegeId, appId, onPaid }) {
   const { openCheckout, scriptError } = useRazorpay()
+  const toast = useToast()
 
   const [feeStatus, setFeeStatus]   = useState(null)
   const [loadingFS, setLoadingFS]   = useState(true)
@@ -818,11 +827,13 @@ function CollegePayPanel({ collegeId, appId, onPaid }) {
         `college-admin/${collegeId}/applications/${appId}/record-cash-payment`,
         { amount: amt, note: note.trim() || undefined }
       )
+      toast.success(res.data.message)
       setMsg(res.data.message)
       setAmount(''); setNote(''); setPayMode(null)
       fetchFS(); onPaid?.()
     } catch (e) {
-      setErr(e?.response?.data?.message || 'Failed to record payment.')
+      const msg = e?.response?.data?.message || 'Failed to record payment.'
+      setErr(msg); toast.error(msg)
     } finally { setSaving(false) }
   }
 
@@ -851,16 +862,18 @@ function CollegePayPanel({ collegeId, appId, onPaid }) {
               razorpay_payment_id: rzpResponse.razorpay_payment_id,
               razorpay_signature:  rzpResponse.razorpay_signature,
             })
+            toast.success(verifyRes.data.message)
             setMsg(verifyRes.data.message)
             setPayMode(null)
             fetchFS(); onPaid?.()
           } catch (e) {
-            setErr(e?.response?.data?.message || 'Payment verification failed.')
+            const msg = e?.response?.data?.message || 'Payment verification failed.'
+            setErr(msg); toast.error(msg)
           } finally { setSaving(false) }
         },
         onFailure: (e) => {
           setSaving(false)
-          if (e.message !== 'Payment cancelled by user.') setErr(e.message)
+          if (e.message !== 'Payment cancelled by user.') { setErr(e.message); toast.error(e.message) }
         },
       })
     } catch (e) {

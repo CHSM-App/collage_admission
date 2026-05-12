@@ -8,9 +8,11 @@ import api from '../../../services/api.js'
 import { useRazorpay } from '../../../shared/hooks/useRazorpay.js'
 import Button from '../../../shared/components/Button.jsx'
 import PaymentReceipts from './PaymentReceipts.jsx'
+import { useToast } from '../../../context/ToastContext.jsx'
 
 export default function CollegeFeePayment({ application, onDone, onCancel }) {
   const { openCheckout, scriptError } = useRazorpay()
+  const toast = useToast()
 
   const [feeStatus, setFeeStatus] = useState(null)
   const [loading, setLoading]       = useState(true)
@@ -62,21 +64,24 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
               razorpay_payment_id: rzpResponse.razorpay_payment_id,
               razorpay_signature:  rzpResponse.razorpay_signature,
             })
+            toast.success(verifyRes.data.message)
             setPaidMsg(verifyRes.data.message)
             setShowReceipts(true)
             fetchStatus()
             if (verifyRes.data.data?.all_paid) setTimeout(onDone, 1500)
           } catch (err) {
-            setPayError(err?.response?.data?.message || 'Payment verification failed.')
+            const msg = err?.response?.data?.message || 'Payment verification failed.'
+            setPayError(msg); toast.error(msg)
           } finally { setPaying(false) }
         },
         onFailure: (err) => {
           setPaying(false)
-          if (err.message !== 'Payment cancelled by user.') setPayError(err.message)
+          if (err.message !== 'Payment cancelled by user.') { setPayError(err.message); toast.error(err.message) }
         },
       })
     } catch (err) {
-      setPayError(err?.response?.data?.message || 'Could not initiate payment.')
+      const msg = err?.response?.data?.message || 'Could not initiate payment.'
+      setPayError(msg); toast.error(msg)
       setPaying(false)
     }
   }

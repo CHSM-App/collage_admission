@@ -12,6 +12,18 @@ const router    = express.Router();
 const db        = require('./db');
 const whatsapp  = require('../services/whatsapp');
 const mssql     = require('mssql');
+const logger    = require('../config/logger');
+
+// ── Password policy ─────────────────────────────────────────
+// Returns an error string if invalid, null if valid.
+function validatePassword(password) {
+  if (!password || password.length < 8)       return 'Password must be at least 8 characters.';
+  if (!/[A-Z]/.test(password))                return 'Password must contain at least one uppercase letter.';
+  if (!/[a-z]/.test(password))                return 'Password must contain at least one lowercase letter.';
+  if (!/[0-9]/.test(password))                return 'Password must contain at least one number.';
+  if (!/[^A-Za-z0-9]/.test(password))         return 'Password must contain at least one special character.';
+  return null;
+}
 
 // ── DB OTP helpers ───────────────────────────────────────────
 
@@ -61,7 +73,7 @@ async function verifyAndConsumeOtp(normPhone, otp, purpose) {
   return { valid: true, pendingData: row.pending_data ? JSON.parse(row.pending_data) : null };
 }
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_in_prod';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // 10 attempts per 15 minutes per IP for login endpoints
 const loginLimiter = rateLimit({
@@ -121,7 +133,7 @@ router.post('/login/student', loginLimiter, async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('Student login error:', err);
+    logger.error({ err }, 'Student login error');
     return res.status(500).json({ message: 'Server error. Please try again.' });
   }
 });
@@ -226,7 +238,7 @@ router.post('/login/college', loginLimiter, async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('College login error:', err);
+    logger.error({ err }, 'College login error');
     return res.status(500).json({ message: 'Server error. Please try again.' });
   }
 });
@@ -258,7 +270,7 @@ router.post('/login/admin', loginLimiter, async (req, res) => {
       user: { id: admin.id, name: admin.name, email: admin.email },
     });
   } catch (err) {
-    console.error('Admin login error:', err);
+    logger.error({ err }, 'Admin login error');
     return res.status(500).json({ message: 'Server error. Please try again.' });
   }
 });
@@ -339,7 +351,7 @@ router.post('/login/college-user', loginLimiter, async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('College-user login error:', err);
+    logger.error({ err }, 'College-user login error');
     return res.status(500).json({ message: 'Server error. Please try again.' });
   }
 });
@@ -364,6 +376,8 @@ router.post('/otp/send', otpLimiter, async (req, res) => {
   if (!/^[6-9]\d{9}$/.test(phone.trim())) {
     return res.status(400).json({ message: 'Phone number must be 10 digits starting with 6–9.' });
   }
+  const pwdErr = validatePassword(password);
+  if (pwdErr) return res.status(400).json({ message: pwdErr });
   if (password !== confirm_password) {
     return res.status(400).json({ message: 'Passwords do not match.' });
   }
@@ -392,7 +406,7 @@ router.post('/otp/send', otpLimiter, async (req, res) => {
 
     return res.json({ message: 'OTP sent to your WhatsApp number. Valid for 10 minutes.' });
   } catch (err) {
-    console.error('OTP send error:', err);
+    logger.error({ err }, 'OTP send error');
     return res.status(500).json({ message: err.message || 'Failed to send OTP. Please try again.' });
   }
 });
@@ -435,7 +449,7 @@ router.post('/otp/verify', async (req, res) => {
       user: { id: newStudent.id, name: newStudent.full_name, email: newStudent.email },
     });
   } catch (err) {
-    console.error('Registration after OTP verify error:', err);
+    logger.error({ err }, 'Registration after OTP verify error');
     return res.status(500).json({ message: 'Server error. Please try again.' });
   }
 });
@@ -447,6 +461,8 @@ router.post('/register/student', registerLimiter, async (req, res) => {
   if (!full_name || !email || !password) {
     return res.status(400).json({ message: 'Name, email and password are required.' });
   }
+  const pwdErr = validatePassword(password);
+  if (pwdErr) return res.status(400).json({ message: pwdErr });
 
   try {
     const exists = await db.request()
@@ -492,7 +508,7 @@ router.post('/register/student', registerLimiter, async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('Student registration error:', err);
+    logger.error({ err }, 'Student registration error');
     return res.status(500).json({ message: 'Server error. Please try again.' });
   }
 });
@@ -522,7 +538,7 @@ router.post('/forgot-password/send-otp', otpLimiter, async (req, res) => {
 
     return res.json({ message: 'OTP sent to your WhatsApp number. Valid for 10 minutes.' });
   } catch (err) {
-    console.error('Forgot password OTP error:', err);
+    logger.error({ err }, 'Forgot password OTP error');
     return res.status(500).json({ message: err.message || 'Failed to send OTP. Please try again.' });
   }
 });
@@ -535,9 +551,8 @@ router.post('/forgot-password/reset', async (req, res) => {
   if (!phone || !otp || !new_password) {
     return res.status(400).json({ message: 'Phone, OTP and new password are required.' });
   }
-  if (new_password.length < 6) {
-    return res.status(400).json({ message: 'Password must be at least 6 characters.' });
-  }
+  const pwdErr = validatePassword(new_password);
+  if (pwdErr) return res.status(400).json({ message: pwdErr });
 
   const normPhone = whatsapp.normalisePhone(phone.trim());
 
@@ -556,7 +571,7 @@ router.post('/forgot-password/reset', async (req, res) => {
     }
     return res.json({ message: 'Password reset successful. You can now log in.' });
   } catch (err) {
-    console.error('Password reset error:', err);
+    logger.error({ err }, 'Password reset error');
     return res.status(500).json({ message: 'Server error. Please try again.' });
   }
 });

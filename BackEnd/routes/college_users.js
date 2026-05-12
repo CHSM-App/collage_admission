@@ -25,6 +25,7 @@ const db      = require('./db');
 const mssql   = require('mssql');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
+const logger  = require('../config/logger');
 
 const ALL_PERMISSIONS = [
   'submit_application',
@@ -76,7 +77,7 @@ router.put('/colleges/:id', authenticate, requireAdmin, async (req, res) => {
       .query(`UPDATE colleges SET application_fee = @fee WHERE id = @id`);
     return res.json({ success: true, message: 'Application fee updated.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -99,7 +100,7 @@ router.get('/colleges', authenticate, requireAdmin, async (req, res) => {
 
     return res.json(paginatedResponse(dataRes.recordset, total, page, limit));
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -135,7 +136,7 @@ router.get('/colleges/:collegeId/roles', authenticate, requireAdmin, async (req,
 
     return res.json({ success: true, data: roles });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -187,7 +188,7 @@ router.post('/colleges/:collegeId/roles', authenticate, requireAdmin, async (req
     if (err.number === 2627 || err.number === 2601) {
       return res.status(409).json({ success: false, message: 'A role with this name already exists for this college.' });
     }
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -239,7 +240,7 @@ router.put('/colleges/:collegeId/roles/:roleId', authenticate, requireAdmin, asy
 
     return res.json({ success: true, message: 'Role updated.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -262,7 +263,7 @@ router.delete('/colleges/:collegeId/roles/:roleId', authenticate, requireAdmin, 
 
     return res.json({ success: true, message: 'Role deleted.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -291,7 +292,7 @@ router.get('/colleges/:collegeId/users', authenticate, requireAdmin, async (req,
 
     return res.json(paginatedResponse(dataRes.recordset, total, page, limit));
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -325,7 +326,7 @@ router.post('/colleges/:collegeId/users', authenticate, requireAdmin, async (req
     if (err.number === 2627 || err.number === 2601) {
       return res.status(409).json({ success: false, message: 'A user with this email already exists.' });
     }
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -361,7 +362,7 @@ router.put('/colleges/:collegeId/users/:userId', authenticate, requireAdmin, asy
 
     return res.json({ success: true, message: 'User updated.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -375,7 +376,7 @@ router.delete('/colleges/:collegeId/users/:userId', authenticate, requireAdmin, 
       .query(`DELETE FROM college_users WHERE id = @id`);
     return res.json({ success: true, message: 'User deleted.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });

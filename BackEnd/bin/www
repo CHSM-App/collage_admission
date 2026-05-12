@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 
+// Validate required env vars before loading anything else.
+// Exits with a clear error if any are missing.
+require('../config/env');
+
 /**
  * Module dependencies.
  */

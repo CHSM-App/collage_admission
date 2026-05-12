@@ -14,6 +14,7 @@ const router  = express.Router();
 const db      = require('./db');
 const mssql   = require('mssql');
 const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
+const logger  = require('../config/logger');
 
 // ── Generate next college code (CL001, CL002, …) ────────────
 async function generateCollegeCode() {
@@ -90,7 +91,7 @@ router.post('/', async (req, res) => {
       },
     })
   } catch (err) {
-    console.error(err)
+    logger.error({ err })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -110,7 +111,7 @@ router.get('/', async (req, res) => {
 
     return res.json(paginatedResponse(dataRes.recordset, total, page, limit));
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -130,7 +131,7 @@ router.get('/search', async (req, res) => {
       `)
     return res.json({ success: true, data: result.recordset })
   } catch (err) {
-    console.error(err)
+    logger.error({ err })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -174,7 +175,7 @@ router.get('/by-code/:code', async (req, res) => {
 
     return res.json({ success: true, data: { college, periods: periodsRes.recordset } });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -191,7 +192,7 @@ router.get('/:id', async (req, res) => {
     }
     return res.json({ success: true, data: result.recordset[0] });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -212,7 +213,7 @@ router.get('/:id/courses', async (req, res) => {
       `);
     return res.json({ success: true, data: result.recordset });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -246,7 +247,7 @@ router.get('/:id/admission-periods', async (req, res) => {
 
     return res.json({ success: true, data: result.recordset });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -283,7 +284,7 @@ router.get('/:collegeId/admission-periods/:periodId/fee', async (req, res) => {
 
     return res.json({ success: true, data: fee.recordset[0] || null });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -318,7 +319,7 @@ router.get('/:collegeId/admission-periods/:periodId/required-docs', async (req, 
 
     return res.json({ success: true, data: docs.recordset });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -340,7 +341,7 @@ router.get('/:collegeId/courses/:courseId/subjects/:year', async (req, res) => {
 
     return res.json({ success: true, data: result.recordset });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });

@@ -11,6 +11,15 @@ import api from '../../../services/api.js'
 
 const STEPS = { FORM: 'form', OTP: 'otp' }
 
+function validatePassword(pwd) {
+  if (!pwd || pwd.length < 8)        return 'Password must be at least 8 characters.'
+  if (!/[A-Z]/.test(pwd))            return 'Password must contain at least one uppercase letter.'
+  if (!/[a-z]/.test(pwd))            return 'Password must contain at least one lowercase letter.'
+  if (!/[0-9]/.test(pwd))            return 'Password must contain at least one number.'
+  if (!/[^A-Za-z0-9]/.test(pwd))     return 'Password must contain at least one special character.'
+  return null
+}
+
 export default function StudentRegister() {
   const navigate = useNavigate()
   const { saveSession } = useAuthContext()
@@ -40,6 +49,8 @@ export default function StudentRegister() {
       setError('Phone number must be 10 digits starting with 6–9.')
       return
     }
+    const pwdErr = validatePassword(form.password)
+    if (pwdErr) { setError(pwdErr); return }
     if (form.password !== form.confirm_password) {
       setError('Passwords do not match.')
       return
@@ -160,7 +171,7 @@ export default function StudentRegister() {
         <div className="grid grid-cols-2 gap-3">
           <Input
             id="password" label="Password" name="password" type="password"
-            placeholder="Min 6 characters"
+            placeholder="Min 8 chars, upper, lower, number, symbol"
             value={form.password} onChange={handleChange}
             disabled={loading} required
           />

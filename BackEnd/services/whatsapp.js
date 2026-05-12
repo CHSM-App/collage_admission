@@ -12,6 +12,7 @@
 const https  = require('https')
 const mssql  = require('mssql')
 const db     = require('../routes/db')
+const logger = require('../config/logger')
 
 const API_TOKEN    = process.env.WHATSAPP_API_TOKEN || ''
 const ENABLED      = process.env.WHATSAPP_ENABLED === 'true'
@@ -50,7 +51,7 @@ async function logToDb({ phone, campaignName, templateId, sample, status, campai
       `)
   } catch (e) {
     // Never let logging failure break anything
-    console.warn('[WhatsApp] DB log failed:', e.message)
+    logger.warn({ err: e }, '[WhatsApp] DB log failed')
   }
 }
 
@@ -149,7 +150,7 @@ async function sendOtp(phone, otpCode) {
   if (!success) {
     throw new Error(result.ErrorDescription || 'OTP send failed.')
   }
-  console.log(`[WhatsApp] OTP sent to ${normPhone} — CampaignId: ${result.ReturnData}`)
+  logger.info(`[WhatsApp] OTP sent to ${normPhone} — CampaignId: ${result.ReturnData}`)
   return result
 }
 
@@ -159,17 +160,17 @@ async function sendOtp(phone, otpCode) {
 
 async function sendTemplateMessage(phone, templateId, sample, campaignName, applicationId) {
   if (!ENABLED) {
-    console.log(`[WhatsApp] Disabled — would have sent "${campaignName}" to ${phone} (template: ${templateId})`)
+    logger.info(`[WhatsApp] Disabled — would have sent "${campaignName}" to ${phone} (template: ${templateId})`)
     await logToDb({ phone, campaignName, templateId, sample, status: 'skipped', applicationId })
     return null
   }
   if (!API_TOKEN || API_TOKEN.startsWith('REPLACE')) {
-    console.warn('[WhatsApp] API token not configured — skipping send.')
+    logger.warn('[WhatsApp] API token not configured — skipping send.')
     await logToDb({ phone, campaignName, templateId, sample, status: 'skipped', errorDetail: 'API token not configured', applicationId })
     return null
   }
   if (!templateId || String(templateId).startsWith('REPLACE')) {
-    console.warn(`[WhatsApp] Template ID not configured for campaign "${campaignName}" — skipping.`)
+    logger.warn(`[WhatsApp] Template ID not configured for campaign "${campaignName}" — skipping.`)
     await logToDb({ phone, campaignName, templateId, sample, status: 'skipped', errorDetail: 'Template ID not configured', applicationId })
     return null
   }
@@ -184,7 +185,7 @@ async function sendTemplateMessage(phone, templateId, sample, campaignName, appl
       CampaignName: campaignName || 'admission_portal',
     })
   } catch (err) {
-    console.error(`[WhatsApp] Network error for "${campaignName}":`, err.message)
+    logger.error({ err }, `[WhatsApp] Network error for "${campaignName}"`);
     await logToDb({ phone, campaignName, templateId, sample, status: 'failed', errorDetail: err.message, applicationId })
     return null
   }
@@ -202,9 +203,9 @@ async function sendTemplateMessage(phone, templateId, sample, campaignName, appl
   })
 
   if (success) {
-    console.log(`[WhatsApp] Sent "${campaignName}" to ${phone} — CampaignId: ${result.ReturnData}`)
+    logger.info(`[WhatsApp] Sent "${campaignName}" to ${phone} — CampaignId: ${result.ReturnData}`)
   } else {
-    console.warn(`[WhatsApp] Send failed for "${campaignName}":`, result)
+    logger.warn({ result }, `[WhatsApp] Send failed for "${campaignName}"`)
   }
   return result
 }
@@ -236,7 +237,10 @@ async function notifyCorrectionRequested(student, applicationId) {
 async function notifyApplicationAccepted(student, applicationId) {
   const phone = normalisePhone(student.phone)
   if (!phone) return
-  return sendTemplateMessage(phone, TEMPLATES.accepted, `${student.name},${student.course_name}`, 'application_accepted', applicationId)
+  const fromDate = student.start_date ? new Date(student.start_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
+  const toDate   = student.end_date   ? new Date(student.end_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
+  const sample = `${student.name},${student.course_name},${student.college_name || ''},${fromDate},${toDate}`
+  return sendTemplateMessage(phone, TEMPLATES.accepted, sample, 'application_accepted', applicationId)
 }
 
 async function notifyApplicationRejected(student, applicationId) {
@@ -245,10 +249,10 @@ async function notifyApplicationRejected(student, applicationId) {
   return sendTemplateMessage(phone, TEMPLATES.rejected, `${student.name},${student.course_name}`, 'application_rejected', applicationId)
 }
 
-async function notifyAdmissionConfirmed(student, payNowAmount, applicationId) {
+async function notifyAdmissionConfirmed(student, applicationId) {
   const phone = normalisePhone(student.phone)
   if (!phone) return
-  return sendTemplateMessage(phone, TEMPLATES.confirmed, `${student.name},${student.course_name},₹${Number(payNowAmount).toLocaleString('en-IN')}`, 'admission_confirmed', applicationId)
+  return sendTemplateMessage(phone, TEMPLATES.confirmed, `${student.name},${student.college_name || ''}`, 'admission_confirmed', applicationId)
 }
 
 async function notifyFeesPaid(student, amountPaid, applicationId) {

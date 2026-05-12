@@ -9,6 +9,7 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('./db');
 const { authenticate } = require('../middleware/auth');
+const logger  = require('../config/logger');
 
 // All notification routes require authentication
 router.use(authenticate);
@@ -203,7 +204,7 @@ router.get('/student/:studentId', async (req, res) => {
 
     return res.json({ success: true, data: notifications, unread });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });

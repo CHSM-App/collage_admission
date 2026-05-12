@@ -4,6 +4,7 @@ var path        = require('path');
 var cookieParser= require('cookie-parser');
 var logger      = require('morgan');
 var cors        = require('cors');
+var pinoLogger  = require('./config/logger');
 
 var authRouter           = require('./routes/auth');
 var collegesRouter       = require('./routes/colleges');
@@ -65,7 +66,7 @@ const PORT = process.env.PORT || 8000;
 const PORTLOCAL = 5000;
 
 app.listen(PORTLOCAL, function () {
-  console.log('Server listening on :' + PORTLOCAL);
+  pinoLogger.info('Server listening on :' + PORTLOCAL);
 });
 
 module.exports = app;

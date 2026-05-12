@@ -21,6 +21,7 @@ const router   = express.Router();
 const db       = require('./db');
 const mssql    = require('mssql');
 const { authenticate } = require('../middleware/auth');
+const logger   = require('../config/logger');
 
 // All application form routes require authentication
 router.use(authenticate);
@@ -33,7 +34,7 @@ async function logActivity(appId, action, actorRole, note = null) {
       .input('actorRole', mssql.NVarChar, actorRole)
       .input('note',      mssql.NVarChar, note || null)
       .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
-  } catch (e) { console.warn('logActivity failed:', e.message); }
+  } catch (e) { logger.warn({ err: e }, 'logActivity failed'); }
 }
 
 const MIN_AGE_FOR_FY = 17; // years
@@ -237,7 +238,7 @@ router.post('/applications/init', async (req, res) => {
         }
       } catch (_) { /* fall through */ }
     }
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -335,7 +336,7 @@ router.post('/applications/init-by-college', async (req, res) => {
       },
     });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -449,7 +450,7 @@ router.get('/applications/:id/form', async (req, res) => {
       data: { application: app, previous_exam: exam, previous_exams: exams, documents: docsRes.recordset },
     });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -499,7 +500,7 @@ router.get('/student-profile/autofill', async (req, res) => {
 
     return res.json({ success: true, data: { profile, last_application: lastApp } });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -603,7 +604,7 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
 
     return res.json({ success: true, message: 'Personal details saved.', current_step: 2 });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -710,7 +711,7 @@ router.patch('/applications/:id/other-details', async (req, res) => {
 
     return res.json({ success: true, message: 'Other details saved.', current_step: 3 });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -808,7 +809,7 @@ router.patch('/applications/:id/previous-exam', async (req, res) => {
 
     return res.json({ success: true, message: 'Previous exam details saved.', current_step: 4 });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -893,7 +894,7 @@ router.post('/applications/:id/form-documents', async (req, res) => {
 
     return res.json({ success: true, message: 'Document linked to application.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -913,7 +914,7 @@ router.delete('/applications/:id/form-documents/:docTypeId', async (req, res) =>
 
     return res.json({ success: true, message: 'Document removed from application.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -969,7 +970,7 @@ router.post('/applications/:id/declaration', async (req, res) => {
 
     return res.json({ success: true, message: 'Declaration accepted. Application ready for payment.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -1037,7 +1038,7 @@ router.post('/applications/:id/resubmit', async (req, res) => {
 
     return res.json({ success: true, message: 'Application resubmitted successfully.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -1066,7 +1067,7 @@ router.get('/subjects-list', async (req, res) => {
       `);
     return res.json({ success: true, data: result.recordset });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -1099,7 +1100,7 @@ router.get('/subject-lookup', async (req, res) => {
     }
     return res.json({ success: true, data: result.recordset[0] });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -1147,7 +1148,7 @@ router.get('/applications/:id/subject-selections', async (req, res) => {
       },
     });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -1219,7 +1220,7 @@ router.post('/applications/:id/subject-selections', async (req, res) => {
 
     return res.json({ success: true, message: 'Subjects saved.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -1247,7 +1248,7 @@ router.get('/required-documents', async (req, res) => {
 
     return res.json({ success: true, data: result.recordset });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });

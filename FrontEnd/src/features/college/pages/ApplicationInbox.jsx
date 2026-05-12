@@ -15,9 +15,7 @@ const STATUS_META = {
   confirmed:                { label: 'Fees Pending',             color: 'bg-amber-100 text-amber-700' },
   fees_paid:                { label: 'Admission Confirmed',      color: 'bg-emerald-100 text-emerald-700' },
   roll_assigned:            { label: 'Roll Assigned',            color: 'bg-violet-100 text-violet-700' },
-  enrolled:                 { label: 'Enrolled',                 color: 'bg-green-100 text-green-800' },
   rejected:                 { label: 'Rejected',                 color: 'bg-red-100 text-red-700' },
-  cancelled:                { label: 'Cancelled',                color: 'bg-slate-100 text-slate-500' },
 }
 
 // Group statuses by label so labels that map to multiple workflow keys

@@ -24,6 +24,7 @@ const router  = express.Router()
 const db      = require('./db')
 const mssql   = require('mssql')
 const { authenticate, requireCollegeAccess, requirePerm } = require('../middleware/auth')
+const logger  = require('../config/logger')
 
 router.use(authenticate, requireCollegeAccess)
 
@@ -128,7 +129,7 @@ router.get('/:collegeId/student-lookup', requirePerm('certificates'), async (req
       },
     })
   } catch (e) {
-    console.error('[student-lookup] query failed:', { reg, message: e.message, code: e.code })
+    logger.error({ err: e, reg }, '[student-lookup] query failed')
     return res.status(500).json({
       success: false,
       message: 'Could not look up the student. The student database returned an error — please try again, or contact your administrator if the problem persists.',
@@ -157,7 +158,7 @@ router.get('/:collegeId/bonafide', requirePerm('certificates'), async (req, res)
     `)
     return res.json({ success: true, data: r.recordset })
   } catch (e) {
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -171,7 +172,7 @@ router.get('/:collegeId/bonafide/next-no', requirePerm('certificates'), async (r
     const certNo = await nextCertificateNumber(cid(req), year, BONAFIDE_CFG)
     return res.json({ success: true, data: { certificate_no: certNo } })
   } catch (e) {
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -189,7 +190,7 @@ router.get('/:collegeId/bonafide/:id', requirePerm('certificates'), async (req, 
     if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Certificate not found.' })
     return res.json({ success: true, data: r.recordset[0] })
   } catch (e) {
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -253,7 +254,7 @@ router.post('/:collegeId/bonafide', requirePerm('certificates'), async (req, res
     if (e.number === 2627 || e.number === 2601) {
       return res.status(409).json({ success: false, message: 'Certificate number collision — please retry.' })
     }
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -301,7 +302,7 @@ router.put('/:collegeId/bonafide/:id', requirePerm('certificates'), async (req, 
     if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Certificate not found.' })
     return res.json({ success: true, data: r.recordset[0] })
   } catch (e) {
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -323,7 +324,7 @@ router.delete('/:collegeId/bonafide/:id', requirePerm('certificates'), async (re
     if (!r.rowsAffected[0]) return res.status(404).json({ success: false, message: 'Certificate not found.' })
     return res.json({ success: true })
   } catch (e) {
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -372,7 +373,7 @@ router.get('/:collegeId/character', requirePerm('certificates'), async (req, res
     `)
     return res.json({ success: true, data: r.recordset })
   } catch (e) {
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -384,7 +385,7 @@ router.get('/:collegeId/character/next-no', requirePerm('certificates'), async (
     const certNo = await nextCertificateNumber(cid(req), year, CHARACTER_CFG)
     return res.json({ success: true, data: { certificate_no: certNo } })
   } catch (e) {
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -402,7 +403,7 @@ router.get('/:collegeId/character/:id', requirePerm('certificates'), async (req,
     if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Certificate not found.' })
     return res.json({ success: true, data: r.recordset[0] })
   } catch (e) {
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -450,7 +451,7 @@ router.post('/:collegeId/character', requirePerm('certificates'), async (req, re
     if (e.number === 2627 || e.number === 2601) {
       return res.status(409).json({ success: false, message: 'Certificate number collision — please retry.' })
     }
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -500,7 +501,7 @@ router.put('/:collegeId/character/:id', requirePerm('certificates'), async (req,
     if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Certificate not found.' })
     return res.json({ success: true, data: r.recordset[0] })
   } catch (e) {
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -521,7 +522,7 @@ router.delete('/:collegeId/character/:id', requirePerm('certificates'), async (r
     if (!r.rowsAffected[0]) return res.status(404).json({ success: false, message: 'Certificate not found.' })
     return res.json({ success: true })
   } catch (e) {
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -569,7 +570,7 @@ router.get('/:collegeId/noc', requirePerm('certificates'), async (req, res) => {
     `)
     return res.json({ success: true, data: r.recordset })
   } catch (e) {
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -581,7 +582,7 @@ router.get('/:collegeId/noc/next-no', requirePerm('certificates'), async (req, r
     const certNo = await nextCertificateNumber(cid(req), year, NOC_CFG)
     return res.json({ success: true, data: { certificate_no: certNo } })
   } catch (e) {
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -599,7 +600,7 @@ router.get('/:collegeId/noc/:id', requirePerm('certificates'), async (req, res) 
     if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Certificate not found.' })
     return res.json({ success: true, data: r.recordset[0] })
   } catch (e) {
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -648,7 +649,7 @@ router.post('/:collegeId/noc', requirePerm('certificates'), async (req, res) => 
     if (e.number === 547 && /chk_cert_noc_date_range/i.test(e.message || '')) {
       return res.status(422).json({ success: false, message: 'To Date must be on or after From Date.' })
     }
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -698,7 +699,7 @@ router.put('/:collegeId/noc/:id', requirePerm('certificates'), async (req, res) 
     if (e.number === 547 && /chk_cert_noc_date_range/i.test(e.message || '')) {
       return res.status(422).json({ success: false, message: 'To Date must be on or after From Date.' })
     }
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -719,7 +720,7 @@ router.delete('/:collegeId/noc/:id', requirePerm('certificates'), async (req, re
     if (!r.rowsAffected[0]) return res.status(404).json({ success: false, message: 'Certificate not found.' })
     return res.json({ success: true })
   } catch (e) {
-    console.error(e)
+    logger.error({ err: e })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })

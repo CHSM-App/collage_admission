@@ -20,7 +20,9 @@ const router   = express.Router();
 const db       = require('./db');
 const mssql    = require('mssql');
 const feeSvc   = require('../services/FeeDeterminationService');
+const whatsapp = require('../services/whatsapp');
 const { authenticate } = require('../middleware/auth');
+const logger   = require('../config/logger');
 
 // All payment routes require authentication
 router.use(authenticate);
@@ -33,7 +35,28 @@ async function logActivity(appId, action, actorRole, note = null) {
       .input('actorRole', mssql.NVarChar, actorRole)
       .input('note',      mssql.NVarChar, note || null)
       .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
-  } catch (e) { console.warn('logActivity failed:', e.message); }
+  } catch (e) { logger.warn({ err: e }, 'logActivity failed'); }
+}
+
+async function getStudentForNotification(appId) {
+  try {
+    const r = await db.request()
+      .input('id', mssql.Int, parseInt(appId))
+      .query(`
+        SELECT s.full_name AS name, s.phone,
+               COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name,
+               c.name AS college_name
+        FROM applications a
+        JOIN students s ON s.id = a.student_id
+        LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+        LEFT JOIN colleges c ON c.id = a.college_id
+        WHERE a.id = @id
+      `);
+    return r.recordset[0] || null;
+  } catch (e) {
+    logger.warn({ err: e }, 'getStudentForNotification failed');
+    return null;
+  }
 }
 
 const razorpay = new Razorpay({
@@ -111,7 +134,7 @@ async function getCollegeFeTotal(app) {
       }
     }
   } catch (e) {
-    console.warn('FeeDeterminationService failed, falling back to fee_structures:', e.message);
+    logger.warn({ err: e }, 'FeeDeterminationService failed, falling back to fee_structures');
   }
 
   // Legacy fallback: fee_structures table
@@ -186,7 +209,7 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
       },
     });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -205,7 +228,7 @@ router.get('/student-has-payments', async (req, res) => {
       `)
     return res.json({ success: true, data: { has_payments: r.recordset.length > 0 } })
   } catch (err) {
-    console.error(err)
+    logger.error({ err })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -276,7 +299,7 @@ router.get('/receipts/:applicationId', async (req, res) => {
       },
     });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -395,7 +418,7 @@ router.post('/create-order', async (req, res) => {
       },
     });
   } catch (err) {
-    console.error('create-order error:', err);
+    logger.error({ err }, 'create-order error');
     return res.status(500).json({ success: false, message: 'Failed to create payment order.' });
   }
 });
@@ -590,6 +613,10 @@ router.post('/verify', async (req, res) => {
       else if (firstPaid) await logActivity(appId, 'fees_paid',           'student', `₹${totalPaid.toLocaleString('en-IN')} paid, ₹${(totalFee - totalPaid).toLocaleString('en-IN')} remaining`);
       else                await logActivity(appId, 'fee_instalment_paid', 'student', `₹${amount.toLocaleString('en-IN')} paid, ₹${(totalFee - totalPaid).toLocaleString('en-IN')} remaining`);
 
+      if (firstPaid || fullyPaid) {
+        getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
+      }
+
       return res.json({
         success: true,
         message: fullyPaid  ? 'College fee fully paid!' :
@@ -600,7 +627,7 @@ router.post('/verify', async (req, res) => {
 
     }
   } catch (err) {
-    console.error('verify error:', err);
+    logger.error({ err }, 'verify error');
     return res.status(500).json({ success: false, message: 'Payment verification failed.' });
   }
 });

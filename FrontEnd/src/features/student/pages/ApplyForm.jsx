@@ -4,12 +4,14 @@ import api from '../../../services/api.js'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import { SkeletonForm } from '../../../shared/components/Skeleton.jsx'
+import { useToast } from '../../../context/ToastContext.jsx'
 
 const YEAR_LABEL = { 1: 'FY (First Year)', 2: 'SY (Second Year)', 3: 'TY (Third Year)' }
 
 export default function ApplyForm({ periodId, collegeId }) {
   const { user } = useAuthContext()
   const navigate = useNavigate()
+  const toast    = useToast()
 
   const [period, setPeriod]   = useState(null)
   const [college, setCollege] = useState(null)
@@ -57,12 +59,15 @@ export default function ApplyForm({ periodId, collegeId }) {
       // 2. Simulate payment → submit
       const submitRes = await api.post(`applications/${appId}/submit`)
 
+      toast.success('Application submitted successfully!')
       setSuccess({
         registration_number: submitRes.data.data.registration_number,
         appId,
       })
     } catch (err) {
-      setError(err?.response?.data?.message || 'Submission failed. Please try again.')
+      const msg = err?.response?.data?.message || 'Submission failed. Please try again.'
+      setError(msg)
+      toast.error(msg)
     } finally {
       setSubmitting(false)
     }

@@ -17,6 +17,7 @@ const router  = express.Router()
 const db      = require('./db')
 const mssql   = require('mssql')
 const { authenticate } = require('../middleware/auth')
+const logger  = require('../config/logger')
 
 // All document routes require authentication
 router.use(authenticate)
@@ -77,7 +78,7 @@ router.get('/document-types', async (req, res) => {
       .query('SELECT id, name, description FROM document_types ORDER BY name')
     return res.json({ success: true, data: result.recordset })
   } catch (err) {
-    console.error(err)
+    logger.error({ err })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -107,7 +108,7 @@ router.get('/student-documents', async (req, res) => {
       `)
     return res.json({ success: true, data: result.recordset })
   } catch (err) {
-    console.error(err)
+    logger.error({ err })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -174,7 +175,7 @@ router.post('/student-documents', upload.single('file'), async (req, res) => {
     }
   } catch (err) {
     if (req.file) fs.unlink(req.file.path, () => {})
-    console.error(err)
+    logger.error({ err })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -210,7 +211,7 @@ router.delete('/student-documents/:id', async (req, res) => {
 
     return res.json({ success: true, message: 'Document deleted.' })
   } catch (err) {
-    console.error(err)
+    logger.error({ err })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -238,7 +239,7 @@ router.get('/student-documents/:id/file', async (req, res) => {
     res.setHeader('Content-Disposition', `inline; filename="${file_name}"`)
     return res.sendFile(absPath)
   } catch (err) {
-    console.error(err)
+    logger.error({ err })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })
@@ -263,7 +264,7 @@ router.get('/application-documents/:applicationId', async (req, res) => {
       `)
     return res.json({ success: true, data: result.recordset })
   } catch (err) {
-    console.error(err)
+    logger.error({ err })
     return res.status(500).json({ success: false, message: 'Server error.' })
   }
 })

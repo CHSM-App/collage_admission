@@ -24,6 +24,7 @@ const db       = require('./db')
 const mssql    = require('mssql')
 const feeSvc   = require('../services/FeeDeterminationService')
 const { authenticate, requireCollegeAccess, requirePerm } = require('../middleware/auth')
+const logger   = require('../config/logger')
 
 // All masters routes require authentication and college ownership
 router.use(authenticate, requireCollegeAccess)
@@ -86,7 +87,7 @@ async function getFacultyMasterCols() {
     `)
     recordset = r.recordset || []
   } catch (e) {
-    console.warn('[faculty-master] schema discovery query failed:', e.message)
+    logger.warn({ err: e }, '[faculty-master] schema discovery query failed')
   }
 
   const all   = recordset.map(x => x.COLUMN_NAME)
@@ -95,7 +96,7 @@ async function getFacultyMasterCols() {
   const years = all.filter(n => /^exam_seat_code_year\d+$/i.test(n)).sort(byNum)
 
   if (sems.length === 0 || years.length === 0) {
-    console.warn(
+    logger.warn(
       `[faculty-master] schema discovery found ${sems.length} sem cols / ${years.length} year cols. ` +
       `Falling back to the legacy 6-sem / 3-year layout. ` +
       `If the migration HAS been run, verify the DB connection's current database contains faculty_master ` +
@@ -111,13 +112,7 @@ async function getFacultyMasterCols() {
 // a user-friendly, action-oriented message to the client. Never leaks raw
 // SQL message text to the response.
 function handleFacultySaveError(e, res, op) {
-  console.error(`[faculty-master ${op}] save failed:`, {
-    sqlNumber: e.number,
-    sqlState:  e.state,
-    procedure: e.procName,
-    message:   e.message,
-    stack:     e.stack,
-  })
+  logger.error({ err: e, op, sqlNumber: e.number, sqlState: e.state, procedure: e.procName }, `[faculty-master ${op}] save failed`)
   // Unique constraint violation (degree_course_code per college)
   if (e.number === 2627 || e.number === 2601) {
     return res.status(409).json({ success: false, message: 'A degree course with this code already exists for this college.' })

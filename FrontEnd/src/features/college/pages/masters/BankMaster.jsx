@@ -145,8 +145,8 @@ export default function BankMaster({ collegeId }) {
             </div>
             <div className="px-6 py-5 space-y-3">
               {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
-              <F label="Bank Name *"><input value={form.bank_name} onChange={e => set('bank_name', e.target.value)} className={inp} placeholder="State Bank of India" /></F>
-              <F label="Account Number *"><input value={form.bank_account_number} onChange={e => set('bank_account_number', e.target.value)} className={inp} placeholder="012345678901" /></F>
+              <F label="Bank Name *"><input value={form.bank_name} onChange={e => { const v = e.target.value; if (/^[a-zA-Z\s]*$/.test(v)) set('bank_name', v) }} className={inp} placeholder="State Bank of India" /></F>
+              <F label="Account Number *"><input value={form.bank_account_number} onChange={e => { const v = e.target.value; if (/^\d*$/.test(v)) set('bank_account_number', v) }} className={inp} placeholder="012345678901" inputMode="numeric" /></F>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <F label="Branch"><input value={form.branch} onChange={e => set('branch', e.target.value)} className={inp} placeholder="Vengurla" /></F>
                 <F label="IFSC Code *"><input value={form.ifsc_code} onChange={e => set('ifsc_code', e.target.value.toUpperCase())} className={inp} placeholder="SBIN0001234" /></F>

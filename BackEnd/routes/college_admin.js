@@ -26,6 +26,7 @@ const mssqlShared = require('mssql');
 const { authenticate, requireCollegeAccess, requirePerm } = require('../middleware/auth');
 const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
 const whatsapp = require('../services/whatsapp');
+const logger = require('../config/logger');
 
 // All routes in this file require authentication and college ownership
 router.use(authenticate, requireCollegeAccess);
@@ -43,7 +44,7 @@ async function logActivity(appId, action, actorRole, note = null) {
         VALUES (@appId, @action, @actorRole, @note)
       `);
   } catch (e) {
-    console.warn('logActivity failed:', e.message);
+    logger.warn({ err: e }, 'logActivity failed');
   }
 }
 
@@ -54,15 +55,20 @@ async function getStudentForNotification(appId) {
       .input('id', mssqlShared.Int, parseInt(appId))
       .query(`
         SELECT s.full_name AS name, s.phone,
-               COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name
+               COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name,
+               c.name AS college_name,
+               ap.start_date,
+               ap.end_date
         FROM applications a
         JOIN students s ON s.id = a.student_id
         LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+        LEFT JOIN colleges c ON c.id = a.college_id
+        LEFT JOIN admission_periods ap ON ap.id = a.admission_period_id
         WHERE a.id = @id
       `);
     return r.recordset[0] || null;
   } catch (e) {
-    console.warn('getStudentForNotification failed:', e.message);
+    logger.warn({ err: e }, 'getStudentForNotification failed');
     return null;
   }
 }
@@ -100,7 +106,7 @@ router.get('/:collegeId/admission-periods', async (req, res) => {
       `);
     return res.json({ success: true, data: result.recordset });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -130,7 +136,7 @@ router.post('/:collegeId/admission-periods', requirePerm('masters'), async (req,
 
     return res.status(201).json({ success: true, data: { id: result.recordset[0].id } });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -161,7 +167,7 @@ router.put('/:collegeId/admission-periods/:periodId', requirePerm('masters'), as
 
     return res.json({ success: true, message: 'Admission period updated.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -186,7 +192,7 @@ router.delete('/:collegeId/admission-periods/:periodId', requirePerm('masters'),
     }
     return res.json({ success: true, message: 'Admission period deleted.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -208,7 +214,7 @@ router.get('/:collegeId/students/search', async (req, res) => {
       `);
     return res.json({ success: true, data: result.recordset });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -276,7 +282,7 @@ router.get('/:collegeId/applications', requirePerm('review_application'), async 
 
     return res.json(paginatedResponse(dataRes.recordset, countRes.recordset[0].total, page, limit));
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -356,7 +362,7 @@ router.get('/:collegeId/applications/:appId', requirePerm('review_application'),
       data: { ...result.recordset[0], documents: docs.recordset, exam, exams, activity: activityRes.recordset },
     });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -394,7 +400,7 @@ router.post('/:collegeId/applications/:appId/request-correction', requirePerm('r
 
     return res.json({ success: true, message: 'Correction requested. Student has been notified.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -443,7 +449,7 @@ router.post('/:collegeId/applications/:appId/approve', requirePerm('review_appli
 
     return res.json({ success: true, message: 'Application accepted. Student has been notified to visit the college.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -479,7 +485,7 @@ router.post('/:collegeId/applications/:appId/reject', requirePerm('review_applic
 
     return res.json({ success: true, message: 'Application rejected.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -554,11 +560,10 @@ router.post('/:collegeId/applications/:appId/confirm', requirePerm('review_appli
     }
 
     await logActivity(req.params.appId, 'confirmed', 'college', `Total fee: ₹${total}, Pay now: ₹${payNow}`);
-    getStudentForNotification(req.params.appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, payNow));
 
     return res.json({ success: true, message: 'Admission confirmed. Student can now pay the college fee.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -605,7 +610,7 @@ router.post('/:collegeId/applications/:appId/set-fee', requirePerm('review_appli
 
     return res.json({ success: true, message: 'Fee amounts saved.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -656,7 +661,7 @@ router.post('/:collegeId/applications/:appId/cancel', requirePerm('review_applic
 
     return res.json({ success: true, message: 'Application cancelled and seat freed.' });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -754,10 +759,10 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
     const noteText = note ? ` — ${note}` : '';
     if (fullyPaid) {
       await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${newTotalPaid.toLocaleString('en-IN')} (full)${noteText}`);
-      getStudentForNotification(appId).then(s => s && whatsapp.notifyFeesPaid(s, newTotalPaid));
+      getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
     } else if (firstPaid) {
       await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${newTotalPaid.toLocaleString('en-IN')} paid, ₹${newRemaining.toLocaleString('en-IN')} remaining${noteText}`);
-      getStudentForNotification(appId).then(s => s && whatsapp.notifyFeesPaid(s, newTotalPaid));
+      getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
     } else {
       await logActivity(appId, 'fee_instalment_paid', 'college', `Cash: ₹${amt.toLocaleString('en-IN')}, ₹${newRemaining.toLocaleString('en-IN')} remaining${noteText}`);
     }
@@ -770,7 +775,7 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
       data: { all_paid: firstPaid, fully_paid: fullyPaid, total_paid: newTotalPaid, remaining: newRemaining },
     });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -851,7 +856,7 @@ router.post('/:collegeId/roll-numbers/generate', requirePerm('assign_subjects'),
       starting_from: nextRoll - pending.recordset.length,
     });
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -939,7 +944,7 @@ router.get('/:collegeId/fee-receipts', requirePerm('collect_fees'), async (req, 
 
     return res.json(paginatedResponse(dataRes.recordset, countRes2.recordset[0].total, page, limit));
   } catch (err) {
-    console.error(err);
+    logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });

@@ -8,6 +8,15 @@ import api from '../../../services/api.js'
 
 const STEPS = { PHONE: 'phone', OTP: 'otp', PASSWORD: 'password', DONE: 'done' }
 
+function validatePassword(pwd) {
+  if (!pwd || pwd.length < 8)        return 'Password must be at least 8 characters.'
+  if (!/[A-Z]/.test(pwd))            return 'Password must contain at least one uppercase letter.'
+  if (!/[a-z]/.test(pwd))            return 'Password must contain at least one lowercase letter.'
+  if (!/[0-9]/.test(pwd))            return 'Password must contain at least one number.'
+  if (!/[^A-Za-z0-9]/.test(pwd))     return 'Password must contain at least one special character.'
+  return null
+}
+
 export default function ForgotPassword() {
   const navigate = useNavigate()
   const [step, setStep]     = useState(STEPS.PHONE)
@@ -72,10 +81,8 @@ export default function ForgotPassword() {
   async function handleReset(e) {
     e.preventDefault()
     setError('')
-    if (newPassword.length < 6) {
-      setError('Password must be at least 6 characters.')
-      return
-    }
+    const pwdErr = validatePassword(newPassword)
+    if (pwdErr) { setError(pwdErr); return }
     if (newPassword !== confirmPassword) {
       setError('Passwords do not match.')
       return
@@ -184,7 +191,7 @@ export default function ForgotPassword() {
             <Input
               id="new_password" label="New password" name="new_password"
               type={showPwd ? 'text' : 'password'}
-              placeholder="Min 6 characters"
+              placeholder="Min 8 chars, upper, lower, number, symbol"
               value={newPassword}
               onChange={e => { setError(''); setNewPassword(e.target.value) }}
               disabled={loading} required autoFocus
