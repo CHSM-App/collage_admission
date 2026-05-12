@@ -600,20 +600,20 @@ export default function RolesPanel({ college }) {
               No staff users yet. Add a user to give staff login access.
             </div>
           ) : (
-            <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+            <div className="rounded-lg border-2 border-slate-400 bg-white overflow-hidden">
+              <table className="w-full text-sm border-collapse">
+                <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
                   <tr>
-                    <th className="px-4 py-3 text-left">Name</th>
-                    <th className="px-4 py-3 text-left">Email</th>
-                    <th className="px-4 py-3 text-left">Role</th>
-                    <th className="px-4 py-3 text-center">Status</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wide text-slate-600">Name</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wide text-slate-600">Email</th>
+                    <th className="px-4 py-2.5 text-left text-xs font-bold uppercase tracking-wide text-slate-600">Role</th>
+                    <th className="px-4 py-2.5 text-center text-xs font-bold uppercase tracking-wide text-slate-600">Status</th>
+                    <th className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wide text-slate-600">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y-2 divide-slate-300">
                   {allUsers.map(u => (
-                    <tr key={u.id} className={`transition ${u.is_active ? 'hover:bg-slate-50' : 'opacity-50 bg-slate-50'}`}>
+                    <tr key={u.id} className={`transition ${u.is_active ? 'hover:bg-blue-50' : 'opacity-50 bg-slate-50'}`}>
                       <td className="px-4 py-3 font-semibold text-slate-900">{u.full_name}</td>
                       <td className="px-4 py-3 text-slate-500">{u.email}</td>
                       <td className="px-4 py-3">

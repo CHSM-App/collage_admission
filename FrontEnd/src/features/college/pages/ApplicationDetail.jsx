@@ -219,17 +219,18 @@ export default function ApplicationDetail({ collegeId, appId }) {
           <p className="text-sm text-slate-500 col-span-2">No exam details filled.</p>
         ) : (
           <div className="col-span-2 overflow-x-auto">
+            <div className="rounded-lg border-2 border-slate-400 overflow-hidden">
             <table className="w-full text-xs border-collapse">
-              <thead>
-                <tr className="bg-slate-50">
+              <thead className="bg-slate-100 border-b-2 border-slate-400">
+                <tr>
                   {['Exam','Institute','Board/Univ.','Month & Year','Seat No.','Marks','Out of','%','Class/Grade','Remark'].map(h => (
-                    <th key={h} className="border border-slate-200 px-2 py-1 text-left font-semibold text-slate-500 whitespace-nowrap">{h}</th>
+                    <th key={h} className="border border-slate-200 px-2 py-1 text-left text-xs font-bold uppercase tracking-wide text-slate-600 whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {Object.entries(d.exams).map(([type, r]) => (
-                  <tr key={type} className="even:bg-slate-50">
+                  <tr key={type} className="even:bg-slate-50 hover:bg-blue-50 transition">
                     <td className="border border-slate-200 px-2 py-1 font-semibold text-slate-700 whitespace-nowrap">
                       {{'SSC':'SSC','HSC':'HSC','FY_SEM1':'F.Y. Sem I','FY_SEM2':'F.Y. Sem II','SY_SEM1':'S.Y. Sem I','SY_SEM2':'S.Y. Sem II'}[type] || type}
                     </td>
@@ -246,54 +247,13 @@ export default function ApplicationDetail({ collegeId, appId }) {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         )}
       </Section>
 
       {/* ── Documents ── */}
-      <Section title="Documents Uploaded">
-        {app.documents?.length === 0 && (
-          <p className="text-sm text-slate-500 col-span-2">No documents uploaded yet.</p>
-        )}
-        {app.documents?.map(doc => {
-          const isImage = doc.file_name?.match(/\.(jpg|jpeg|png|webp)$/i)
-          const fileUrl = `${API_BASE}${doc.file_path}`
-          return (
-            <div key={doc.id} className="col-span-2 flex items-center gap-3 rounded-md bg-slate-50 px-3 py-2 text-sm">
-              {/* Thumbnail */}
-              {isImage ? (
-                <a href={fileUrl} target="_blank" rel="noreferrer" className="shrink-0">
-                  <img src={fileUrl} alt={doc.document_name} className="h-12 w-9 object-cover rounded border border-slate-200 hover:opacity-80 transition" />
-                </a>
-              ) : (
-                <a href={fileUrl} target="_blank" rel="noreferrer" className="shrink-0 flex h-12 w-9 items-center justify-center rounded border border-slate-200 bg-white hover:bg-slate-100 transition">
-                  <svg className="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/>
-                  </svg>
-                </a>
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-slate-800">{doc.document_name}</p>
-                <p className="text-xs text-slate-400 truncate">{doc.file_name}</p>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <a
-                  href={fileUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-xs font-semibold text-blue-600 hover:underline"
-                >
-                  View
-                </a>
-                {doc.is_verified
-                  ? <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 rounded-full px-2 py-0.5">Verified</span>
-                  : <span className="text-xs font-semibold text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">Pending</span>
-                }
-              </div>
-            </div>
-          )
-        })}
-      </Section>
+      <DocumentsSection documents={app.documents} />
 
       {/* ── Selected Subjects ── */}
       {['fees_paid', 'roll_assigned', 'enrolled'].includes(d.status) && (
@@ -1029,6 +989,140 @@ function CollegePayPanel({ collegeId, appId, onPaid }) {
             <p className="text-xs text-blue-600">Razorpay checkout will open for UPI, card, or netbanking payment.</p>
           </form>
         )}
+      </div>
+    </div>
+  )
+}
+
+function DocumentsSection({ documents }) {
+  const [previewDoc, setPreviewDoc] = useState(null)
+
+  if (!documents || documents.length === 0) {
+    return (
+      <Section title="Documents Uploaded">
+        <p className="text-sm text-slate-500 col-span-2">No documents uploaded yet.</p>
+      </Section>
+    )
+  }
+
+  return (
+    <>
+      <Section title="Documents Uploaded">
+        {documents.map(doc => {
+          const isImage = doc.file_name?.match(/\.(jpg|jpeg|png|webp)$/i)
+          return (
+            <div key={doc.id} className="col-span-2 flex items-center gap-3 rounded-md bg-slate-50 px-3 py-2 text-sm">
+              {/* Icon */}
+              <button onClick={() => setPreviewDoc(doc)} className="shrink-0 flex h-12 w-9 items-center justify-center rounded border border-slate-200 bg-white hover:bg-slate-100 transition">
+                {isImage ? (
+                  <svg className="w-5 h-5 text-blue-400" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M21 19V5a2 2 0 00-2-2H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2zM8.5 13.5l2.5 3 3.5-4.5 4.5 6H5l3.5-4.5z"/>
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5 text-red-500" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6zm-1 1.5L18.5 9H13V3.5zM6 20V4h5v7h7v9H6z"/>
+                  </svg>
+                )}
+              </button>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-slate-800">{doc.document_name}</p>
+                <p className="text-xs text-slate-400 truncate">{doc.file_name}</p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => setPreviewDoc(doc)}
+                  className="text-xs font-semibold text-blue-600 hover:underline"
+                >
+                  View
+                </button>
+                {doc.is_verified
+                  ? <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 rounded-full px-2 py-0.5">Verified</span>
+                  : <span className="text-xs font-semibold text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">Pending</span>
+                }
+              </div>
+            </div>
+          )
+        })}
+      </Section>
+
+      {previewDoc && (
+        <DocPreviewModal doc={previewDoc} onClose={() => setPreviewDoc(null)} />
+      )}
+    </>
+  )
+}
+
+function DocPreviewModal({ doc, onClose }) {
+  const EXT_MIME = { pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }
+  const mime  = EXT_MIME[doc.file_name?.split('.').pop().toLowerCase()] || 'application/octet-stream'
+  const isPdf = mime === 'application/pdf'
+  const [blobUrl, setBlobUrl] = useState(null)
+  const [loadErr, setLoadErr] = useState('')
+
+  useEffect(() => {
+    let url
+    api.get(doc.file_path, { responseType: 'blob' })
+      .then(res => {
+        url = URL.createObjectURL(new Blob([res.data], { type: mime }))
+        setBlobUrl(url)
+      })
+      .catch(() => setLoadErr('Failed to load document.'))
+    return () => { if (url) URL.revokeObjectURL(url) }
+  }, [doc.file_path])
+
+  function handleDownload() {
+    if (!blobUrl) return
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = doc.file_name
+    a.click()
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className={`relative bg-white rounded-xl shadow-2xl flex flex-col overflow-hidden ${isPdf ? 'w-full max-w-3xl h-[90vh]' : 'max-w-xl w-full'}`}
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50 shrink-0">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate-800 truncate">{doc.document_name}</p>
+            <p className="text-xs text-slate-400 truncate">{doc.file_name}</p>
+          </div>
+          <div className="flex items-center gap-3 shrink-0 ml-3">
+            {blobUrl && (
+              <button onClick={handleDownload} className="text-xs font-semibold text-blue-600 hover:underline">
+                Download
+              </button>
+            )}
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-xl leading-none">✕</button>
+          </div>
+        </div>
+        {/* Content */}
+        <div className="flex-1 overflow-auto flex items-center justify-center bg-slate-100 p-2">
+          {loadErr ? (
+            <p className="text-sm text-red-500">{loadErr}</p>
+          ) : !blobUrl ? (
+            <p className="text-sm text-slate-400">Loading…</p>
+          ) : isPdf ? (
+            <iframe
+              src={blobUrl}
+              title={doc.file_name}
+              className="w-full h-full border-0 rounded"
+              style={{ minHeight: '75vh' }}
+            />
+          ) : (
+            <img
+              src={blobUrl}
+              alt={doc.document_name}
+              className="max-w-full max-h-[75vh] object-contain rounded shadow"
+            />
+          )}
+        </div>
       </div>
     </div>
   )

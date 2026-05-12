@@ -313,7 +313,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
         </FormField>
 
         {/* Fee Breakdown */}
-        <FeeBreakdown result={feeResult} loading={feeLoading} />
+        {/* <FeeBreakdown result={feeResult} loading={feeLoading} /> */}
 
         {(localError || globalError) && (
           <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{localError || globalError}</p>

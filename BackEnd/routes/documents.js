@@ -92,18 +92,17 @@ router.get('/student-documents', async (req, res) => {
     const result = await db.request()
       .input('sid', mssql.Int, parseInt(student_id))
       .query(`
-        SELECT sd.id, sd.document_type_id, sd.file_name, sd.file_path, sd.uploaded_at,
-               dt.name AS document_name,
-               -- is_locked: used in at least one non-rejected/cancelled application
-               CASE WHEN EXISTS (
-                 SELECT 1 FROM application_documents ad
-                 JOIN applications a ON a.id = ad.application_id
-                 WHERE ad.student_document_id = sd.id
-                   AND a.status NOT IN ('rejected','cancelled')
-               ) THEN 1 ELSE 0 END AS is_locked
-        FROM student_documents sd
-        JOIN document_types dt ON dt.id = sd.document_type_id
-        WHERE sd.student_id = @sid
+        WITH ranked AS (
+          SELECT sd.id, sd.document_type_id, sd.file_name, sd.file_path, sd.uploaded_at,
+                 ROW_NUMBER() OVER (PARTITION BY sd.document_type_id ORDER BY sd.uploaded_at DESC) AS rn
+          FROM student_documents sd
+          WHERE sd.student_id = @sid
+        )
+        SELECT r.id, r.document_type_id, r.file_name, r.file_path, r.uploaded_at,
+               dt.name AS document_name
+        FROM ranked r
+        JOIN document_types dt ON dt.id = r.document_type_id
+        WHERE r.rn = 1
         ORDER BY dt.name
       `)
     return res.json({ success: true, data: result.recordset })
@@ -131,48 +130,20 @@ router.post('/student-documents', upload.single('file'), async (req, res) => {
   const relativePath = `/uploads/students/${student_id}/${req.file.filename}`
 
   try {
-    const existing = await db.request()
-      .input('sid',  mssql.Int, parseInt(student_id))
-      .input('dtid', mssql.Int, parseInt(document_type_id))
-      .query('SELECT id, file_path FROM student_documents WHERE student_id=@sid AND document_type_id=@dtid')
+    // Always insert a new row — each upload creates its own student_document record.
+    // This allows different applications to reference different versions of the same doc type.
+    const ins = await db.request()
+      .input('sid',  mssql.Int,      parseInt(student_id))
+      .input('dtid', mssql.Int,      parseInt(document_type_id))
+      .input('fn',   mssql.NVarChar, req.file.originalname)
+      .input('fp',   mssql.NVarChar, relativePath)
+      .query(`
+        INSERT INTO student_documents (student_id, document_type_id, file_name, file_path)
+        OUTPUT INSERTED.id VALUES (@sid, @dtid, @fn, @fp)
+      `)
 
-    if (existing.recordset.length > 0) {
-      const existingDoc = existing.recordset[0]
-
-      // Block replacement if locked
-      const lockedStatus = await isDocumentLocked(existingDoc.id)
-      if (lockedStatus) {
-        fs.unlink(req.file.path, () => {})
-        return res.status(400).json({
-          success: false,
-          message: `This document is used in an active application (status: ${lockedStatus}). It cannot be replaced until the application is rejected or cancelled.`,
-        })
-      }
-
-      // Delete old file from disk
-      const oldPath = path.join(__dirname, '..', 'public', existingDoc.file_path)
-      if (fs.existsSync(oldPath)) fs.unlink(oldPath, () => {})
-
-      await db.request()
-        .input('id', mssql.Int, existingDoc.id)
-        .input('fn', mssql.NVarChar, req.file.originalname)
-        .input('fp', mssql.NVarChar, relativePath)
-        .query('UPDATE student_documents SET file_name=@fn, file_path=@fp, uploaded_at=GETDATE() WHERE id=@id')
-
-      return res.json({ success: true, message: 'Document updated.', data: { file_path: relativePath, file_name: req.file.originalname } })
-    } else {
-      await db.request()
-        .input('sid',  mssql.Int, parseInt(student_id))
-        .input('dtid', mssql.Int, parseInt(document_type_id))
-        .input('fn',   mssql.NVarChar, req.file.originalname)
-        .input('fp',   mssql.NVarChar, relativePath)
-        .query(`
-          INSERT INTO student_documents (student_id, document_type_id, file_name, file_path)
-          VALUES (@sid, @dtid, @fn, @fp)
-        `)
-
-      return res.json({ success: true, message: 'Document uploaded.', data: { file_path: relativePath, file_name: req.file.originalname } })
-    }
+    const newId = ins.recordset[0].id
+    return res.json({ success: true, message: 'Document uploaded.', data: { id: newId, file_path: relativePath, file_name: req.file.originalname } })
   } catch (err) {
     if (req.file) fs.unlink(req.file.path, () => {})
     logger.error({ err })

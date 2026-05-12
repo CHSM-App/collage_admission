@@ -35,7 +35,7 @@ function requirePerm(perm) {
       return res.status(403).json({ success: false, message: 'Access denied.' });
     }
     if (!u.is_staff) return next(); // main college admin always allowed
-    if (u.permissions && u.permissions[perm] === true) return next();
+    if (u.permissions && u.permissions[perm] !== undefined) return next(); // read or write access
     return res.status(403).json({ success: false, message: `Permission denied: ${perm}` });
   };
 }
@@ -78,4 +78,19 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-module.exports = { authenticate, requirePerm, requireCollegeAccess, requireStudent, requireAdmin };
+// Require write access for a permission (can_write = true).
+// Use this on mutating routes (approve, reject, save, etc.) when the same
+// permission also has a read-only variant.
+function requireWrite(perm) {
+  return (req, res, next) => {
+    const u = req.user;
+    if (!u) return res.status(401).json({ success: false, message: 'Authentication required.' });
+    if (u.role === 'admin') return next();
+    if (u.role !== 'college') return res.status(403).json({ success: false, message: 'Access denied.' });
+    if (!u.is_staff) return next(); // main college admin always allowed
+    if (u.permissions && u.permissions[perm] === true) return next();
+    return res.status(403).json({ success: false, message: `Write permission denied: ${perm}` });
+  };
+}
+
+module.exports = { authenticate, requirePerm, requireWrite, requireCollegeAccess, requireStudent, requireAdmin };

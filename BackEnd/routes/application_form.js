@@ -445,9 +445,26 @@ router.get('/applications/:id/form', async (req, res) => {
         WHERE ad.application_id = @appId
       `);
 
+    // Latest student_documents (one per doc type) for "use existing" in Step 5
+    const studentDocsRes = await db.request()
+      .input('sid', mssql.Int, app.student_id)
+      .query(`
+        WITH ranked AS (
+          SELECT id, document_type_id, file_name, file_path, uploaded_at,
+                 ROW_NUMBER() OVER (PARTITION BY document_type_id ORDER BY uploaded_at DESC) AS rn
+          FROM student_documents WHERE student_id = @sid
+        )
+        SELECT r.id, r.document_type_id, r.file_name, r.file_path, r.uploaded_at,
+               dt.name AS document_name
+        FROM ranked r
+        JOIN document_types dt ON dt.id = r.document_type_id
+        WHERE r.rn = 1
+        ORDER BY dt.name
+      `);
+
     return res.json({
       success: true,
-      data: { application: app, previous_exam: exam, previous_exams: exams, documents: docsRes.recordset },
+      data: { application: app, previous_exam: exam, previous_exams: exams, documents: docsRes.recordset, student_documents: studentDocsRes.recordset },
     });
   } catch (err) {
     logger.error({ err });
@@ -833,31 +850,38 @@ router.post('/applications/:id/form-documents', async (req, res) => {
   }
 
   try {
-    // Upsert student_document
-    const existSD = await db.request()
-      .input('sid',  mssql.Int, parseInt(student_id))
-      .input('dtid', mssql.Int, parseInt(document_type_id))
-      .query('SELECT id FROM student_documents WHERE student_id=@sid AND document_type_id=@dtid');
-
+    // Resolve student_document id:
+    // - If file_path starts with /uploads/ it's a freshly uploaded file already inserted by
+    //   POST /student-documents — find that new row by exact file_path.
+    // - Otherwise (use-existing flow) find the latest row for this student+doctype.
     let sdId;
-    if (existSD.recordset.length > 0) {
-      sdId = existSD.recordset[0].id;
-      await db.request()
-        .input('id', mssql.Int,      sdId)
-        .input('fn', mssql.NVarChar, file_name)
-        .input('fp', mssql.NVarChar, file_path)
-        .query('UPDATE student_documents SET file_name=@fn, file_path=@fp, uploaded_at=GETDATE() WHERE id=@id');
+    const byPath = await db.request()
+      .input('sid',  mssql.Int,      parseInt(student_id))
+      .input('dtid', mssql.Int,      parseInt(document_type_id))
+      .input('fp',   mssql.NVarChar, file_path)
+      .query('SELECT TOP 1 id FROM student_documents WHERE student_id=@sid AND document_type_id=@dtid AND file_path=@fp ORDER BY uploaded_at DESC');
+
+    if (byPath.recordset.length > 0) {
+      sdId = byPath.recordset[0].id;
     } else {
-      const ins = await db.request()
-        .input('sid',  mssql.Int,      parseInt(student_id))
-        .input('dtid', mssql.Int,      parseInt(document_type_id))
-        .input('fn',   mssql.NVarChar, file_name)
-        .input('fp',   mssql.NVarChar, file_path)
-        .query(`
-          INSERT INTO student_documents (student_id, document_type_id, file_name, file_path)
-          OUTPUT INSERTED.id VALUES (@sid, @dtid, @fn, @fp)
-        `);
-      sdId = ins.recordset[0].id;
+      // use-existing: pick latest row for this student+doctype
+      const latest = await db.request()
+        .input('sid',  mssql.Int, parseInt(student_id))
+        .input('dtid', mssql.Int, parseInt(document_type_id))
+        .query('SELECT TOP 1 id FROM student_documents WHERE student_id=@sid AND document_type_id=@dtid ORDER BY uploaded_at DESC');
+
+      if (latest.recordset.length > 0) {
+        sdId = latest.recordset[0].id;
+      } else {
+        // No existing row — insert one
+        const ins = await db.request()
+          .input('sid',  mssql.Int,      parseInt(student_id))
+          .input('dtid', mssql.Int,      parseInt(document_type_id))
+          .input('fn',   mssql.NVarChar, file_name)
+          .input('fp',   mssql.NVarChar, file_path)
+          .query(`INSERT INTO student_documents (student_id, document_type_id, file_name, file_path) OUTPUT INSERTED.id VALUES (@sid, @dtid, @fn, @fp)`);
+        sdId = ins.recordset[0].id;
+      }
     }
 
     // Upsert application_documents

@@ -26,8 +26,8 @@ const feeSvc   = require('../services/FeeDeterminationService')
 const { authenticate, requireCollegeAccess, requirePerm } = require('../middleware/auth')
 const logger   = require('../config/logger')
 
-// All masters routes require authentication and college ownership
-router.use(authenticate, requireCollegeAccess)
+// All routes require authentication
+router.use(authenticate)
 
 // ── Helper: assert college ownership ────────────────────────────
 // In production, verify JWT token's college_id matches param.
@@ -49,7 +49,7 @@ router.get('/:collegeId/faculty', async (req, res) => {
         ORDER BY degree_course_code
       `)
     res.json({ success: true, data: r.recordset })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'get faculty master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // Duration-driven slot count (sems = duration*2, exam codes = duration).
@@ -319,20 +319,20 @@ router.delete('/:collegeId/faculty/:id', requirePerm('masters'), async (req, res
       .input('cid', mssql.Int, cid(req))
       .query(`UPDATE faculty_master SET is_active=0, modified_on=GETDATE() WHERE code_no=@id AND college_id=@cid`)
     res.json({ success: true })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'delete faculty master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // ═══════════════════════════════════════════════════════════════
 // BANK MASTER
 // ═══════════════════════════════════════════════════════════════
 
-router.get('/:collegeId/bank', async (req, res) => {
+router.get('/:collegeId/bank', requireCollegeAccess, async (req, res) => {
   try {
     const r = await db.request()
       .input('cid', mssql.Int, cid(req))
       .query(`SELECT * FROM bank_master WHERE college_id=@cid ORDER BY bank_name`)
     res.json({ success: true, data: r.recordset })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'get bank master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 router.post('/:collegeId/bank', requirePerm('masters'), async (req, res) => {
@@ -364,7 +364,7 @@ router.post('/:collegeId/bank', requirePerm('masters'), async (req, res) => {
         VALUES (@cid,@an,@bn,@br,@if,@at,@ia)
       `)
     res.status(201).json({ success: true, data: r.recordset[0] })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'create bank master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 router.put('/:collegeId/bank/:id', requirePerm('masters'), async (req, res) => {
@@ -388,7 +388,7 @@ router.put('/:collegeId/bank/:id', requirePerm('masters'), async (req, res) => {
       `)
     if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Record not found.' })
     res.json({ success: true, data: r.recordset[0] })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'update bank master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 router.delete('/:collegeId/bank/:id', requirePerm('masters'), async (req, res) => {
@@ -398,7 +398,7 @@ router.delete('/:collegeId/bank/:id', requirePerm('masters'), async (req, res) =
       .input('cid', mssql.Int, cid(req))
       .query(`UPDATE bank_master SET is_active=0, modified_on=GETDATE() WHERE ledger_code=@id AND college_id=@cid`)
     res.json({ success: true })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'delete bank master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // ═══════════════════════════════════════════════════════════════
@@ -406,7 +406,7 @@ router.delete('/:collegeId/bank/:id', requirePerm('masters'), async (req, res) =
 // ═══════════════════════════════════════════════════════════════
 
 // GET /masters/:collegeId/course?faculty_id=&semester=
-router.get('/:collegeId/course', async (req, res) => {
+router.get('/:collegeId/course', requireCollegeAccess, async (req, res) => {
   const { faculty_id, semester } = req.query
   try {
     let q = `
@@ -421,7 +421,7 @@ router.get('/:collegeId/course', async (req, res) => {
     q += ' ORDER BY cm.display_order, cm.id'
     const r = await req2.query(q)
     res.json({ success: true, data: r.recordset })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'get course master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // POST — create single course master row
@@ -469,6 +469,7 @@ router.post('/:collegeId/course', requirePerm('masters'), async (req, res) => {
   } catch (e) {
     if (e.number === 2627 || e.number === 2601)
       return res.status(409).json({ success: false, message: 'Course code already exists for this program-semester.' })
+    logger.error({ err: e }, 'create course master')
     res.status(500).json({ success: false, message: e.message })
   }
 })
@@ -513,6 +514,7 @@ router.put('/:collegeId/course/:id', requirePerm('masters'), async (req, res) =>
   } catch (e) {
     if (e.number === 2627 || e.number === 2601)
       return res.status(409).json({ success: false, message: 'Course code already exists for this program-semester.' })
+    logger.error({ err: e }, 'update course master')
     res.status(500).json({ success: false, message: e.message })
   }
 })
@@ -524,7 +526,7 @@ router.delete('/:collegeId/course/:id', requirePerm('masters'), async (req, res)
       .input('cid', mssql.Int, cid(req))
       .query(`DELETE FROM course_master WHERE id=@id AND college_id=@cid`)
     res.json({ success: true })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'delete course master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // POST /masters/:collegeId/course/bulk-save — save entire semester grid at once
@@ -568,14 +570,14 @@ router.post('/:collegeId/course/bulk-save', requirePerm('masters'), async (req, 
         `)
     }
     res.json({ success: true, message: 'Saved.' })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'bulk save course master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // ═══════════════════════════════════════════════════════════════
 // GROUP MASTER
 // ═══════════════════════════════════════════════════════════════
 
-router.get('/:collegeId/group', async (req, res) => {
+router.get('/:collegeId/group', requireCollegeAccess, async (req, res) => {
   const { faculty_id, semester } = req.query
   try {
     let q = `
@@ -591,10 +593,10 @@ router.get('/:collegeId/group', async (req, res) => {
     q += ' ORDER BY gm.group_code'
     const r = await req2.query(q)
     res.json({ success: true, data: r.recordset })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'get group master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
-router.get('/:collegeId/group/:id', async (req, res) => {
+router.get('/:collegeId/group/:id', requireCollegeAccess, async (req, res) => {
   try {
     const [gRes, gcRes] = await Promise.all([
       db.request()
@@ -607,7 +609,7 @@ router.get('/:collegeId/group/:id', async (req, res) => {
     ])
     if (!gRes.recordset.length) return res.status(404).json({ success: false, message: 'Not found.' })
     res.json({ success: true, data: { ...gRes.recordset[0], courses: gcRes.recordset } })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'get group master by id'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // Reject duplicate (course_code, course_title) combinations inside one group.
@@ -668,6 +670,7 @@ router.post('/:collegeId/group', requirePerm('masters'), async (req, res) => {
         return res.status(409).json({ success: false, message: 'Selected Course Code and Course Title combination already exists.' })
       return res.status(409).json({ success: false, message: 'Group code already exists for this program-semester.' })
     }
+    logger.error({ err: e }, 'create group master')
     res.status(500).json({ success: false, message: e.message })
   }
 })
@@ -709,6 +712,7 @@ router.put('/:collegeId/group/:id', requirePerm('masters'), async (req, res) => 
   } catch (e) {
     if ((e.number === 2627 || e.number === 2601) && /uq_group_course_combo/i.test(e.message || ''))
       return res.status(409).json({ success: false, message: 'Selected Course Code and Course Title combination already exists.' })
+    logger.error({ err: e }, 'update group master')
     res.status(500).json({ success: false, message: e.message })
   }
 })
@@ -720,7 +724,7 @@ router.delete('/:collegeId/group/:id', requirePerm('masters'), async (req, res) 
       .input('cid', mssql.Int, cid(req))
       .query(`UPDATE group_master SET is_active=0, modified_on=GETDATE() WHERE id=@id AND college_id=@cid`)
     res.json({ success: true })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'delete group master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // ═══════════════════════════════════════════════════════════════
@@ -743,7 +747,7 @@ router.get('/:collegeId/division', async (req, res) => {
     q += ' ORDER BY dm.year_level, dm.division_letter'
     const r = await req2.query(q)
     res.json({ success: true, data: r.recordset })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'get division master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // POST /masters/:collegeId/division/save-grid — save entire A-J grid for one class-year
@@ -775,7 +779,7 @@ router.post('/:collegeId/division/save-grid', requirePerm('masters'), async (req
         `)
     }
     res.json({ success: true })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'save division grid'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 router.delete('/:collegeId/division/:id', requirePerm('masters'), async (req, res) => {
@@ -785,14 +789,14 @@ router.delete('/:collegeId/division/:id', requirePerm('masters'), async (req, re
       .input('cid', mssql.Int, cid(req))
       .query(`UPDATE division_master SET is_active=0, modified_on=GETDATE() WHERE id=@id AND college_id=@cid`)
     res.json({ success: true })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'delete division master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // ═══════════════════════════════════════════════════════════════
 // FEES MASTER
 // ═══════════════════════════════════════════════════════════════
 
-router.get('/:collegeId/fees', async (req, res) => {
+router.get('/:collegeId/fees', requireCollegeAccess, async (req, res) => {
   try {
     const r = await db.request()
       .input('cid', mssql.Int, cid(req))
@@ -804,7 +808,7 @@ router.get('/:collegeId/fees', async (req, res) => {
         ORDER BY fm.sequence_auto_fees, fm.fees_code
       `)
     res.json({ success: true, data: r.recordset })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'get fees master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 router.post('/:collegeId/fees', requirePerm('masters'), async (req, res) => {
@@ -844,7 +848,7 @@ router.post('/:collegeId/fees', requirePerm('masters'), async (req, res) => {
         VALUES (@cid,@ft,@iom,@fh,@sn,@seq,@ctb,@ir,@a1,@a2,@a3,@a4,@c4,@ia)
       `)
     res.status(201).json({ success: true, data: r.recordset[0] })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'create fees master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 router.put('/:collegeId/fees/:id', requirePerm('masters'), async (req, res) => {
@@ -882,7 +886,7 @@ router.put('/:collegeId/fees/:id', requirePerm('masters'), async (req, res) => {
       `)
     if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Record not found.' })
     res.json({ success: true, data: r.recordset[0] })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'update fees master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 router.delete('/:collegeId/fees/:id', requirePerm('masters'), async (req, res) => {
@@ -892,13 +896,13 @@ router.delete('/:collegeId/fees/:id', requirePerm('masters'), async (req, res) =
       .input('cid', mssql.Int, cid(req))
       .query(`UPDATE fees_master SET is_active=0, modified_on=GETDATE() WHERE fees_code=@id AND college_id=@cid`)
     res.json({ success: true })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'delete fees master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // ── Classwise Fees ───────────────────────────────────────────
 
 // GET /masters/:collegeId/fees/classwise?faculty_id=&year_level=
-router.get('/:collegeId/fees/classwise', async (req, res) => {
+router.get('/:collegeId/fees/classwise', requireCollegeAccess, async (req, res) => {
   const { faculty_id, year_level } = req.query
   try {
     let q = `
@@ -915,7 +919,7 @@ router.get('/:collegeId/fees/classwise', async (req, res) => {
     q += ' ORDER BY fm_row.sequence_auto_fees'
     const r = await req2.query(q)
     res.json({ success: true, data: r.recordset })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'get classwise fees'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // POST /masters/:collegeId/fees/classwise/save — upsert classwise fees
@@ -946,7 +950,7 @@ router.post('/:collegeId/fees/classwise/save', requirePerm('masters'), async (re
         `)
     }
     res.json({ success: true })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'save classwise fees'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // ═══════════════════════════════════════════════════════════════
@@ -972,6 +976,7 @@ router.post('/:collegeId/fees/compute', async (req, res) => {
     })
     res.json({ success: true, data: result })
   } catch (e) {
+    logger.error({ err: e }, 'compute fees')
     res.status(500).json({ success: false, message: e.message })
   }
 })
@@ -986,7 +991,7 @@ router.get('/document-types', async (req, res) => {
     const r = await db.request()
       .query('SELECT id, name, description FROM document_types ORDER BY name')
     res.json({ success: true, data: r.recordset })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'get document types'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // ═══════════════════════════════════════════════════════════════
@@ -994,7 +999,7 @@ router.get('/document-types', async (req, res) => {
 // ═══════════════════════════════════════════════════════════════
 
 // GET /masters/:collegeId/required-documents?faculty_master_id=&year_of_study=
-router.get('/:collegeId/required-documents', async (req, res) => {
+router.get('/:collegeId/required-documents', requireCollegeAccess, async (req, res) => {
   const { faculty_master_id, year_of_study } = req.query
   try {
     let query = `
@@ -1018,7 +1023,7 @@ router.get('/:collegeId/required-documents', async (req, res) => {
     query += ' ORDER BY fm.degree_course_code, rd.year_of_study, dt.name'
     const r = await req2.query(query)
     res.json({ success: true, data: r.recordset })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'get required documents'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // Maps a Document Type name to the admission year it should accompany.
@@ -1086,6 +1091,7 @@ router.post('/:collegeId/required-documents', requirePerm('masters'), async (req
     if (e.number === 2627 || e.number === 2601) {
       return res.status(409).json({ success: false, message: 'This document is already in the list.' })
     }
+    logger.error({ err: e }, 'add required document')
     res.status(500).json({ success: false, message: e.message })
   }
 })
@@ -1100,7 +1106,7 @@ router.put('/:collegeId/required-documents/:id', requirePerm('masters'), async (
       .input('mand', mssql.Bit, is_mandatory ? 1 : 0)
       .query('UPDATE college_required_documents SET is_mandatory=@mand WHERE id=@id AND college_id=@cid')
     res.json({ success: true })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'update required document'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // DELETE /masters/:collegeId/required-documents/:id
@@ -1111,7 +1117,7 @@ router.delete('/:collegeId/required-documents/:id', requirePerm('masters'), asyn
       .input('cid', mssql.Int, cid(req))
       .query('DELETE FROM college_required_documents WHERE id=@id AND college_id=@cid')
     res.json({ success: true })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'delete required document'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // ═══════════════════════════════════════════════════════════════
@@ -1119,7 +1125,7 @@ router.delete('/:collegeId/required-documents/:id', requirePerm('masters'), asyn
 // ═══════════════════════════════════════════════════════════════
 
 // GET /masters/:collegeId/class — list all, joined with faculty_master
-router.get('/:collegeId/class', async (req, res) => {
+router.get('/:collegeId/class', requireCollegeAccess, async (req, res) => {
   try {
     const r = await db.request()
       .input('cid', mssql.Int, cid(req))
@@ -1131,7 +1137,7 @@ router.get('/:collegeId/class', async (req, res) => {
         ORDER BY fm.degree_course_code, cm.year_of_study
       `)
     res.json({ success: true, data: r.recordset })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'get class master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // POST /masters/:collegeId/class — create
@@ -1175,11 +1181,14 @@ router.post('/:collegeId/class', requirePerm('masters'), async (req, res) => {
       return res.status(409).json({ success: false, message: 'This program + year combination already exists.' })
     // SQL Server CHECK constraint violation: surface a helpful hint pointing
     // at the migration that relaxes year_of_study from (1,2,3) to (1..5).
-    if (e.number === 547 && /year_of_study/i.test(e.message || ''))
+    if (e.number === 547 && /year_of_study/i.test(e.message || '')) {
+      logger.error({ err: e }, 'create class master')
       return res.status(500).json({
         success: false,
         message: 'The database still restricts year_of_study to 1-3. Please ask an administrator to run BackEnd/scripts/migrate_class_master_extended_years.js.',
       })
+    }
+    logger.error({ err: e }, 'create class master')
     res.status(500).json({ success: false, message: e.message })
   }
 })
@@ -1200,7 +1209,7 @@ router.put('/:collegeId/class/:id', requirePerm('masters'), async (req, res) => 
       `)
     if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Record not found.' })
     res.json({ success: true, data: r.recordset[0] })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'update class master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // DELETE /masters/:collegeId/class/:id — hard delete
@@ -1211,7 +1220,7 @@ router.delete('/:collegeId/class/:id', requirePerm('masters'), async (req, res) 
       .input('cid', mssql.Int, cid(req))
       .query(`DELETE FROM class_master WHERE id=@id AND college_id=@cid`)
     res.json({ success: true })
-  } catch (e) { res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) { logger.error({ err: e }, 'delete class master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 module.exports = router

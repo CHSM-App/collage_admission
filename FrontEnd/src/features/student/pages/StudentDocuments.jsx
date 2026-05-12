@@ -366,36 +366,50 @@ function DeleteButton({ docId, onSuccess }) {
 
 // ── Image preview modal ──────────────────────────────────────
 function DocPreviewModal({ doc, onClose }) {
+  const fileUrl = `${API_BASE}${doc.file_path}`
+  const isPdf   = doc.file_name?.toLowerCase().endsWith('.pdf')
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       onClick={onClose}
     >
       <div
-        className="relative max-w-lg w-full bg-white rounded-xl overflow-hidden shadow-2xl"
+        className="relative w-full bg-white rounded-xl overflow-hidden shadow-2xl flex flex-col"
+        style={{ maxWidth: isPdf ? '900px' : '600px', maxHeight: '90vh' }}
         onClick={e => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 shrink-0">
           <p className="font-semibold text-slate-900 text-sm">{doc.document_name || doc.file_name}</p>
           <div className="flex items-center gap-3">
             <a
-              href={`${API_BASE}${doc.file_path}`}
-              download={doc.file_name}
+              href={fileUrl}
               target="_blank"
               rel="noreferrer"
               className="text-xs font-semibold text-blue-600 hover:underline"
             >
-              Download
+              Open in new tab
             </a>
             <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-lg leading-none">✕</button>
           </div>
         </div>
-        <div className="flex items-center justify-center bg-slate-50 p-4 max-h-[70vh] overflow-auto">
-          <img
-            src={`${API_BASE}${doc.file_path}`}
-            alt={doc.file_name}
-            className="max-w-full max-h-[60vh] object-contain rounded shadow"
-          />
+        <div className="flex-1 overflow-auto bg-slate-50">
+          {isPdf ? (
+            <iframe
+              src={fileUrl}
+              title={doc.file_name}
+              className="w-full h-full border-0"
+              style={{ minHeight: '75vh' }}
+            />
+          ) : (
+            <div className="flex items-center justify-center p-4">
+              <img
+                src={fileUrl}
+                alt={doc.file_name}
+                className="max-w-full max-h-[75vh] object-contain rounded shadow"
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>

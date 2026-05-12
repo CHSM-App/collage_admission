@@ -41,14 +41,15 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
 
   const exams = data.exams || {}
 
-  // Compute which SSC/HSC rows were prefilled from DB at mount time only.
+  // Compute which rows were prefilled from DB at mount time only.
+  // Any row with institute + marks data is considered prefilled and locked (read-only).
   // Using empty deps so this never re-evaluates from live form state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const prefilledTypes = useMemo(() => {
     const initial = data.exams || {}
     return new Set(
       Object.entries(initial)
-        .filter(([t, row]) => ['SSC', 'HSC'].includes(t) && !!(row.institute && row.marks_obtained && row.marks_max))
+        .filter(([, row]) => !!(row.institute && row.marks_obtained && row.marks_max))
         .map(([t]) => t)
     )
   }, []) // intentionally empty — snapshot at mount
@@ -111,15 +112,15 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
       <div className="px-4 sm:px-5 py-5">
 
         {/* Scrollable table */}
-        <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <div className="overflow-x-auto rounded-lg border-2 border-slate-400">
           <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr className="bg-slate-50">
-                <th className="border border-slate-200 px-3 py-2 text-left text-xs font-semibold text-slate-600 whitespace-nowrap min-w-[70px]">
+            <thead className="bg-slate-100 border-b-2 border-slate-400">
+              <tr>
+                <th className="border border-slate-200 px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-slate-600 whitespace-nowrap min-w-[70px]">
                   Exam
                 </th>
                 {COLS.map(col => (
-                  <th key={col.key} className={`border border-slate-200 px-3 py-2 text-left text-xs font-semibold text-slate-600 whitespace-nowrap ${col.width}`}>
+                  <th key={col.key} className={`border border-slate-200 px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-slate-600 whitespace-nowrap ${col.width}`}>
                     {col.label}
                   </th>
                 ))}
@@ -133,7 +134,7 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
                 const hasPrefill = yearOfStudy > 1 && prefilledTypes.has(type)
                 const isLocked = readOnly || hasPrefill
                 return (
-                  <tr key={type} className={isMandatory ? 'bg-white' : 'bg-slate-50/50'}>
+                  <tr key={type} className={`hover:bg-blue-50 transition ${isMandatory ? 'bg-white' : 'bg-slate-50/50'}`}>
                     <td className="border border-slate-200 px-3 py-2 font-semibold text-slate-700 whitespace-nowrap text-xs">
                       {ROW_LABEL[type]}
                       {isMandatory && <span className="text-red-500 ml-0.5">*</span>}
@@ -163,7 +164,7 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
 
         {yearOfStudy > 1 && (
           <p className="mt-2 text-xs text-slate-400">
-            SSC and HSC details are pre-filled from your previous application if available.
+            Rows pre-filled from your previous application are locked and cannot be edited.
           </p>
         )}
 

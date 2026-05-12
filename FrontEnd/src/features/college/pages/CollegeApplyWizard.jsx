@@ -365,7 +365,7 @@ export default function CollegeApplyWizard() {
               studentId={studentId}
               onBack={() => goStep(3)}
               onNext={() => skip(5)}
-              onDocumentsChange={(linked) => dispatch({ type: 'SET_DATA', patch: { linked_documents: linked } })}
+              onDocumentsChange={(linked, studentDocs) => dispatch({ type: 'SET_DATA', patch: { linked_documents: linked, ...(studentDocs && { student_documents: studentDocs }) } })}
             />
           )}
 

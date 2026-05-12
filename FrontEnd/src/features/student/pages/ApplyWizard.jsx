@@ -357,7 +357,7 @@ export default function ApplyWizard() {
                 dispatch({ type: 'SET_MAX_STEP', step: 6 })
                 dispatch({ type: 'SET_STEP', step: 6 })
               }}
-              onDocumentsChange={(linked) => dispatch({ type: 'SET_DATA', patch: { linked_documents: linked } })}
+              onDocumentsChange={(linked, studentDocs) => dispatch({ type: 'SET_DATA', patch: { linked_documents: linked, ...(studentDocs && { student_documents: studentDocs }) } })}
             />
           )}
           {currentStep === 6 && (

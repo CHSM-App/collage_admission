@@ -51,7 +51,6 @@ export default function BrowseColleges() {
     setQuery(val)
     setError('')
     setResult(null)
-    fetchSuggestions(val)
   }
 
   async function loadCollege(collegeCode) {

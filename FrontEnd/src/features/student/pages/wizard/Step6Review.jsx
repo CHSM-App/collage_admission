@@ -5,6 +5,7 @@ import Button from '../../../../shared/components/Button.jsx'
 import { useRazorpay } from '../../../../shared/hooks/useRazorpay.js'
 
 const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year' }
+const EXAM_ROWS  = { 1: ['SSC', 'HSC'], 2: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2'], 3: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2'] }
 
 export default function Step6Review({ data, errors, globalError, saving, appId, applicationFeePaid, onBack, onEditStep, onDone }) {
   const [accepted, setAccepted]         = useState(!!data.declaration_accepted)
@@ -174,17 +175,18 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
             <p className="col-span-2 text-sm text-slate-400">No exam details filled.</p>
           ) : (
             <div className="col-span-2 overflow-x-auto">
+              <div className="rounded-lg border-2 border-slate-400 overflow-hidden">
               <table className="w-full text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-50">
+                <thead className="bg-slate-100 border-b-2 border-slate-400">
+                  <tr>
                     {['Exam','Institute','Board/Univ.','Month & Year','Seat No.','Marks','Out of','%','Class/Grade','Remark'].map(h => (
-                      <th key={h} className="border border-slate-200 px-2 py-1 text-left font-semibold text-slate-500 whitespace-nowrap">{h}</th>
+                      <th key={h} className="border border-slate-200 px-2 py-1 text-left text-xs font-bold uppercase tracking-wide text-slate-600 whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(data.exams).map(([type, row]) => (
-                    <tr key={type} className="even:bg-slate-50">
+                  {(EXAM_ROWS[data.year_of_study] || EXAM_ROWS[1]).filter(type => data.exams[type]).map(type => { const row = data.exams[type]; return (
+                    <tr key={type} className="even:bg-slate-50 hover:bg-blue-50 transition">
                       <td className="border border-slate-200 px-2 py-1 font-semibold text-slate-700 whitespace-nowrap">
                         {{'SSC':'SSC','HSC':'HSC','FY_SEM1':'F.Y. Sem I','FY_SEM2':'F.Y. Sem II','SY_SEM1':'S.Y. Sem I','SY_SEM2':'S.Y. Sem II'}[type] || type}
                       </td>
@@ -198,9 +200,10 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
                       <td className="border border-slate-200 px-2 py-1">{row.class_grade || '—'}</td>
                       <td className="border border-slate-200 px-2 py-1">{row.remark || '—'}</td>
                     </tr>
-                  ))}
+                  )})}
                 </tbody>
               </table>
+              </div>
             </div>
           )}
         </ReviewSection>

@@ -28,7 +28,7 @@ app.set('view engine', 'pug');
 app.use(cors({
   origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(o => o.trim()) : false,
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS' , 'PATCH'],
   allowedHeaders: ['Authorization', 'Content-Type'],
 }));
 app.options('*', cors());
@@ -59,7 +59,11 @@ app.use(function(req, res, next) {
 
 // ── Error handler ────────────────────────────────────────────
 app.use(function(err, req, res, next) {
-  res.status(err.status || 500).json({
+  const status = err.status || 500;
+  if (status >= 500) {
+    pinoLogger.error({ err, url: req.url, method: req.method }, 'Unhandled error');
+  }
+  res.status(status).json({
     success: false,
     message: err.message || 'Internal server error',
   });
@@ -68,8 +72,8 @@ app.use(function(err, req, res, next) {
 const PORT = process.env.PORT || 8000;
 const PORTLOCAL = 5000;
 
-app.listen(PORT, function () {
-  pinoLogger.info('Server listening on :' + PORT);
+app.listen(PORTLOCAL, function () {
+  pinoLogger.info('Server listening on :' + PORTLOCAL);
 });
 
 module.exports = app;

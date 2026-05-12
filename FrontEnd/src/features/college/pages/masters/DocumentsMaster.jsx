@@ -211,7 +211,7 @@ export default function DocumentsMaster({ collegeId }) {
       </div>
 
       {/* Current required documents list */}
-      <div className="rounded-xl border border-slate-200 bg-white overflow-hidden mb-5">
+      <div className="rounded-lg border-2 border-slate-400 bg-white overflow-hidden mb-5">
         <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
           <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
             Required Documents ({rows.length})
@@ -226,17 +226,17 @@ export default function DocumentsMaster({ collegeId }) {
             No documents configured for this batch yet.
           </p>
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-100">
+          <table className="w-full text-sm border-collapse">
+            <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
+              <tr>
                 <DMTh col="document_type_name" label="Document"  align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortDM} />
                 <DMTh col="is_mandatory"       label="Mandatory" align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortDM} />
-                {rw && <th className="px-4 py-2 text-right text-xs font-semibold text-slate-500">Actions</th>}
+                {rw && <th className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wide text-slate-600">Actions</th>}
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y-2 divide-slate-300">
               {sortedRows.map(row => (
-                <tr key={row.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
+                <tr key={row.id} className="hover:bg-blue-50 transition">
                   <td className="px-4 py-2.5 text-slate-800 font-medium">{row.document_type_name}</td>
                   <td className="px-4 py-2.5 text-center">
                     {rw ? (
@@ -332,7 +332,7 @@ function DMTh({ col, label, align = 'left', sortCol, sortDir, onSort }) {
   const active = sortCol === col
   return (
     <th
-      className={`px-4 py-2 text-${align} text-xs font-semibold text-slate-500 cursor-pointer select-none hover:text-slate-800 transition`}
+      className={`px-4 py-2.5 text-${align} text-xs font-bold uppercase tracking-wide text-slate-600 cursor-pointer select-none hover:text-slate-800 transition`}
       onClick={() => onSort(col)}
     >
       <span className="inline-flex items-center gap-1">

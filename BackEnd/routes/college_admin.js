@@ -23,7 +23,7 @@ const express = require('express');
 const router  = express.Router({ mergeParams: true });
 const db      = require('./db');
 const mssqlShared = require('mssql');
-const { authenticate, requireCollegeAccess, requirePerm } = require('../middleware/auth');
+const { authenticate, requireCollegeAccess, requirePerm, requireWrite } = require('../middleware/auth');
 const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
 const whatsapp = require('../services/whatsapp');
 const logger = require('../config/logger');
@@ -315,6 +315,7 @@ router.get('/:collegeId/applications/:appId', requirePerm('review_application'),
       .query(`
         SELECT ad.id, ad.is_verified, ad.verified_at,
                dt.name AS document_name,
+               sd.id AS student_document_id,
                sd.file_name, sd.file_path, sd.uploaded_at
         FROM application_documents ad
         JOIN student_documents sd ON sd.id = ad.student_document_id
@@ -368,7 +369,7 @@ router.get('/:collegeId/applications/:appId', requirePerm('review_application'),
 });
 
 // ── Request Correction (submitted/under_review → correction_requested) ──────
-router.post('/:collegeId/applications/:appId/request-correction', requirePerm('review_application'), async (req, res) => {
+router.post('/:collegeId/applications/:appId/request-correction', requireWrite('review_application'), async (req, res) => {
   const { note } = req.body;
   if (!note || !note.trim()) {
     return res.status(400).json({ success: false, message: 'A correction note is required.' });
@@ -407,7 +408,7 @@ router.post('/:collegeId/applications/:appId/request-correction', requirePerm('r
 
 // ── Accept Application (submitted/correction_done → doc_verified) ────────────
 // College accepts the application. Student is notified to visit for doc check.
-router.post('/:collegeId/applications/:appId/approve', requirePerm('review_application'), async (req, res) => {
+router.post('/:collegeId/applications/:appId/approve', requireWrite('review_application'), async (req, res) => {
   try {
     const appRes = await db.request()
       .input('id',  parseInt(req.params.appId))
@@ -455,7 +456,7 @@ router.post('/:collegeId/applications/:appId/approve', requirePerm('review_appli
 });
 
 // ── Reject ──────────────────────────────────────────────────
-router.post('/:collegeId/applications/:appId/reject', requirePerm('review_application'), async (req, res) => {
+router.post('/:collegeId/applications/:appId/reject', requireWrite('review_application'), async (req, res) => {
   const { reason } = req.body;
 
   try {
@@ -493,7 +494,7 @@ router.post('/:collegeId/applications/:appId/reject', requirePerm('review_applic
 // ── Confirm after doc visit: set fees and move to confirmed ──────────────────
 // Student visited college. College verifies docs, sets fees, confirms admission.
 // Status: doc_verified → confirmed
-router.post('/:collegeId/applications/:appId/confirm', requirePerm('review_application'), async (req, res) => {
+router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_application'), async (req, res) => {
   const { fee_total_amount, fee_pay_now_amount, division, document_ids_verified } = req.body;
 
   const total  = parseFloat(fee_total_amount);
@@ -569,7 +570,7 @@ router.post('/:collegeId/applications/:appId/confirm', requirePerm('review_appli
 });
 
 // ── Set fee amounts (college enters total fee and amount due now) ─────────────
-router.post('/:collegeId/applications/:appId/set-fee', requirePerm('review_application'), async (req, res) => {
+router.post('/:collegeId/applications/:appId/set-fee', requireWrite('review_application'), async (req, res) => {
   const { fee_total_amount, fee_pay_now_amount } = req.body;
 
   const total  = parseFloat(fee_total_amount);
@@ -616,7 +617,7 @@ router.post('/:collegeId/applications/:appId/set-fee', requirePerm('review_appli
 });
 
 // ── Cancel (held seat freed) ─────────────────────────────────
-router.post('/:collegeId/applications/:appId/cancel', requirePerm('review_application'), async (req, res) => {
+router.post('/:collegeId/applications/:appId/cancel', requireWrite('review_application'), async (req, res) => {
   const { reason } = req.body;
 
   try {

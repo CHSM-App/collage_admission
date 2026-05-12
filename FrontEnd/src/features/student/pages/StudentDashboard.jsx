@@ -70,7 +70,7 @@ function Overview({ user }) {
         <ol className="mt-4 space-y-3">
           {[
             'Browse open admissions and pick a college + course.',
-            'Submit your application and pay the application fee (₹250–₹600).',
+            'Submit your application and pay the application fee.',
             'College reviews your application and calls you for document verification.',
             'Bring original documents to the college for verification.',
             'On confirmation, pay the college fee to secure your seat.',

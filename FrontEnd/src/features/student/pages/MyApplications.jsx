@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../../services/api.js'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
@@ -6,7 +6,7 @@ import SubjectSelection from './SubjectSelection.jsx'
 import CollegeFeePayment from './CollegeFeePayment.jsx'
 import PaymentReceipts from './PaymentReceipts.jsx'
 import ApplicationPrintView from './ApplicationPrintView.jsx'
-import { SkeletonCards } from '../../../shared/components/Skeleton.jsx'
+import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
 
 const YEAR_LABEL  = { 1: 'FY', 2: 'SY', 3: 'TY' }
 const STATUS_META = {
@@ -16,34 +16,28 @@ const STATUS_META = {
   under_review:         { label: 'Under Review',        color: 'bg-blue-100 text-blue-700' },
   correction_requested: { label: 'Correction Required', color: 'bg-orange-100 text-orange-700' },
   correction_done:      { label: 'Under Review',        color: 'bg-blue-100 text-blue-700' },
-  doc_verified:         { label: 'Application Approved',color: 'bg-teal-100 text-teal-700' },
+  doc_verified:         { label: 'App. Approved',       color: 'bg-teal-100 text-teal-700' },
   confirmed:            { label: 'Fees Pending',        color: 'bg-amber-100 text-amber-700' },
-  fees_paid:            { label: 'Admission Confirmed',  color: 'bg-emerald-100 text-emerald-700' },
+  fees_paid:            { label: 'Adm. Confirmed',      color: 'bg-emerald-100 text-emerald-700' },
   roll_assigned:        { label: 'Roll Assigned',       color: 'bg-violet-100 text-violet-700' },
   enrolled:             { label: 'Enrolled',            color: 'bg-green-100 text-green-800' },
   rejected:             { label: 'Rejected',            color: 'bg-red-100 text-red-700' },
   cancelled:            { label: 'Cancelled',           color: 'bg-slate-100 text-slate-500' },
 }
 
-const SECTIONS = [
-  { key: 'all',        label: 'All' },
-  { key: 'review',     label: 'Under Review',       statuses: ['draft', 'submitted', 'under_review', 'correction_done'] },
-  { key: 'correction', label: 'Correction Required', statuses: ['correction_requested'] },
-  { key: 'approved',   label: 'Approved',            statuses: ['doc_verified'] },
-  { key: 'fees',       label: 'Fees Pending',        statuses: ['confirmed'] },
-  { key: 'confirmed',  label: 'Admission Confirmed',  statuses: ['fees_paid', 'roll_assigned', 'enrolled'] },
-]
-
 export default function MyApplications() {
   const { user }    = useAuthContext()
   const navigate    = useNavigate()
-  const [apps, setApps]               = useState([])
-  const [loading, setLoading]         = useState(true)
-  const [activeSection, setActiveSection] = useState('all')
-  const [feePayApp, setFeePayApp]     = useState(null)
-  const [receiptsAppId, setReceiptsAppId] = useState(null)
+  const [apps, setApps]                     = useState([])
+  const [loading, setLoading]               = useState(true)
+  const [search, setSearch]                 = useState('')
+  const [filterStatus, setFilterStatus]     = useState('')
+  const [sortCol, setSortCol]               = useState('submitted_at')
+  const [sortDir, setSortDir]               = useState('desc')
+  const [feePayApp, setFeePayApp]           = useState(null)
+  const [receiptsAppId, setReceiptsAppId]   = useState(null)
   const [selectSubjectsApp, setSelectSubjectsApp] = useState(null)
-  const [viewAppId, setViewAppId]     = useState(null)  // id of app whose print view is open
+  const [expandedId, setExpandedId]         = useState(null)
 
   function fetchApps() {
     api.get(`applications?student_id=${user.id}&limit=100`)
@@ -53,6 +47,30 @@ export default function MyApplications() {
   }
 
   useEffect(() => { fetchApps() }, [user.id])
+
+  function toggleSort(col) {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortCol(col); setSortDir('asc') }
+  }
+
+  const filtered = useMemo(() => {
+    const list = apps.filter(app => {
+      if (filterStatus && app.status !== filterStatus) return false
+      if (search) {
+        const q = search.toLowerCase()
+        if (!app.college_name?.toLowerCase().includes(q) &&
+            !app.course_name?.toLowerCase().includes(q) &&
+            !app.registration_number?.toLowerCase().includes(q)) return false
+      }
+      return true
+    })
+    return [...list].sort((a, b) => {
+      const av = a[sortCol] ?? ''
+      const bv = b[sortCol] ?? ''
+      const cmp = typeof av === 'number' ? av - bv : String(av).localeCompare(String(bv))
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+  }, [apps, search, filterStatus, sortCol, sortDir])
 
   if (selectSubjectsApp) {
     return (
@@ -96,12 +114,13 @@ export default function MyApplications() {
   }
 
   return (
-    <section className="space-y-6">
+    <section className="space-y-5">
+      {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
         <div>
           <p className="text-sm font-semibold uppercase tracking-wide text-emerald-600">Student portal</p>
-          <h1 className="mt-2 text-2xl sm:text-3xl font-bold text-slate-950">My Applications</h1>
-          <p className="mt-1 text-slate-600">All your college applications across all years.</p>
+          <h1 className="mt-1 text-2xl font-bold text-slate-950">My Applications</h1>
+          <p className="mt-1 text-sm text-slate-500">All your college applications across all years.</p>
         </div>
         <button
           onClick={() => navigate('/student/dashboard?section=browse')}
@@ -111,31 +130,40 @@ export default function MyApplications() {
         </button>
       </div>
 
-      {/* Section tabs */}
+      {/* Search + filter */}
       {!loading && apps.length > 0 && (
-        <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
-          {SECTIONS.map(sec => (
-            <button
-              key={sec.key}
-              onClick={() => setActiveSection(sec.key)}
-              className={`whitespace-nowrap px-4 py-2 text-sm font-semibold border-b-2 transition ${
-                activeSection === sec.key
-                  ? 'border-emerald-600 text-emerald-700'
-                  : 'border-transparent text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              {sec.label}
-              {sec.key !== 'all' && (
-                <span className="ml-1.5 text-xs text-slate-400">
-                  ({apps.filter(a => sec.statuses.includes(a.status)).length})
-                </span>
-              )}
-            </button>
-          ))}
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            type="text"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search college, course or reg. no…"
+            className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          />
+          <select
+            value={filterStatus}
+            onChange={e => setFilterStatus(e.target.value)}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          >
+            <option value="">All Statuses</option>
+            {(() => {
+              const seen = new Set()
+              return Object.entries(STATUS_META)
+                .filter(([key, { label }]) => {
+                  if (['enrolled', 'cancelled'].includes(key)) return false
+                  if (seen.has(label)) return false
+                  seen.add(label)
+                  return true
+                })
+                .map(([key, { label }]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))
+            })()}
+          </select>
         </div>
       )}
 
-      {loading && <SkeletonCards count={3} />}
+      {loading && <SkeletonTable rows={4} cols={5} />}
 
       {!loading && apps.length === 0 && (
         <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center">
@@ -150,236 +178,312 @@ export default function MyApplications() {
         </div>
       )}
 
-      <div className="space-y-4">
-        {apps
-          .filter(app => {
-            if (activeSection === 'all') return true
-            const sec = SECTIONS.find(s => s.key === activeSection)
-            return sec?.statuses.includes(app.status)
-          })
-          .map(app => {
-          const meta = STATUS_META[app.status] || { label: app.status, color: 'bg-slate-100 text-slate-600' }
-
-          return (
-            <div key={app.id}>
-            <article className="rounded-lg border border-slate-200 bg-white p-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-slate-950">{app.college_name}</p>
-                  <p className="text-sm text-slate-500">
-                    {app.course_name} · {YEAR_LABEL[app.year_of_study]} · {app.academic_year}
-                  </p>
-                  {app.registration_number && (
-                    <p className="mt-1 font-mono text-xs text-slate-400">Reg: {app.registration_number}</p>
-                  )}
-                  {app.roll_number && (
-                    <p className="mt-0.5 text-xs font-semibold text-violet-700">Roll No: {app.roll_number}</p>
-                  )}
-                </div>
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${meta.color}`}>
-                  {meta.label}
-                </span>
-              </div>
-
-              {/* Status-specific actions and messages */}
-              {app.status === 'correction_requested' && (
-                <div className="mt-3 rounded-md bg-orange-50 border border-orange-200 px-3 py-3 space-y-2">
-                  <p className="text-sm font-semibold text-orange-800">The college has requested corrections to your application.</p>
-                  {app.correction_note && (
-                    <p className="text-sm text-orange-700 whitespace-pre-wrap">{app.correction_note}</p>
-                  )}
-                  <button
-                    onClick={() => navigate(`/apply/${app.id}`)}
-                    className="inline-flex items-center gap-1.5 rounded-md bg-orange-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-orange-700 transition"
-                  >
-                    Edit &amp; Resubmit Application
-                  </button>
-                </div>
-              )}
-
-              {(app.status === 'submitted' || app.status === 'under_review' || app.status === 'correction_done') && (
-                <div className="mt-3 rounded-md bg-blue-50 border border-blue-100 px-3 py-2">
-                  <p className="text-sm text-blue-800">
-                    Your application is under review by the college.
-                  </p>
-                </div>
-              )}
-
-              {app.status === 'doc_verified' && (
-                <div className="mt-3 rounded-md bg-teal-50 border border-teal-200 px-3 py-3 space-y-1">
-                  <p className="text-sm font-semibold text-teal-800">
-                    Your application has been approved!
-                  </p>
-                  <p className="text-sm text-teal-700">
-                    Please visit the college as soon as possible with all your original documents for verification.
-                    Carry originals of mark sheets, certificates, ID proof, and any other required documents.
-                  </p>
-                </div>
-              )}
-
-              {app.status === 'confirmed' && (
-                <div className="mt-3 rounded-md bg-amber-50 border border-amber-200 px-3 py-3 space-y-2">
-                  <p className="text-sm font-semibold text-amber-800">
-                    Documents verified! Please pay the college fee to confirm your admission.
-                  </p>
-                  <button
-                    onClick={() => setFeePayApp(app)}
-                    className="rounded-md bg-amber-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-amber-700"
-                  >
-                    Pay College Fee
-                  </button>
-                </div>
-              )}
-
-              {app.status === 'fees_paid' && (() => {
-                const total    = parseFloat(app.fee_total_amount)  || 0
-                const payNow   = parseFloat(app.fee_pay_now_amount) || total
-                const paid     = parseFloat(app.amount_paid)       || 0
-                // remaining = total minus what's actually been paid
-                const remaining = total > 0 ? Math.max(0, total - paid) : 0
-                // has more to pay if total > payNow threshold (instalment scenario)
-                // or if actual paid amount is less than total
-                const hasMore  = total > 0 && (total > payNow + 0.01 || remaining > 0.01)
-                return (
-                  <div className="mt-3 rounded-md bg-emerald-50 border border-emerald-200 px-3 py-3 space-y-2">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="inline-flex items-center gap-1 text-sm font-semibold text-emerald-800">
-                        <svg className="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                        </svg>
-                        Admission Confirmed!
-                      </span>
-                      {hasMore && remaining > 0.01 && (
-                        <span className="rounded-full bg-amber-100 text-amber-700 text-xs font-semibold px-2.5 py-0.5">
-                          ₹{remaining.toLocaleString('en-IN')} balance due
-                        </span>
-                      )}
-                    </div>
-                    {hasMore && (
-                      <p className="text-xs text-slate-500">
-                        {remaining > 0.01
-                          ? `You have paid ₹${paid.toLocaleString('en-IN')} of ₹${total.toLocaleString('en-IN')} total. Please pay the remaining ₹${remaining.toLocaleString('en-IN')}.`
-                          : `Total fee: ₹${total.toLocaleString('en-IN')}. You may pay any outstanding balance below.`
-                        }
-                      </p>
-                    )}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <button
-                        onClick={() => setFeePayApp(app)}
-                        className={`rounded-md px-4 py-1.5 text-sm font-semibold text-white transition ${
-                          hasMore && remaining > 0.01
-                            ? 'bg-amber-600 hover:bg-amber-700'
-                            : 'bg-emerald-600 hover:bg-emerald-700'
-                        }`}
-                      >
-                        {hasMore && remaining > 0.01 ? 'Pay Remaining Fee' : 'View Fee & Receipts'}
-                      </button>
-                      <button
-                        onClick={() => setSelectSubjectsApp(app)}
-                        className="rounded-md bg-violet-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-violet-700 transition"
-                      >
-                        Select Subjects
-                      </button>
-                    </div>
-                  </div>
-                )
-              })()}
-
-              {app.status === 'roll_assigned' && (
-                <div className="mt-3 rounded-md bg-violet-50 border border-violet-100 px-3 py-2">
-                  <p className="text-sm text-violet-800 font-medium">
-                    Roll number assigned! Select your subjects to complete enrollment.
-                  </p>
-                  <button
-                    onClick={() => setSelectSubjectsApp(app)}
-                    className="mt-2 rounded-md bg-violet-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-violet-700"
-                  >
-                    Select Subjects
-                  </button>
-                </div>
-              )}
-
-              {app.status === 'enrolled' && (
-                <div className="mt-3 rounded-md bg-green-50 border border-green-100 px-3 py-3 space-y-2 text-sm text-green-800">
-                  <p className="font-medium">Enrollment complete. Welcome to {app.college_name}!</p>
-                  <button
-                    onClick={() => setSelectSubjectsApp(app)}
-                    className="rounded-md bg-green-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-green-700"
-                  >
-                    View / Update Subjects
-                  </button>
-                </div>
-              )}
-
-              {app.status === 'rejected' && app.rejection_reason && (
-                <div className="mt-3 rounded-md bg-red-50 border border-red-100 px-3 py-2 text-sm text-red-700">
-                  <strong>Rejection reason:</strong> {app.rejection_reason}
-                </div>
-              )}
-
-              {app.status === 'cancelled' && app.cancellation_reason && (
-                <div className="mt-3 rounded-md bg-slate-50 border border-slate-200 px-3 py-2 text-sm text-slate-600">
-                  <strong>Cancelled:</strong> {app.cancellation_reason}
-                </div>
-              )}
-
-              {app.status === 'draft' && (
-                <div className="mt-3 rounded-md bg-amber-50 border border-amber-200 px-3 py-2">
-                  <p className="text-sm text-amber-800 font-medium">Application not yet submitted.</p>
-                  <div className="mt-2 flex items-center gap-3">
-                    <button
-                      onClick={() => navigate(`/apply/${app.id}`)}
-                      className="rounded-md bg-amber-500 px-4 py-1.5 text-sm font-semibold text-white hover:bg-amber-600"
-                    >
-                      Continue →
-                    </button>
-                    <DeleteDraftButton appId={app.id} onDeleted={fetchApps} />
-                  </div>
-                </div>
-              )}
-
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-                <span className="text-xs text-slate-400">
-                  Submitted: {app.submitted_at ? new Date(app.submitted_at).toLocaleDateString('en-IN') : '—'}
-                </span>
-                <div className="flex items-center gap-2 flex-wrap">
-                  {app.status !== 'draft' && app.registration_number && (
-                    <button
-                      onClick={() => setViewAppId(viewAppId === app.id ? null : app.id)}
-                      className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 border border-slate-200 rounded-md px-2.5 py-1 hover:bg-slate-50 transition"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/>
-                      </svg>
-                      {viewAppId === app.id ? 'Hide' : 'View / Print'}
-                    </button>
-                  )}
-                  {app.application_fee_paid && (
-                    <button
-                      onClick={() => setReceiptsAppId(app.id)}
-                      className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-800 border border-slate-200 rounded-md px-2.5 py-1 hover:bg-slate-50 transition"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                      </svg>
-                      Receipts
-                    </button>
-                  )}
-                </div>
-              </div>
-            </article>
-            {viewAppId === app.id && (
-              <ApplicationPrintView
-                appId={app.id}
-                regNumber={app.registration_number}
-                onClose={() => setViewAppId(null)}
+      {/* ── Mobile: cards ── */}
+      {!loading && filtered.length > 0 && (
+        <>
+          <div className="flex flex-col gap-3 md:hidden">
+            {filtered.map(app => (
+              <MobileCard
+                key={app.id}
+                app={app}
+                expandedId={expandedId}
+                setExpandedId={setExpandedId}
+                navigate={navigate}
+                setFeePayApp={setFeePayApp}
+                setReceiptsAppId={setReceiptsAppId}
+                setSelectSubjectsApp={setSelectSubjectsApp}
+                fetchApps={fetchApps}
               />
-            )}
-            </div>
-          )
-        })}
-      </div>
+            ))}
+          </div>
+
+          {/* ── Desktop: table ── */}
+          <div className="hidden md:block rounded-lg border-2 border-slate-400 overflow-hidden">
+            <table className="w-full text-sm border-collapse">
+              <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
+                <tr>
+                  <Th col="college_name"        label="College / Course" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <Th col="year_of_study"       label="Year"             sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <Th col="registration_number" label="Reg. No."         sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <Th col="submitted_at"        label="Submitted"        sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <Th col="status"              label="Status"           sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <th className="px-4 py-2.5 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y-2 divide-slate-300">
+                {filtered.map(app => {
+                  const meta = STATUS_META[app.status] || { label: app.status, color: 'bg-slate-100 text-slate-600' }
+                  const isExpanded = expandedId === app.id
+
+                  return (
+                    <React.Fragment key={app.id}>
+                      <tr
+                        className="hover:bg-blue-50 transition cursor-pointer"
+                        onClick={() => setExpandedId(isExpanded ? null : app.id)}
+                      >
+                        <td className="px-4 py-2.5">
+                          <p className="font-semibold text-slate-900">{app.college_name}</p>
+                          <p className="text-xs text-slate-500">{app.course_name}</p>
+                        </td>
+                        <td className="px-4 py-2.5 text-slate-700">{YEAR_LABEL[app.year_of_study]} · {app.academic_year}</td>
+                        <td className="px-4 py-2.5 font-mono text-xs text-slate-500">
+                          {app.registration_number || '—'}
+                          {app.roll_number && <p className="text-violet-700 font-semibold font-sans">Roll: {app.roll_number}</p>}
+                        </td>
+                        <td className="px-4 py-2.5 text-xs text-slate-500">
+                          {app.submitted_at ? new Date(app.submitted_at).toLocaleDateString('en-IN') : '—'}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${meta.color}`}>
+                            {meta.label}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            {app.status !== 'draft' && app.registration_number && (
+                              <button
+                                onClick={e => { e.stopPropagation(); setExpandedId(expandedId === `print-${app.id}` ? null : `print-${app.id}`) }}
+                                className="text-xs font-semibold text-slate-500 hover:text-slate-800 border border-slate-200 rounded px-2 py-1 hover:bg-slate-50 transition"
+                              >
+                                Print
+                              </button>
+                            )}
+                            {app.application_fee_paid && (
+                              <button
+                                onClick={e => { e.stopPropagation(); setReceiptsAppId(app.id) }}
+                                className="text-xs font-semibold text-slate-500 hover:text-slate-800 border border-slate-200 rounded px-2 py-1 hover:bg-slate-50 transition"
+                              >
+                                Receipts
+                              </button>
+                            )}
+                            <span className="text-slate-300 text-xs">{isExpanded ? '▲' : '▼'}</span>
+                          </div>
+                        </td>
+                      </tr>
+
+                      {isExpanded && (
+                        <tr key={`detail-${app.id}`} className="bg-slate-50">
+                          <td colSpan={6} className="px-4 py-3">
+                            <AppDetail
+                              app={app}
+                              navigate={navigate}
+                              setFeePayApp={setFeePayApp}
+                              setSelectSubjectsApp={setSelectSubjectsApp}
+                              fetchApps={fetchApps}
+                            />
+                          </td>
+                        </tr>
+                      )}
+
+                      {expandedId === `print-${app.id}` && (
+                        <tr key={`print-${app.id}`}>
+                          <td colSpan={6}>
+                            <ApplicationPrintView
+                              appId={app.id}
+                              regNumber={app.registration_number}
+                              onClose={() => setExpandedId(null)}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </section>
+  )
+}
+
+// ── Mobile card ───────────────────────────────────────────────
+function MobileCard({ app, expandedId, setExpandedId, navigate, setFeePayApp, setReceiptsAppId, setSelectSubjectsApp, fetchApps }) {
+  const meta       = STATUS_META[app.status] || { label: app.status, color: 'bg-slate-100 text-slate-600' }
+  const isExpanded = expandedId === app.id
+  const isPrint    = expandedId === `print-${app.id}`
+
+  return (
+    <div className="rounded-xl border-2 border-slate-300 bg-white overflow-hidden">
+      {/* Card header — tap to expand */}
+      <button
+        className="w-full text-left px-4 py-3 hover:bg-slate-50 transition"
+        onClick={() => setExpandedId(isExpanded ? null : app.id)}
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-slate-900 truncate">{app.college_name}</p>
+            <p className="text-xs text-slate-500 truncate">{app.course_name}</p>
+          </div>
+          <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${meta.color}`}>
+            {meta.label}
+          </span>
+        </div>
+
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+          <span>{YEAR_LABEL[app.year_of_study]} · {app.academic_year}</span>
+          {app.registration_number && (
+            <span className="font-mono">{app.registration_number}</span>
+          )}
+          {app.roll_number && (
+            <span className="text-violet-700 font-semibold">Roll: {app.roll_number}</span>
+          )}
+          {app.submitted_at && (
+            <span>{new Date(app.submitted_at).toLocaleDateString('en-IN')}</span>
+          )}
+        </div>
+
+        <div className="mt-1.5 flex items-center justify-end">
+          <span className="text-slate-400 text-xs">{isExpanded ? '▲ Less' : '▼ Details'}</span>
+        </div>
+      </button>
+
+      {/* Quick action buttons */}
+      {(app.status !== 'draft' && app.registration_number) || app.application_fee_paid ? (
+        <div className="flex border-t border-slate-100 divide-x divide-slate-100">
+          {app.status !== 'draft' && app.registration_number && (
+            <button
+              onClick={() => setExpandedId(isPrint ? null : `print-${app.id}`)}
+              className="flex-1 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
+            >
+              🖨 Print
+            </button>
+          )}
+          {app.application_fee_paid && (
+            <button
+              onClick={() => setReceiptsAppId(app.id)}
+              className="flex-1 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
+            >
+              🧾 Receipts
+            </button>
+          )}
+        </div>
+      ) : null}
+
+      {/* Expanded detail */}
+      {isExpanded && (
+        <div className="border-t border-slate-200 px-4 py-3 bg-slate-50">
+          <AppDetail
+            app={app}
+            navigate={navigate}
+            setFeePayApp={setFeePayApp}
+            setSelectSubjectsApp={setSelectSubjectsApp}
+            fetchApps={fetchApps}
+          />
+        </div>
+      )}
+
+      {/* Print view */}
+      {isPrint && (
+        <div className="border-t border-slate-200">
+          <ApplicationPrintView
+            appId={app.id}
+            regNumber={app.registration_number}
+            onClose={() => setExpandedId(null)}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AppDetail({ app, navigate, setFeePayApp, setSelectSubjectsApp, fetchApps }) {
+  return (
+    <div className="space-y-2">
+      {app.status === 'correction_requested' && (
+        <div className="rounded-md bg-orange-50 border border-orange-200 px-3 py-3 space-y-2">
+          <p className="text-sm font-semibold text-orange-800">The college has requested corrections to your application.</p>
+          {app.correction_note && <p className="text-sm text-orange-700 whitespace-pre-wrap">{app.correction_note}</p>}
+          <button onClick={() => navigate(`/apply/${app.id}`)} className="rounded-md bg-orange-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-orange-700 transition">
+            Edit &amp; Resubmit Application
+          </button>
+        </div>
+      )}
+
+      {(app.status === 'submitted' || app.status === 'under_review' || app.status === 'correction_done') && (
+        <div className="rounded-md bg-blue-50 border border-blue-100 px-3 py-2">
+          <p className="text-sm text-blue-800">Your application is under review by the college.</p>
+        </div>
+      )}
+
+      {app.status === 'doc_verified' && (
+        <div className="rounded-md bg-teal-50 border border-teal-200 px-3 py-3">
+          <p className="text-sm font-semibold text-teal-800">Your application has been approved!</p>
+          <p className="text-sm text-teal-700 mt-1">Please visit the college with all original documents for verification.</p>
+        </div>
+      )}
+
+      {app.status === 'confirmed' && (
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-3 space-y-2">
+          <p className="text-sm font-semibold text-amber-800">Documents verified! Please pay the college fee to confirm your admission.</p>
+          <button onClick={() => setFeePayApp(app)} className="rounded-md bg-amber-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-amber-700">Pay College Fee</button>
+        </div>
+      )}
+
+      {app.status === 'fees_paid' && (() => {
+        const total     = parseFloat(app.fee_total_amount)   || 0
+        const payNow    = parseFloat(app.fee_pay_now_amount) || total
+        const paid      = parseFloat(app.amount_paid)        || 0
+        const remaining = total > 0 ? Math.max(0, total - paid) : 0
+        const hasMore   = total > 0 && (total > payNow + 0.01 || remaining > 0.01)
+        return (
+          <div className="rounded-md bg-emerald-50 border border-emerald-200 px-3 py-3 space-y-2">
+            <p className="text-sm font-semibold text-emerald-800">
+              Admission Confirmed!
+              {hasMore && remaining > 0.01 && (
+                <span className="ml-2 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-0.5">
+                  ₹{remaining.toLocaleString('en-IN')} balance due
+                </span>
+              )}
+            </p>
+            {hasMore && <p className="text-xs text-slate-500">Paid ₹{paid.toLocaleString('en-IN')} of ₹{total.toLocaleString('en-IN')} total.</p>}
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={() => setFeePayApp(app)} className={`rounded-md px-4 py-1.5 text-sm font-semibold text-white transition ${hasMore && remaining > 0.01 ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+                {hasMore && remaining > 0.01 ? 'Pay Remaining Fee' : 'View Fee & Receipts'}
+              </button>
+              <button onClick={() => setSelectSubjectsApp(app)} className="rounded-md bg-violet-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-violet-700 transition">Select Subjects</button>
+            </div>
+          </div>
+        )
+      })()}
+
+      {app.status === 'roll_assigned' && (
+        <div className="rounded-md bg-violet-50 border border-violet-100 px-3 py-2">
+          <p className="text-sm text-violet-800 font-medium">Roll number assigned! Select your subjects to complete enrollment.</p>
+          <button onClick={() => setSelectSubjectsApp(app)} className="mt-2 rounded-md bg-violet-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-violet-700">Select Subjects</button>
+        </div>
+      )}
+
+      {app.status === 'enrolled' && (
+        <div className="rounded-md bg-green-50 border border-green-100 px-3 py-3 space-y-2 text-sm text-green-800">
+          <p className="font-medium">Enrollment complete. Welcome to {app.college_name}!</p>
+          <button onClick={() => setSelectSubjectsApp(app)} className="rounded-md bg-green-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-green-700">View / Update Subjects</button>
+        </div>
+      )}
+
+      {app.status === 'rejected' && app.rejection_reason && (
+        <div className="rounded-md bg-red-50 border border-red-100 px-3 py-2 text-sm text-red-700">
+          <strong>Rejection reason:</strong> {app.rejection_reason}
+        </div>
+      )}
+
+      {app.status === 'cancelled' && app.cancellation_reason && (
+        <div className="rounded-md bg-slate-100 border border-slate-200 px-3 py-2 text-sm text-slate-600">
+          <strong>Cancelled:</strong> {app.cancellation_reason}
+        </div>
+      )}
+
+      {app.status === 'draft' && (
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2">
+          <p className="text-sm text-amber-800 font-medium">Application not yet submitted.</p>
+          <div className="mt-2 flex items-center gap-3 flex-wrap">
+            <button onClick={() => navigate(`/apply/${app.id}`)} className="rounded-md bg-amber-500 px-4 py-1.5 text-sm font-semibold text-white hover:bg-amber-600">Continue →</button>
+            <DeleteDraftButton appId={app.id} onDeleted={fetchApps} />
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -406,5 +510,20 @@ function DeleteDraftButton({ appId, onDeleted }) {
     >
       {deleting ? 'Deleting…' : 'Delete Draft'}
     </button>
+  )
+}
+
+function Th({ col, label, sortCol, sortDir, onSort }) {
+  const active = sortCol === col
+  return (
+    <th
+      className="px-4 py-2.5 text-left cursor-pointer select-none hover:text-slate-900 transition"
+      onClick={() => onSort(col)}
+    >
+      <span className="flex items-center gap-1">
+        {label}
+        <span className="text-slate-300">{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>
+      </span>
+    </th>
   )
 }
