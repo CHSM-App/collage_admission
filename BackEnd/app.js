@@ -26,9 +26,12 @@ app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'pug');
 
 app.use(cors({
-  origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : '*',
+  origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(o => o.trim()) : false,
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Authorization', 'Content-Type'],
 }));
+app.options('*', cors());
 app.use(logger('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -65,8 +68,8 @@ app.use(function(err, req, res, next) {
 const PORT = process.env.PORT || 8000;
 const PORTLOCAL = 5000;
 
-app.listen(PORTLOCAL, function () {
-  pinoLogger.info('Server listening on :' + PORTLOCAL);
+app.listen(PORT, function () {
+  pinoLogger.info('Server listening on :' + PORT);
 });
 
 module.exports = app;
