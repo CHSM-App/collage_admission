@@ -546,18 +546,6 @@ function CollegeReviewStep({ data, saving, submitError, isEditMode, onBack, onEd
           </div>
         )}
 
-        {/* Application fee info — only for new submissions */}
-        {!isEditMode && d.application_fee > 0 && (
-          <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3">
-            <p className="text-sm font-semibold text-blue-900">
-              Application Fee: ₹{Number(d.application_fee).toLocaleString('en-IN')}
-            </p>
-            <p className="text-xs text-blue-600 mt-0.5">
-              This fee will be recorded as collected on behalf of the student.
-            </p>
-          </div>
-        )}
-
         {submitError && (
           <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
             {submitError}

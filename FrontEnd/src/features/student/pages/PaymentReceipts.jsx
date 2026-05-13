@@ -34,7 +34,7 @@ function fmtTime(str) {
   return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' })
 }
 
-export default function PaymentReceipts({ applicationId, onClose }) {
+export default function PaymentReceipts({ applicationId, onClose, hideTypes = [] }) {
   const [data, setData]         = useState(null)
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
@@ -45,7 +45,8 @@ export default function PaymentReceipts({ applicationId, onClose }) {
       .then(r => {
         const d = r.data.data
         setData(d)
-        if (d.payments?.length) setActiveId(d.payments[d.payments.length - 1].id)
+        const visible = (d.payments || []).filter(p => !hideTypes.includes(p.payment_type))
+        if (visible.length) setActiveId(visible[visible.length - 1].id)
       })
       .catch(() => setError('Failed to load receipts.'))
       .finally(() => setLoading(false))
@@ -53,7 +54,9 @@ export default function PaymentReceipts({ applicationId, onClose }) {
 
   if (loading) return <div className="py-4 px-2"><SkeletonLines rows={4} /></div>
   if (error)   return <div className="py-6 text-center text-red-500 text-sm">{error}</div>
-  if (!data?.payments?.length) return <div className="py-6 text-center text-slate-400 text-sm">No payment receipts found.</div>
+  const payments = (data?.payments || []).filter(p => !hideTypes.includes(p.payment_type))
+
+  if (!payments.length) return <div className="py-6 text-center text-slate-400 text-sm">No payment receipts found.</div>
 
   return (
     <div className="space-y-2">
@@ -63,7 +66,7 @@ export default function PaymentReceipts({ applicationId, onClose }) {
           <button onClick={onClose} className="text-xs text-slate-400 hover:text-slate-600">✕ Close</button>
         </div>
       )}
-      {data.payments.map((pmt, idx) => (
+      {payments.map((pmt, idx) => (
         <div key={pmt.id} className="rounded-lg border border-slate-200 overflow-hidden">
           <button
             onClick={() => setActiveId(activeId === pmt.id ? null : pmt.id)}

@@ -190,7 +190,7 @@ async function sendTemplateMessage(phone, templateId, sample, campaignName, appl
     return null
   }
 
-  const success = result.IsSuccess || result.ErrorCode === 40
+  const success = result.IsSuccess || result.ErrorCode === 0
   await logToDb({
     phone,
     campaignName,

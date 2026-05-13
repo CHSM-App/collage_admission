@@ -92,6 +92,14 @@ export default function CourseMaster({ collegeId }) {
       if (r.max_sem_end && r.min_sem_end && parseInt(r.min_sem_end) > parseInt(r.max_sem_end))
         return setError(`Row "${r.course_title}": min_sem_end > max_sem_end.`)
     }
+    // Check for duplicate subject codes within the current batch
+    const newCodes = valid.filter(r => r.is_new || !r.id).map(r => r.course_code.trim().toUpperCase())
+    const dupInBatch = newCodes.find((c, i) => newCodes.indexOf(c) !== i)
+    if (dupInBatch) return setError(`Duplicate subject code "${dupInBatch}" in the list. Each subject code must be unique.`)
+    // Check new codes against already-saved rows (different id, same code)
+    const existingCodes = valid.filter(r => !r.is_new && r.id).map(r => r.course_code.trim().toUpperCase())
+    const dupWithExisting = newCodes.find(c => existingCodes.includes(c))
+    if (dupWithExisting) return setError(`Subject code "${dupWithExisting}" already exists in this program and semester.`)
     setSaving(true)
     try {
       // Existing rows: update individually by id (avoids creating duplicates when course_code is edited)

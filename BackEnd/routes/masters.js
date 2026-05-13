@@ -529,16 +529,17 @@ router.delete('/:collegeId/course/:id', requirePerm('masters'), async (req, res)
   } catch (e) { logger.error({ err: e }, 'delete course master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
-// POST /masters/:collegeId/course/bulk-save — save entire semester grid at once
+// POST /masters/:collegeId/course/bulk-save — insert new rows only (no upsert)
 router.post('/:collegeId/course/bulk-save', requirePerm('masters'), async (req, res) => {
   const { faculty_master_id, semester, rows } = req.body
   if (!faculty_master_id || !semester || !Array.isArray(rows))
     return res.status(422).json({ success: false, message: 'faculty_master_id, semester, rows[] required.' })
 
+  const validRows = rows.filter(r => r.course_code?.trim() && r.course_title?.trim())
+  if (!validRows.length) return res.json({ success: true, message: 'Saved.' })
+
   try {
-    for (const row of rows) {
-      if (!row.course_code?.trim() || !row.course_title?.trim()) continue
-      // Upsert by (college_id, faculty_master_id, semester, course_code)
+    for (const row of validRows) {
       await db.request()
         .input('cid', mssql.Int,      cid(req))
         .input('fid', mssql.Int,      parseInt(faculty_master_id))
@@ -555,22 +556,25 @@ router.post('/:collegeId/course/bulk-save', requirePerm('masters'), async (req, 
         .input('st',  mssql.NVarChar, row.subject_type || null)
         .input('do',  mssql.Int,      parseInt(row.display_order) || 0)
         .query(`
-          MERGE course_master AS target
-          USING (SELECT @cid AS college_id, @fid AS faculty_master_id, @sem AS semester, @cc AS course_code) AS src
-          ON target.college_id=src.college_id AND target.faculty_master_id=src.faculty_master_id
-             AND target.semester=src.semester AND target.course_code=src.course_code
-          WHEN MATCHED THEN UPDATE SET
-            course_title=@ct, credits=@cr, max_internal=@mi, min_internal=@ni,
-            max_sem_end=@ms, min_sem_end=@ns, max_total=@mt, min_total=@nt,
-            subject_type=@st, display_order=@do, modified_on=GETDATE()
-          WHEN NOT MATCHED THEN INSERT
+          INSERT INTO course_master
             (college_id,faculty_master_id,semester,course_code,course_title,credits,
              max_internal,min_internal,max_sem_end,min_sem_end,max_total,min_total,subject_type,display_order)
-          VALUES (@cid,@fid,@sem,@cc,@ct,@cr,@mi,@ni,@ms,@ns,@mt,@nt,@st,@do);
+          VALUES (@cid,@fid,@sem,@cc,@ct,@cr,@mi,@ni,@ms,@ns,@mt,@nt,@st,@do)
         `)
     }
     res.json({ success: true, message: 'Saved.' })
-  } catch (e) { logger.error({ err: e }, 'bulk save course master'); res.status(500).json({ success: false, message: e.message }) }
+  } catch (e) {
+    if (e.number === 2627 || e.number === 2601) {
+      const match = e.message.match(/\(([^)]+)\)$/)
+      const code  = match ? match[1].split(',').map(s => s.trim())[3] : null
+      const msg   = code
+        ? `Subject code "${code}" already exists in this program and semester.`
+        : 'One or more subject codes already exist in this program and semester.'
+      return res.status(409).json({ success: false, message: msg })
+    }
+    logger.error({ err: e }, 'bulk save course master')
+    res.status(500).json({ success: false, message: e.message })
+  }
 })
 
 // ═══════════════════════════════════════════════════════════════

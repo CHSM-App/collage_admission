@@ -386,11 +386,7 @@ router.get('/applications/:id/form', async (req, res) => {
         e.total_marks_max         AS marks_max,
         e.percentage,
         e.class_grade,
-        e.remark,
-        (SELECT s.id, s.subject_name, s.marks_obtained, s.marks_max
-         FROM application_previous_exam_subjects s
-         WHERE s.application_previous_exam_id = e.id
-         FOR JSON PATH) AS subjects_json
+        e.remark
       FROM application_previous_exam e
       WHERE e.application_id = @appId
     `;
@@ -400,7 +396,6 @@ router.get('/applications/:id/form', async (req, res) => {
 
     const exams = {};
     for (const row of examRes.recordset) {
-      if (row.subjects_json) { row.subjects = JSON.parse(row.subjects_json); delete row.subjects_json; }
       exams[row.exam_type || 'SSC'] = row;
     }
 
@@ -421,7 +416,6 @@ router.get('/applications/:id/form', async (req, res) => {
           .input('appId', mssql.Int, prevAppId)
           .query(examQuery);
         for (const row of prevRows.recordset) {
-          if (row.subjects_json) { row.subjects = JSON.parse(row.subjects_json); delete row.subjects_json; }
           exams[row.exam_type || 'SSC'] = row;
         }
       }
@@ -429,7 +423,6 @@ router.get('/applications/:id/form', async (req, res) => {
 
     // Legacy: if only one row without exam_type, keep backward compat
     const exam = examRes.recordset[0] || null;
-    if (exam && exam.subjects_json) { exam.subjects = JSON.parse(exam.subjects_json); delete exam.subjects_json; }
 
     // Linked documents
     const docsRes = await db.request()

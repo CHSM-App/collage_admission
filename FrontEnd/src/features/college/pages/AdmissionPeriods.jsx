@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getCollegeAdminAdmissionPeriods, createAdmissionPeriod, updateAdmissionPeriod } from '../../../services/collegeAdminService.js'
 import { getFaculty } from '../../../services/masterService.js'
-import { getAllAdminColleges } from '../../../services/adminService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
@@ -17,7 +16,6 @@ export default function AdmissionPeriods({ collegeId }) {
   const rw = canWrite('masters')
   const [periods, setPeriods]       = useState([])
   const [courses, setCourses]       = useState([])
-  const [collegeFee, setCollegeFee] = useState(null)
   const [loading, setLoading]       = useState(true)
   const [showForm, setShowForm]     = useState(false)
   const [saving, setSaving]         = useState(false)
@@ -45,13 +43,6 @@ export default function AdmissionPeriods({ collegeId }) {
       .catch(() => setError('Failed to load data.'))
       .finally(() => setLoading(false))
 
-    // College fee fetch is optional — failure should not block the page
-    getAllAdminColleges()
-      .then(res => {
-        const col = (res.data.data || []).find(c => String(c.id) === String(collegeId))
-        setCollegeFee(col?.application_fee ?? null)
-      })
-      .catch(() => {})
   }
 
   useEffect(() => { fetchData() }, [collegeId])
@@ -197,12 +188,6 @@ export default function AdmissionPeriods({ collegeId }) {
           <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">College portal</p>
           <h1 className="mt-2 text-3xl font-bold text-slate-950">Admission Periods</h1>
           <p className="mt-1 text-slate-600">Control when students can apply for each course and year.</p>
-          {collegeFee !== null && (
-            <p className="mt-1 text-sm text-slate-500">
-              Application fee: <span className="font-semibold text-slate-800">₹{Number(collegeFee).toLocaleString('en-IN')}</span>
-              <span className="text-xs text-slate-400 ml-1">(set by admin — applied to all periods)</span>
-            </p>
-          )}
         </div>
         {rw && <Button onClick={() => { setShowForm(v => !v); setError('') }}>
           {showForm ? 'Cancel' : '+ New Period'}

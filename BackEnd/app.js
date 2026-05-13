@@ -76,8 +76,8 @@ app.use(function(err, req, res, next) {
 const PORT = process.env.PORT || 8000;
 const PORTLOCAL = 5000;
 
-app.listen(PORTLOCAL, function () {
-  pinoLogger.info('Server listening on :' + PORTLOCAL);
+app.listen(PORT, function () {
+  pinoLogger.info('Server listening on :' + PORT);
 });
 
 module.exports = app;

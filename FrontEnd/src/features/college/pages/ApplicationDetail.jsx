@@ -14,6 +14,19 @@ const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000/').repl
 
 const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year', 4: '4Y — Fourth Year', 5: '5Y — Fifth Year' }
 
+const ALLOWED_EXAMS_BY_YEAR = {
+  1: ['SSC', 'HSC'],
+  2: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2'],
+  3: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2'],
+  4: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2', 'TY_SEM1', 'TY_SEM2'],
+  5: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2', 'TY_SEM1', 'TY_SEM2', '4Y_SEM1', '4Y_SEM2'],
+}
+
+function filterExamsByYear(exams, yearOfStudy) {
+  const allowed = ALLOWED_EXAMS_BY_YEAR[yearOfStudy] || ALLOWED_EXAMS_BY_YEAR[1]
+  return Object.fromEntries(Object.entries(exams || {}).filter(([type]) => allowed.includes(type)))
+}
+
 const STATUS_FLOW = {
   submitted:                { label: 'Review Pending — awaiting college review' },
   under_review:             { label: 'Review Pending — awaiting college review' },
@@ -217,43 +230,8 @@ export default function ApplicationDetail({ collegeId, appId }) {
       </Section>
 
       {/* ── Previous Exam Details ── */}
-      <Section title="Previous Exam Details">
-        {Object.keys(d.exams || {}).length === 0 ? (
-          <p className="text-sm text-slate-500 col-span-2">No exam details filled.</p>
-        ) : (
-          <div className="col-span-2 overflow-x-auto">
-            <div className="rounded-lg border-2 border-slate-400 overflow-hidden">
-            <table className="w-full text-xs border-collapse">
-              <thead className="bg-slate-100 border-b-2 border-slate-400">
-                <tr>
-                  {['Exam','Institute','Board/Univ.','Month & Year','Seat No.','Marks','Out of','%','Class/Grade','Remark'].map(h => (
-                    <th key={h} className="border border-slate-200 px-2 py-1 text-left text-xs font-bold uppercase tracking-wide text-slate-600 whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(d.exams).map(([type, r]) => (
-                  <tr key={type} className="even:bg-slate-50 hover:bg-blue-50 transition">
-                    <td className="border border-slate-200 px-2 py-1 font-semibold text-slate-700 whitespace-nowrap">
-                      {{'SSC':'SSC','HSC':'HSC','FY_SEM1':'F.Y. Sem I','FY_SEM2':'F.Y. Sem II','SY_SEM1':'S.Y. Sem I','SY_SEM2':'S.Y. Sem II'}[type] || type}
-                    </td>
-                    <td className="border border-slate-200 px-2 py-1">{r.institute || '—'}</td>
-                    <td className="border border-slate-200 px-2 py-1">{r.board || '—'}</td>
-                    <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.month_year || '—'}</td>
-                    <td className="border border-slate-200 px-2 py-1">{r.seat_no || '—'}</td>
-                    <td className="border border-slate-200 px-2 py-1">{r.marks_obtained || '—'}</td>
-                    <td className="border border-slate-200 px-2 py-1">{r.marks_max || '—'}</td>
-                    <td className="border border-slate-200 px-2 py-1">{r.percentage ? `${r.percentage}%` : '—'}</td>
-                    <td className="border border-slate-200 px-2 py-1">{r.class_grade || '—'}</td>
-                    <td className="border border-slate-200 px-2 py-1">{r.remark || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            </div>
-          </div>
-        )}
-      </Section>
+      <ExamDetailsSection exams={d.exams} yearOfStudy={d.year_of_study} />
+
 
       {/* ── Documents ── */}
       <DocumentsSection documents={app.documents} />
@@ -593,6 +571,50 @@ function SelectedSubjectsSection({ appId }) {
         )}
       </div>
     </div>
+  )
+}
+
+const EXAM_LABEL = { SSC: 'SSC', HSC: 'HSC', FY_SEM1: 'F.Y. Sem I', FY_SEM2: 'F.Y. Sem II', SY_SEM1: 'S.Y. Sem I', SY_SEM2: 'S.Y. Sem II', TY_SEM1: 'T.Y. Sem I', TY_SEM2: 'T.Y. Sem II', '4Y_SEM1': '4Y Sem I', '4Y_SEM2': '4Y Sem II' }
+
+function ExamDetailsSection({ exams, yearOfStudy }) {
+  const filteredExams = filterExamsByYear(exams, yearOfStudy)
+  const entries = Object.entries(filteredExams)
+  return (
+    <Section title="Previous Exam Details">
+      {entries.length === 0 ? (
+        <p className="text-sm text-slate-500 col-span-2">No exam details filled.</p>
+      ) : (
+        <div className="col-span-2 overflow-x-auto">
+          <div className="rounded-lg border-2 border-slate-400 overflow-hidden">
+            <table className="w-full text-xs border-collapse">
+              <thead className="bg-slate-100 border-b-2 border-slate-400">
+                <tr>
+                  {['Exam','Institute','Board/Univ.','Month & Year','Seat No.','Marks','Out of','%','Class/Grade','Remark'].map(h => (
+                    <th key={h} className="border border-slate-200 px-2 py-1 text-left text-xs font-bold uppercase tracking-wide text-slate-600 whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map(([type, r]) => (
+                  <tr key={type} className="even:bg-slate-50 hover:bg-blue-50 transition">
+                    <td className="border border-slate-200 px-2 py-1 font-semibold text-slate-700 whitespace-nowrap">{EXAM_LABEL[type] || type}</td>
+                    <td className="border border-slate-200 px-2 py-1">{r.institute || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1">{r.board || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.month_year || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1">{r.seat_no || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1">{r.marks_obtained || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1">{r.marks_max || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1">{r.percentage ? `${r.percentage}%` : '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1">{r.class_grade || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1">{r.remark || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </Section>
   )
 }
 

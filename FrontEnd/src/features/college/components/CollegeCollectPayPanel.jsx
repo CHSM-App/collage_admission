@@ -285,7 +285,7 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
                 </button>
                 {receiptsOpen && (
                   <div className="mt-3">
-                    <PaymentReceipts applicationId={appId} />
+                    <PaymentReceipts applicationId={appId} hideTypes={['application_fee']} />
                   </div>
                 )}
               </div>

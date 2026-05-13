@@ -9,6 +9,21 @@ import { getApplicationForm } from '../../../services/applicationService.js'
 
 const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year', 4: '4Y — Fourth Year', 5: '5Y — Fifth Year' }
 
+// Exam types that are relevant up to (and including) each year of study.
+// Applying for FY → only SSC + HSC; SY → + FY sems; TY → + SY sems; etc.
+const ALLOWED_EXAMS_BY_YEAR = {
+  1: ['SSC', 'HSC'],
+  2: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2'],
+  3: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2'],
+  4: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2', 'TY_SEM1', 'TY_SEM2'],
+  5: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2', 'TY_SEM1', 'TY_SEM2', '4Y_SEM1', '4Y_SEM2'],
+}
+
+function filterExamsByYear(exams, yearOfStudy) {
+  const allowed = ALLOWED_EXAMS_BY_YEAR[yearOfStudy] || ALLOWED_EXAMS_BY_YEAR[1]
+  return Object.fromEntries(Object.entries(exams || {}).filter(([type]) => allowed.includes(type)))
+}
+
 export default function ApplicationPrintView({ appId, regNumber, onClose }) {
   const [data, setData]       = useState(null)
   const [loading, setLoading] = useState(true)
@@ -45,8 +60,8 @@ export default function ApplicationPrintView({ appId, regNumber, onClose }) {
   const fullName = [app.app_surname, app.app_first_name, app.app_middle_name].filter(Boolean).join(' ')
   const address  = [app.app_address, app.app_taluka, app.app_district, app.app_state].filter(Boolean).join(', ')
 
-  const ROW_LABEL = { SSC: 'SSC', HSC: 'HSC', FY_SEM1: 'F.Y. Sem I', FY_SEM2: 'F.Y. Sem II', SY_SEM1: 'S.Y. Sem I', SY_SEM2: 'S.Y. Sem II' }
-  const examEntries = Object.entries(previous_exams || {})
+  const ROW_LABEL = { SSC: 'SSC', HSC: 'HSC', FY_SEM1: 'F.Y. Sem I', FY_SEM2: 'F.Y. Sem II', SY_SEM1: 'S.Y. Sem I', SY_SEM2: 'S.Y. Sem II', TY_SEM1: 'T.Y. Sem I', TY_SEM2: 'T.Y. Sem II', '4Y_SEM1': '4Y Sem I', '4Y_SEM2': '4Y Sem II' }
+  const examEntries = Object.entries(filterExamsByYear(previous_exams, app.year_of_study))
 
   return (
     <div className="mt-3 rounded-xl border border-slate-200 bg-white overflow-hidden">
@@ -209,7 +224,7 @@ function PRow({ label, value, full }) {
 }
 
 // ── Build full self-contained HTML for print ─────────────────
-const PRINT_ROW_LABEL = { SSC: 'SSC', HSC: 'HSC', FY_SEM1: 'F.Y. Sem I', FY_SEM2: 'F.Y. Sem II', SY_SEM1: 'S.Y. Sem I', SY_SEM2: 'S.Y. Sem II' }
+const PRINT_ROW_LABEL = { SSC: 'SSC', HSC: 'HSC', FY_SEM1: 'F.Y. Sem I', FY_SEM2: 'F.Y. Sem II', SY_SEM1: 'S.Y. Sem I', SY_SEM2: 'S.Y. Sem II', TY_SEM1: 'T.Y. Sem I', TY_SEM2: 'T.Y. Sem II', '4Y_SEM1': '4Y Sem I', '4Y_SEM2': '4Y Sem II' }
 
 function buildHTML(data, regNumber) {
   const { application: app, previous_exams, documents } = data
@@ -239,7 +254,7 @@ function buildHTML(data, regNumber) {
       </div>`
   }
 
-  const examEntries = Object.entries(previous_exams || {})
+  const examEntries = Object.entries(filterExamsByYear(previous_exams, app.year_of_study))
   const examTableHTML = examEntries.length === 0
     ? `<tr><td colspan="10" style="padding:8px 10px;font-size:11.5px;color:#94a3b8;font-style:italic;">No exam details filled.</td></tr>`
     : examEntries.map(([type, r]) => `
