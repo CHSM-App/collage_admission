@@ -491,10 +491,12 @@ router.post('/verify', async (req, res) => {
             .input('amount',  mssql.Decimal,  app.application_fee)
             .input('orderId', mssql.NVarChar, razorpay_order_id)
             .input('payId',   mssql.NVarChar, razorpay_payment_id)
+            .input('paidBy',  mssql.NVarChar, 'student')
+            .input('userId',  mssql.Int,      req.user.id)
             .query(`
               INSERT INTO payments (application_id, payment_type, amount, status,
-                razorpay_order_id, razorpay_payment_id, completed_at)
-              VALUES (@appId, @ptype, @amount, 'success', @orderId, @payId, GETDATE())
+                razorpay_order_id, razorpay_payment_id, completed_at, paid_by, paid_by_user_id)
+              VALUES (@appId, @ptype, @amount, 'success', @orderId, @payId, GETDATE(), @paidBy, @userId)
             `);
 
           // WHERE status = 'draft' makes this a no-op if somehow called twice
@@ -563,16 +565,19 @@ router.post('/verify', async (req, res) => {
           collegeFeeAlreadyProcessed = true;
           await tx.rollback();
         } else {
+          const isCollegePaying = req.user.role === 'college';
           await tx.request()
             .input('appId',   mssql.Int,      appId)
             .input('ptype',   mssql.NVarChar, 'college_fee')
             .input('amount',  mssql.Decimal,  amount)
             .input('orderId', mssql.NVarChar, razorpay_order_id)
             .input('payId',   mssql.NVarChar, razorpay_payment_id)
+            .input('paidBy',  mssql.NVarChar, isCollegePaying ? 'college' : 'student')
+            .input('userId',  mssql.Int,      req.user.staff_id || req.user.id)
             .query(`
               INSERT INTO payments (application_id, payment_type, amount, status,
-                razorpay_order_id, razorpay_payment_id, completed_at)
-              VALUES (@appId, @ptype, @amount, 'success', @orderId, @payId, GETDATE())
+                razorpay_order_id, razorpay_payment_id, completed_at, paid_by, paid_by_user_id)
+              VALUES (@appId, @ptype, @amount, 'success', @orderId, @payId, GETDATE(), @paidBy, @userId)
             `);
 
           // Sum total paid within the transaction so the count is consistent

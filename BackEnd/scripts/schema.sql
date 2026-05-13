@@ -502,6 +502,8 @@ CREATE TABLE payments (
     razorpay_payment_id  NVARCHAR(100) NULL,
     status               NVARCHAR(20)  NOT NULL DEFAULT 'pending'
                          CHECK (status IN ('pending','success','failed','cancelled')),
+    paid_by              NVARCHAR(10)  NULL CHECK (paid_by IN ('student','college')),
+    paid_by_user_id      INT           NULL,  -- students.id or college_staff.id (or colleges.id for main admin)
     attempted_at         DATETIME2 DEFAULT GETDATE(),
     completed_at         DATETIME2 NULL
 );

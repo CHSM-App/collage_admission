@@ -732,13 +732,14 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
       await tx.request()
         .input('appId',  mssqlShared.Int,      appId)
         .input('amount', mssqlShared.Decimal,   amt)
+        .input('userId', mssqlShared.Int,       req.user.staff_id || req.user.id)
         .query(`
           INSERT INTO payments (application_id, payment_type, amount, status,
-            razorpay_order_id, razorpay_payment_id, completed_at)
+            razorpay_order_id, razorpay_payment_id, completed_at, paid_by, paid_by_user_id)
           VALUES (@appId, 'college_fee', @amount, 'success',
             CONCAT('CASH-', CAST(@appId AS NVARCHAR), '-', CAST(CHECKSUM(NEWID()) AS NVARCHAR)),
             CONCAT('CASH-', FORMAT(GETDATE(),'yyyyMMddHHmmss')),
-            GETDATE())
+            GETDATE(), 'college', @userId)
         `);
 
       if (firstPaid) {

@@ -353,13 +353,7 @@ router.get('/applications/:id/form', async (req, res) => {
                COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
                ap.academic_year AS period_ay,
                s.email AS student_email, s.full_name AS student_name, s.phone AS student_phone,
-               s.surname, s.first_name, s.middle_name, s.mother_name,
-               s.sex, s.birth_date, s.birth_place, s.birth_state, s.nationality,
-               s.marital_status, s.religion, s.caste, s.mother_tongue,
-               s.height_cm, s.weight_kg, s.blood_group,
-               s.father_full_name, s.father_occupation, s.annual_income,
-               s.son_daughter_number, s.aadhaar, s.abc_id, s.prn,
-               s.bank_account_number, s.bank_ifsc, s.bank_name, s.bank_branch
+               s.prn
         FROM applications a
         JOIN colleges         c  ON c.id       = a.college_id
         LEFT JOIN faculty_master  cr ON cr.code_no  = a.course_id AND cr.college_id = a.college_id
@@ -474,14 +468,7 @@ router.get('/student-profile/autofill', async (req, res) => {
     const profRes = await db.request()
       .input('sid', mssql.Int, parseInt(student_id))
       .query(`
-        SELECT full_name, email, phone, city, address,
-               surname, first_name, middle_name, mother_name,
-               sex, birth_date, birth_place, birth_taluka, birth_district, birth_state,
-               nationality, marital_status, religion, caste, mother_tongue,
-               height_cm, weight_kg, blood_group,
-               father_full_name, father_occupation, annual_income, son_daughter_number,
-               aadhaar, abc_id, prn,
-               bank_account_number AS bank_account, bank_ifsc, bank_name, bank_branch
+        SELECT full_name, email, phone, city, address, prn
         FROM students WHERE id = @sid
       `);
 

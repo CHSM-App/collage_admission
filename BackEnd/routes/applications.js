@@ -333,9 +333,10 @@ router.post('/:id/submit', async (req, res) => {
         .input('appId',  mssql.Int,     appId)
         .input('ptype',  mssql.NVarChar,'application_fee')
         .input('amount', mssql.Decimal, app.application_fee)
+        .input('userId', mssql.Int,     req.user.id)
         .query(`
-          INSERT INTO payments (application_id, payment_type, amount, status, completed_at)
-          VALUES (@appId, @ptype, @amount, 'success', GETDATE())
+          INSERT INTO payments (application_id, payment_type, amount, status, completed_at, paid_by, paid_by_user_id)
+          VALUES (@appId, @ptype, @amount, 'success', GETDATE(), 'student', @userId)
         `);
 
       await tx.request()
@@ -422,9 +423,10 @@ router.post('/:id/pay-college-fee', async (req, res) => {
         .input('appId',  mssql.Int,     appId)
         .input('ptype',  mssql.NVarChar,'college_fee')
         .input('amount', mssql.Decimal, amount)
+        .input('userId', mssql.Int,     req.user.id)
         .query(`
-          INSERT INTO payments (application_id, payment_type, amount, status, completed_at)
-          VALUES (@appId, @ptype, @amount, 'success', GETDATE())
+          INSERT INTO payments (application_id, payment_type, amount, status, completed_at, paid_by, paid_by_user_id)
+          VALUES (@appId, @ptype, @amount, 'success', GETDATE(), 'student', @userId)
         `);
 
       await tx.request()
