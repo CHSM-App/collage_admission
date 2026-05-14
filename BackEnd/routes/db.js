@@ -9,7 +9,7 @@ const sqlConfig = {
     port: parseInt(process.env.DB_PORT),
     options: {
         encrypt: true,
-        trustServerCertificate: process.env.NODE_ENV !== 'production'
+        trustServerCertificate: true
     },
     pool: {
         max: 30,                       // match max concurrent VUs in load test

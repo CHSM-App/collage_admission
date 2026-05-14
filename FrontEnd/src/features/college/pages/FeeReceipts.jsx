@@ -129,6 +129,8 @@ export default function FeeReceipts({ collegeId }) {
           <option value="1">FY</option>
           <option value="2">SY</option>
           <option value="3">TY</option>
+          <option value="4">4Y</option>
+          <option value="5">5Y</option>
         </select>
       </div>
 

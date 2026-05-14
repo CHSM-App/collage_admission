@@ -15,9 +15,7 @@ import FeesMaster          from './masters/FeesMaster.jsx'
 import DocumentsMaster     from './masters/DocumentsMaster.jsx'
 import ClassMaster         from './masters/ClassMaster.jsx'
 import FeeReceipts         from './FeeReceipts.jsx'
-import BonafideCertificate     from './certificates/BonafideCertificate.jsx'
-import CharacterCertificate    from './certificates/CharacterCertificate.jsx'
-import NoObjectionCertificate  from './certificates/NoObjectionCertificate.jsx'
+import Certificates from './certificates/Certificates.jsx'
 
 function ReadOnlyBanner({ label }) {
   return (
@@ -91,10 +89,7 @@ export default function CollegeDashboard() {
   if (section === 'fee-receipts')     return navAllowed('fee-receipts')     ? <FeeReceipts collegeId={user?.id} />                                                                                                             : <NavBlocked />
 
   // Certificates
-  const certReadOnly = readOnly('certificates')
-  if (section === 'cert-bonafide')  return navAllowed('cert-bonafide')  ? <>{certReadOnly && <ReadOnlyBanner label="Bonafide Certificate" />}<BonafideCertificate     collegeId={user?.id} readOnly={certReadOnly} /></> : <NavBlocked />
-  if (section === 'cert-character') return navAllowed('cert-character') ? <>{certReadOnly && <ReadOnlyBanner label="Character Certificate" />}<CharacterCertificate    collegeId={user?.id} readOnly={certReadOnly} /></> : <NavBlocked />
-  if (section === 'cert-noc')       return navAllowed('cert-noc')       ? <>{certReadOnly && <ReadOnlyBanner label="No Objection Certificate" />}<NoObjectionCertificate collegeId={user?.id} readOnly={certReadOnly} /></> : <NavBlocked />
+  if (section === 'certificates') return navAllowed('certificates') ? <Certificates collegeId={user?.id} readOnly={readOnly('certificates')} /> : <NavBlocked />
 
   return <Overview user={user} navAllowed={navAllowed} />
 }

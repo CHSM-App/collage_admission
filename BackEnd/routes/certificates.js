@@ -30,7 +30,7 @@ router.use(authenticate, requireCollegeAccess)
 
 const cid = (req) => parseInt(req.params.collegeId)
 
-const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY' }
+const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 
 function pad4(n) { return String(n).padStart(4, '0') }
 
@@ -92,10 +92,10 @@ router.get('/:collegeId/student-lookup', requirePerm('certificates'), async (req
           a.app_birth_date,
           a.app_caste,
           a.app_prn,
-          s.full_name  AS student_full_name,
-          s.gender     AS student_gender,
-          s.dob        AS student_dob,
-          s.category   AS student_category,
+          s.full_name AS student_full_name,
+          s.gender    AS student_gender,
+          s.dob       AS student_dob,
+          s.category  AS student_category,
           fm.degree_course_code,
           fm.degree_course_name
         FROM applications a
@@ -119,13 +119,13 @@ router.get('/:collegeId/student-lookup', requirePerm('certificates'), async (req
       data: {
         registration_number: a.registration_number,
         student_name:        appName || a.student_full_name || '',
-        gender:              a.student_gender   || '',
-        birth_date:          a.student_dob,
-        caste:               a.app_category     || a.student_category || '',
+        gender:              a.app_sex          || a.student_gender  || '',
+        birth_date:          a.app_birth_date   || a.student_dob     || null,
+        caste:               a.app_caste        || a.app_category    || a.student_category || '',
         roll_no:             a.roll_number      || '',
         academic_year:       a.academic_year    || '',
         class_name:          cls.trim(),
-        prn_no:              '',
+        prn_no:              a.app_prn          || '',
       },
     })
   } catch (e) {

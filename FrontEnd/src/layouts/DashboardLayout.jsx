@@ -38,10 +38,8 @@ const sidebarItems = {
     { label: 'Division Master',   to: `${DASHBOARD_PATHS.college}?section=master-division`,      perm: 'masters' },
     { label: 'Fees Master',       to: `${DASHBOARD_PATHS.college}?section=master-fees`,          perm: 'masters' },
     { label: 'Req. Documents',    to: `${DASHBOARD_PATHS.college}?section=master-documents`,     perm: 'masters' },
-    { label: '— Certificates —',         to: null },
-    { label: 'Bonafide Certificate',     to: `${DASHBOARD_PATHS.college}?section=cert-bonafide`,  perm: 'certificates' },
-    { label: 'Character Certificate',    to: `${DASHBOARD_PATHS.college}?section=cert-character`, perm: 'certificates' },
-    { label: 'No Objection Certificate', to: `${DASHBOARD_PATHS.college}?section=cert-noc`,       perm: 'certificates' },
+    { label: '— Certificates —',  to: null },
+    { label: 'Certificates',      to: `${DASHBOARD_PATHS.college}?section=certificates`, perm: 'certificates' },
   ],
   admin: [
     { label: 'Colleges & Roles', to: DASHBOARD_PATHS.admin },
