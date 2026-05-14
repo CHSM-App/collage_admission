@@ -89,12 +89,12 @@ export default function ClassMaster({ collegeId }) {
       .catch(() => setError('Failed to load programs.'))
   }, [collegeId])
 
-  const load = useCallback(() => {
-    setLoading(true)
+  const load = useCallback((silent = false) => {
+    if (!silent) setLoading(true)
     getClasses(collegeId)
       .then(r => setRows(r.data.data || []))
       .catch(() => setError('Failed to load classes.'))
-      .finally(() => setLoading(false))
+      .finally(() => { if (!silent) setLoading(false) })
   }, [collegeId])
 
   useEffect(() => { load() }, [load])
@@ -114,7 +114,7 @@ export default function ClassMaster({ collegeId }) {
       })
       setShowForm(false)
       setForm({ ...EMPTY_FORM, faculty_master_id: programs[0]?.code_no || '' })
-      load()
+      load(true)
     } catch (err) {
       setFormError(err?.response?.data?.message || 'Save failed.')
     } finally { setSaving(false) }
@@ -136,7 +136,7 @@ export default function ClassMaster({ collegeId }) {
         is_active: editActive,
       })
       setEditId(null)
-      load()
+      load(true)
     } catch (err) {
       alert(err?.response?.data?.message || 'Save failed.')
     } finally { setEditSaving(false) }
@@ -146,7 +146,7 @@ export default function ClassMaster({ collegeId }) {
     if (!confirm(`Delete class "${row.degree_course_code} — ${yearShort(row.year_of_study)}"? This cannot be undone.`)) return
     try {
       await deleteClass(collegeId, row.id)
-      load()
+      load(true)
     } catch (err) {
       alert(err?.response?.data?.message || 'Delete failed.')
     }

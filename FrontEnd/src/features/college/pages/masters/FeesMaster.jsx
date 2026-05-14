@@ -58,15 +58,15 @@ export default function FeesMaster({ collegeId }) {
   const [cwError, setCwError]     = useState('')
   const [cwSuccess, setCwSuccess] = useState('')
 
-  function load() {
-    setLoading(true)
+  function load(silent = false) {
+    if (!silent) setLoading(true)
     Promise.all([
       getFeesList(collegeId),
       getBankLedgers(collegeId),
     ]).then(([fRes, bRes]) => {
       setRows(fRes.data.data || [])
       setBanks((bRes.data.data || []).filter(b => b.is_active))
-    }).catch(() => setError('Failed to load.')).finally(() => setLoading(false))
+    }).catch(() => setError('Failed to load.')).finally(() => { if (!silent) setLoading(false) })
   }
   useEffect(() => { load() }, [collegeId])
 
@@ -81,14 +81,14 @@ export default function FeesMaster({ collegeId }) {
     try {
       if (modal === 'new') await createFees(collegeId, form)
       else await updateFees(collegeId, modal.fees_code, form)
-      setModal(null); load()
+      setModal(null); load(true)
     } catch (e) { setError(e?.response?.data?.message || 'Save failed.') }
     finally { setSaving(false) }
   }
 
   async function softDelete(row) {
     if (!confirm(`Deactivate "${row.fees_head}"?`)) return
-    try { await deleteFees(collegeId, row.fees_code); load() }
+    try { await deleteFees(collegeId, row.fees_code); load(true) }
     catch { alert('Failed.') }
   }
 

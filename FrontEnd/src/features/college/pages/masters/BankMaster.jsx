@@ -29,12 +29,12 @@ export default function BankMaster({ collegeId }) {
     return sortDir === 'asc' ? cmp : -cmp
   }), [rows, sortCol, sortDir])
 
-  function load() {
-    setLoading(true)
+  function load(silent = false) {
+    if (!silent) setLoading(true)
     getBankLedgers(collegeId)
       .then(r => setRows(r.data.data || []))
       .catch(() => setError('Failed to load.'))
-      .finally(() => setLoading(false))
+      .finally(() => { if (!silent) setLoading(false) })
   }
   useEffect(() => { load() }, [collegeId])
 
@@ -51,14 +51,14 @@ export default function BankMaster({ collegeId }) {
     try {
       if (modal === 'new') await createBankLedger(collegeId, form)
       else await updateBankLedger(collegeId, modal.ledger_code, form)
-      closeModal(); load()
+      closeModal(); load(true)
     } catch (e) { setError(e?.response?.data?.message || 'Save failed.') }
     finally { setSaving(false) }
   }
 
   async function softDelete(row) {
     if (!confirm(`Deactivate "${row.bank_name}"?`)) return
-    try { await deleteBankLedger(collegeId, row.ledger_code); load() }
+    try { await deleteBankLedger(collegeId, row.ledger_code); load(true) }
     catch { alert('Failed.') }
   }
 

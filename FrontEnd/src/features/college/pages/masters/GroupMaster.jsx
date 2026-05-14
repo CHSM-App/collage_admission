@@ -62,13 +62,13 @@ export default function GroupMaster({ collegeId }) {
     if (selFacultyRow && selSem > semCount) setSelSem(1)
   }, [selFacultyRow, semCount, selSem])
 
-  const loadGroups = useCallback(() => {
+  const loadGroups = useCallback((silent = false) => {
     if (!selFaculty) return
-    setLoading(true)
+    if (!silent) setLoading(true)
     getGroups(collegeId, selFaculty, selSem)
       .then(r => setGroups(r.data.data || []))
       .catch(() => {})
-      .finally(() => setLoading(false))
+      .finally(() => { if (!silent) setLoading(false) })
   }, [collegeId, selFaculty, selSem])
 
   useEffect(() => { loadGroups() }, [loadGroups])
@@ -136,14 +136,14 @@ export default function GroupMaster({ collegeId }) {
     try {
       if (modal === 'new') await createGroup(collegeId, payload)
       else await updateGroup(collegeId, modal.id, payload)
-      setModal(null); loadGroups()
+      setModal(null); loadGroups(true)
     } catch (e) { setError(e?.response?.data?.message || 'Save failed.') }
     finally { setSaving(false) }
   }
 
   async function softDelete(g) {
     if (!confirm(`Deactivate group "${g.group_code}"?`)) return
-    try { await deleteGroup(collegeId, g.id); loadGroups() }
+    try { await deleteGroup(collegeId, g.id); loadGroups(true) }
     catch { alert('Failed.') }
   }
 

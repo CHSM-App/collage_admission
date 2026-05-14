@@ -49,13 +49,14 @@ export default function CourseMaster({ collegeId }) {
       })
   }, [collegeId])
 
-  const loadRows = useCallback(() => {
+  const loadRows = useCallback((silent = false) => {
     if (!selFaculty) return
-    setLoading(true); setError(''); setSuccess('')
+    if (!silent) setLoading(true)
+    setError(''); setSuccess('')
     getCourses(collegeId, selFaculty, selSem)
       .then(r => { setRows((r.data.data || []).filter(row => row.is_active !== false).map(row => ({ ...row, _key: row.id, is_new: false }))); setDirty(false) })
       .catch(() => setError('Failed to load subjects.'))
-      .finally(() => setLoading(false))
+      .finally(() => { if (!silent) setLoading(false) })
   }, [collegeId, selFaculty, selSem])
 
   useEffect(() => { loadRows() }, [loadRows])
@@ -130,7 +131,7 @@ export default function CourseMaster({ collegeId }) {
       setSuccess('Saved successfully.')
       setDirty(false)
       setTimeout(() => setSuccess(''), 3000)
-      loadRows()
+      loadRows(true)
     } catch (e) { setError(e?.response?.data?.message || 'Save failed.') }
     finally { setSaving(false) }
   }

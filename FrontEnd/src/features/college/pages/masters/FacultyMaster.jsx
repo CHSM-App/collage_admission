@@ -35,12 +35,12 @@ export default function FacultyMaster({ collegeId }) {
   const [sortCol, setSortCol] = useState('degree_course_code')
   const [sortDir, setSortDir] = useState('asc')
 
-  function load() {
-    setLoading(true)
+  function load(silent = false) {
+    if (!silent) setLoading(true)
     getFaculty(collegeId)
       .then(r => setRows(r.data.data || []))
       .catch(() => setError('Failed to load.'))
-      .finally(() => setLoading(false))
+      .finally(() => { if (!silent) setLoading(false) })
   }
   useEffect(() => { load() }, [collegeId])
 
@@ -82,7 +82,7 @@ export default function FacultyMaster({ collegeId }) {
       } else {
         await updateFaculty(collegeId, modal.code_no, form)
       }
-      closeModal(); load()
+      closeModal(); load(true)
     } catch (e) {
       // Prefer the server's user-friendly message; fall back to a useful
       // generic per-failure-mode rather than a bare "Save failed."
@@ -107,7 +107,7 @@ export default function FacultyMaster({ collegeId }) {
     if (!confirm(`Deactivate "${row.degree_course_name}"?`)) return
     try {
       await deleteFaculty(collegeId, row.code_no)
-      load()
+      load(true)
     } catch { alert('Delete failed.') }
   }
 
