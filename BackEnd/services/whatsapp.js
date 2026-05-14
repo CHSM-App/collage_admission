@@ -1,4 +1,4 @@
-/**
+/*
  * SMSala WhatsApp Messaging Service
  * Docs: https://api2.smsala.com
  *

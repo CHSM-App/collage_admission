@@ -54,9 +54,7 @@ const NAV_ITEMS = [
   'master-division',
   'master-fees',
   'master-documents',
-  'cert-bonafide',
-  'cert-character',
-  'cert-noc',
+  'certificates',
 ];
 
 // ── PUT /admin/colleges/:id ──────────────────────────────────
