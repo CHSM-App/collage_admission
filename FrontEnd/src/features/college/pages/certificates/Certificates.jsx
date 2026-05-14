@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import { useAuthContext } from '../../../../context/AuthContext.jsx'
 import {
   lookupStudent,
   getBonafideList, getBonafideNextNo, createBonafide,
@@ -69,6 +70,9 @@ function emptyForm(type) {
 // ─── Main component ───────────────────────────────────────────
 
 export default function Certificates({ collegeId, readOnly }) {
+  const { user } = useAuthContext()
+  const collegeName    = user?.name    || ''
+  const collegeAddress = user?.address || (user?.city || '')
   const [certType,    setCertType]    = useState('bonafide')
   const [form,        setForm]        = useState(() => emptyForm('bonafide'))
   const [certNo,      setCertNo]      = useState('')
@@ -244,10 +248,11 @@ export default function Certificates({ collegeId, readOnly }) {
 
   // ── Print ───────────────────────────────────────────────────
   function handlePrint(row) {
-    const type = row._type || certType
-    const html = type === 'bonafide'  ? buildBonafideHTML(row)
-               : type === 'character' ? buildCharacterHTML(row)
-               : buildNocHTML(row)
+    const type    = row._type || certType
+    const college = { name: collegeName, address: collegeAddress }
+    const html = type === 'bonafide'  ? buildBonafideHTML(row, college)
+               : type === 'character' ? buildCharacterHTML(row, college)
+               : buildNocHTML(row, college)
     const win = window.open('', '_blank', 'width=860,height=900')
     if (!win) { alert('Pop-up blocked — allow pop-ups for this site to print.'); return }
     win.document.write(html)
@@ -322,7 +327,7 @@ export default function Certificates({ collegeId, readOnly }) {
                 </div>
                 <button
                   type="button"
-                  onClick={() => handlePrint({ ...issued, _type: certType })}
+                  onClick={() => handlePrint({ ...issued, _type: certType, collegeName, collegeAddress })}
                   className="shrink-0 rounded-lg bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 hover:bg-emerald-800 transition"
                 >
                   Print Now
@@ -568,7 +573,7 @@ const PRINT_BASE_CSS = `
     @page{size:A4;margin:18mm 20mm}
   }
   .meta{display:flex;justify-content:space-between;font-size:13px;color:#334155;margin-bottom:24px}
-  .title{text-align:center;font-size:18px;font-weight:bold;letter-spacing:6px;margin:18px 0 28px;text-transform:uppercase;color:#0f172a}
+  .title{text-align:center;font-size:15px;font-weight:bold;letter-spacing:4px;margin:14px 0 24px;text-transform:uppercase;color:#0f172a}
   .body{font-size:14px;line-height:1.85;text-align:justify;color:#1e293b}
   .body strong{color:#0f172a}
   .refs{margin-top:18px;font-size:13px;color:#334155}
@@ -578,7 +583,7 @@ const PRINT_BASE_CSS = `
   .sign div span{display:block;border-top:1px solid #94a3b8;margin-top:48px;padding-top:6px;min-width:200px}
 `
 
-function printShell({ accentColor, title, subtitle, certNo, dateStr, body, css = '' }) {
+function printShell({ accentColor, title, certNo, dateStr, body, collegeName = '', collegeAddress = '', css = '' }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -588,16 +593,18 @@ function printShell({ accentColor, title, subtitle, certNo, dateStr, body, css =
     ${PRINT_BASE_CSS}
     .sheet{max-width:780px;margin:0 auto;background:#fff;border:6px double ${accentColor};padding:36px 44px}
     .hdr{text-align:center;border-bottom:2px solid ${accentColor};padding-bottom:14px;margin-bottom:22px}
-    .hdr h1{font-size:22px;color:${accentColor};letter-spacing:.5px;margin-bottom:4px}
-    .hdr p{font-size:12px;color:#475569}
+    .hdr .clg-name{font-size:20px;font-weight:bold;color:${accentColor};letter-spacing:.4px;margin-bottom:4px}
+    .hdr .clg-addr{font-size:12px;color:#475569;margin-bottom:10px}
+    .hdr .cert-title{font-size:17px;font-weight:bold;letter-spacing:4px;text-transform:uppercase;color:#0f172a;margin-top:10px}
     ${css}
   </style>
 </head>
 <body>
   <div class="sheet">
     <div class="hdr">
-      <h1>${escapeHTML(title)}</h1>
-      <p>${escapeHTML(subtitle)}</p>
+      ${collegeName ? `<div class="clg-name">${escapeHTML(collegeName)}</div>` : ''}
+      ${collegeAddress ? `<div class="clg-addr">${escapeHTML(collegeAddress)}</div>` : ''}
+      <div class="cert-title">${escapeHTML(title)}</div>
     </div>
     <div class="meta">
       <span><strong>Cert. No:</strong> ${escapeHTML(certNo)}</span>
@@ -619,7 +626,7 @@ function genderVars(gender) {
   return { pronoun: f ? 'She' : 'He', possess: f ? 'her' : 'his', title: f ? 'Ms.' : 'Mr.' }
 }
 
-function buildBonafideHTML(c) {
+function buildBonafideHTML(c, college = {}) {
   const { pronoun, possess, title } = genderVars(c.gender)
   const dateStr = fmtDateIN(c.certificate_date)
   const dobStr  = c.birth_date ? fmtDateIN(c.birth_date) : '__________'
@@ -638,11 +645,11 @@ function buildBonafideHTML(c) {
     <p>This certificate is issued on ${possess} request for the purpose ${possess} may deem appropriate.</p>
   `
   return printShell({ accentColor: '#1e3a8a', title: 'BONAFIDE CERTIFICATE',
-    subtitle: 'This certificate is issued under the seal of the institution',
+    collegeName: college.name, collegeAddress: college.address,
     certNo: c.certificate_no || '', dateStr, body })
 }
 
-function buildCharacterHTML(c) {
+function buildCharacterHTML(c, college = {}) {
   const { pronoun, possess, title } = genderVars(c.gender)
   const dateStr = fmtDateIN(c.certificate_date)
   const dobStr  = c.birth_date ? fmtDateIN(c.birth_date) : '__________'
@@ -668,11 +675,11 @@ function buildCharacterHTML(c) {
     <p>We wish ${possess === 'her' ? 'her' : 'him'} every success in ${possess} future endeavours.</p>
   `
   return printShell({ accentColor: '#4c1d95', title: 'CHARACTER CERTIFICATE',
-    subtitle: 'This certificate is issued under the seal of the institution',
+    collegeName: college.name, collegeAddress: college.address,
     certNo: c.certificate_no || '', dateStr, body })
 }
 
-function buildNocHTML(c) {
+function buildNocHTML(c, college = {}) {
   const { pronoun, possess, title } = genderVars(c.gender)
   const dateStr  = fmtDateIN(c.certificate_date)
   const fromStr  = c.from_date ? fmtDateIN(c.from_date) : null
@@ -702,6 +709,6 @@ function buildNocHTML(c) {
     ${refs}
   `
   return printShell({ accentColor: '#065f46', title: 'NO OBJECTION CERTIFICATE',
-    subtitle: 'This certificate is issued under the seal of the institution',
+    collegeName: college.name, collegeAddress: college.address,
     certNo: c.certificate_no || '', dateStr, body })
 }

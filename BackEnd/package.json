@@ -5,7 +5,9 @@
   "scripts": {
     "start": "node ./bin/www",
     "dev": "nodemon ./bin/www",
-    "seed": "node scripts/seeder.js"
+    "seed": "node scripts/seeder.js",
+    "migrate": "node scripts/migrate.js",
+    "migrate:status": "node scripts/migrate.js --status"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

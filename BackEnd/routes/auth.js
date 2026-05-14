@@ -150,7 +150,7 @@ router.post('/login/college', loginLimiter, async (req, res) => {
     // 1. Try college admin first
     const adminResult = await db.request()
       .input('email', email.trim().toLowerCase())
-      .query('SELECT id, name, admin_email, admin_password_hash, city, college_code FROM colleges WHERE admin_email = @email');
+      .query('SELECT id, name, address, admin_email, admin_password_hash, city, college_code FROM colleges WHERE admin_email = @email');
 
     if (adminResult.recordset.length > 0) {
       const college = adminResult.recordset[0];
@@ -166,7 +166,7 @@ router.post('/login/college', loginLimiter, async (req, res) => {
         user: {
           id:           college.id,
           name:         college.name,
-          email:        college.admin_email,
+          address:      college.address || '',
           city:         college.city,
           college_code: college.college_code,
         },
@@ -179,7 +179,7 @@ router.post('/login/college', loginLimiter, async (req, res) => {
       .query(`
         SELECT u.id, u.full_name, u.email, u.password_hash, u.is_active,
                u.college_id, u.role_id,
-               c.name AS college_name, c.college_code,
+               c.name AS college_name, c.address AS college_address, c.college_code,
                r.role_name,
                (SELECT p.permission, p.can_write
                 FROM college_role_permissions p
@@ -227,6 +227,7 @@ router.post('/login/college', loginLimiter, async (req, res) => {
       user: {
         id:           staff.college_id,
         name:         staff.college_name,
+        address:      staff.college_address || '',
         email:        staff.email,
         college_code: staff.college_code,
         staff_id:     staff.id,
@@ -287,7 +288,7 @@ router.post('/login/college-user', loginLimiter, async (req, res) => {
       .query(`
         SELECT u.id, u.full_name, u.email, u.password_hash, u.is_active,
                u.college_id, u.role_id,
-               c.name AS college_name, c.college_code,
+               c.name AS college_name, c.address AS college_address, c.college_code,
                r.role_name,
                (SELECT p.permission, p.can_write
                 FROM college_role_permissions p
@@ -339,6 +340,7 @@ router.post('/login/college-user', loginLimiter, async (req, res) => {
       user: {
         id:           user.college_id,
         name:         user.college_name,
+        address:      user.college_address || '',
         email:        user.email,
         college_code: user.college_code,
         // staff-specific fields
