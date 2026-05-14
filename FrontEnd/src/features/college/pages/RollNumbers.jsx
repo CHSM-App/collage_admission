@@ -4,6 +4,7 @@ import { getFaculty } from '../../../services/masterService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
 import { SkeletonLine } from '../../../shared/components/Skeleton.jsx'
+import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 
@@ -34,7 +35,7 @@ export default function RollNumbers({ collegeId }) {
       const res = await generateRollNumbers(collegeId, form)
       setResult(res.data)
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to generate roll numbers.')
+      setError(getErrorMessage(err, 'Failed to generate roll numbers.'))
     } finally {
       setGenerating(false)
     }

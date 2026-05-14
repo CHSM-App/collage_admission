@@ -5,6 +5,7 @@
 import { useState } from 'react'
 import { authService, sendOtp, verifyOtp } from '../services/authService.js'
 import { validatePassword, validatePhone, formatPhone } from '../../../shared/hooks/usePasswordValidation.js'
+import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
 
 export const REG_STEPS = { FORM: 'form', OTP: 'otp' }
 
@@ -51,7 +52,7 @@ export function useStudentRegistration() {
       setInfo(data.message)
       setStep(REG_STEPS.OTP)
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to send OTP. Please try again.')
+      setError(getErrorMessage(err, 'Failed to send OTP. Please try again.'))
     } finally {
       setLoading(false)
     }
@@ -71,7 +72,7 @@ export function useStudentRegistration() {
       const session = await authService.loginByRole('student', { phone: form.phone, password: form.password })
       return session
     } catch (err) {
-      setError(err?.response?.data?.message || 'Verification failed. Please try again.')
+      setError(getErrorMessage(err, 'Verification failed. Please try again.'))
       return null
     } finally {
       setLoading(false)
@@ -87,7 +88,7 @@ export function useStudentRegistration() {
       const { data } = await sendOtp(form)
       setInfo(data.message)
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to resend OTP.')
+      setError(getErrorMessage(err, 'Failed to resend OTP.'))
     } finally {
       setLoading(false)
     }

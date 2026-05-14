@@ -22,6 +22,18 @@ api.interceptors.response.use(
   res => res,
   err => {
     const status = err.response?.status
+
+    // Tag network-level failures (no response received) with a consistent flag
+    // so every component can distinguish "offline / server unreachable" from
+    // "server returned an error" without duplicating detection logic.
+    if (!err.response && (err.code === 'ERR_NETWORK' || err.code === 'ECONNABORTED' || err.message === 'Network Error')) {
+      err.isNetworkError = true
+      err.message = navigator.onLine
+        ? 'The server could not be reached. Please try again.'
+        : 'No internet connection. Please check your network and try again.'
+      return Promise.reject(err)
+    }
+
     if (status === 401) {
       try {
         const stored = localStorage.getItem('collegeAdmissionAuth')

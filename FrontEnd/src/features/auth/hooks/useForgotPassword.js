@@ -5,6 +5,7 @@
 import { useState } from 'react'
 import { forgotPasswordSendOtp, forgotPasswordReset } from '../services/authService.js'
 import { validatePassword, validatePhone, formatPhone } from '../../../shared/hooks/usePasswordValidation.js'
+import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
 
 export const STEPS = { PHONE: 'phone', OTP: 'otp', PASSWORD: 'password', DONE: 'done' }
 
@@ -33,7 +34,7 @@ export function useForgotPassword() {
       setInfo(data.message)
       setStep(STEPS.OTP)
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to send OTP. Please try again.')
+      setError(getErrorMessage(err, 'Failed to send OTP. Please try again.'))
     } finally {
       setLoading(false)
     }
@@ -60,7 +61,7 @@ export function useForgotPassword() {
       const { data } = await forgotPasswordSendOtp(phone.trim())
       setInfo(data.message)
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to resend OTP.')
+      setError(getErrorMessage(err, 'Failed to resend OTP.'))
     } finally {
       setLoading(false)
     }

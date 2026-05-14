@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
-import { getFaculty, getDivisions, saveDivisionGrid } from '../../../../services/masterService.js'
+import { getFaculty, getDivisions, saveDivisionGrid, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
+import { getErrorMessage } from '../../../../shared/hooks/useNetworkError.js'
 
 const YEAR_LEVEL_LABELS = ['FY', 'SY', 'TY', '4Y', '5Y']
 const DIVISIONS    = ['A','B','C','D','E','F','G','H','I','J']
@@ -15,8 +16,11 @@ function yearLevelsFor(durationYears) {
 export default function DivisionMaster({ collegeId }) {
   const { canWrite } = usePermissions()
   const rw = canWrite('masters')
-  const [faculty, setFaculty]       = useState([])
-  const [selFaculty, setSelFaculty] = useState('')
+  const [faculty, setFaculty]       = useState(() => (masterCacheRead(`faculty:${collegeId}`)?.data?.data ?? []).filter(f => f.is_active))
+  const [selFaculty, setSelFaculty] = useState(() => {
+    const cached = (masterCacheRead(`faculty:${collegeId}`)?.data?.data ?? []).filter(f => f.is_active)
+    return cached.length ? cached[0].code_no : ''
+  })
   const [selYear, setSelYear]       = useState('FY')
   const [grid, setGrid]             = useState(Object.fromEntries(DIVISIONS.map(d => [d, null])))
   const [classYearCode, setClassYearCode] = useState('')
@@ -26,12 +30,14 @@ export default function DivisionMaster({ collegeId }) {
   const [error, setError]           = useState('')
 
   useEffect(() => {
-    getFaculty(collegeId)
-      .then(r => {
-        const active = (r.data.data || []).filter(f => f.is_active)
-        setFaculty(active)
-        if (active.length) setSelFaculty(active[0].code_no)
-      })
+    getFaculty(collegeId, r => {
+      const active = (r.data.data || []).filter(f => f.is_active)
+      setFaculty(active)
+    }).then(r => {
+      const active = (r.data.data || []).filter(f => f.is_active)
+      setFaculty(active)
+      if (active.length && !selFaculty) setSelFaculty(active[0].code_no)
+    })
   }, [collegeId])
 
   useEffect(() => {
@@ -39,19 +45,22 @@ export default function DivisionMaster({ collegeId }) {
     if (f) setClassYearCode(`${selYear}${f.degree_course_code}`)
   }, [selFaculty, selYear, faculty])
 
+  const applyDivisionData = (data) => {
+    const fresh = Object.fromEntries(DIVISIONS.map(d => [d, null]))
+    for (const row of data || []) {
+      if (row.is_active) fresh[row.division_letter] = row.funding_type
+    }
+    setGrid(fresh)
+  }
+
   const loadGrid = useCallback(() => {
     if (!selFaculty) return
-    setLoading(true)
-    getDivisions(collegeId, selFaculty, selYear)
-      .then(r => {
-        const fresh = Object.fromEntries(DIVISIONS.map(d => [d, null]))
-        for (const row of r.data.data || []) {
-          if (row.is_active) fresh[row.division_letter] = row.funding_type
-        }
-        setGrid(fresh)
-      })
+    const wasMiss = !masterCacheHas(`division:${collegeId}:${selFaculty}:${selYear}`)
+    if (wasMiss) setLoading(true)
+    getDivisions(collegeId, selFaculty, selYear, r => applyDivisionData(r.data.data))
+      .then(r => applyDivisionData(r.data.data))
       .catch(() => {})
-      .finally(() => setLoading(false))
+      .finally(() => { if (wasMiss) setLoading(false) })
   }, [collegeId, selFaculty, selYear])
 
   useEffect(() => { loadGrid() }, [loadGrid])
@@ -76,7 +85,7 @@ export default function DivisionMaster({ collegeId }) {
         divisions,
       })
       setSaved(true)
-    } catch (e) { setError(e?.response?.data?.message || 'Save failed.') }
+    } catch (e) { setError(getErrorMessage(e, 'Save failed.')) }
     finally { setSaving(false) }
   }
 

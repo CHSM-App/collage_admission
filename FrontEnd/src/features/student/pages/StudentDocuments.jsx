@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 import { getDocumentTypes, getStudentDocuments, uploadStudentDocument, deleteStudentDocument } from '../../../services/documentService.js'
 import { SkeletonCards } from '../../../shared/components/Skeleton.jsx'
+import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000/').replace(/\/$/, '')
 
@@ -294,7 +295,7 @@ function UploadButton({ documentTypeId, documentName, studentId, isPhoto, isLock
       await uploadStudentDocument(studentId, fd)
       onSuccess()
     } catch (err) {
-      setError(err?.response?.data?.message || 'Upload failed.')
+      setError(getErrorMessage(err, 'Upload failed.'))
     } finally {
       setUploading(false)
     }
@@ -343,7 +344,7 @@ function DeleteButton({ docId, onSuccess }) {
       await deleteStudentDocument(docId)
       onSuccess()
     } catch (err) {
-      setError(err?.response?.data?.message || 'Delete failed.')
+      setError(getErrorMessage(err, 'Delete failed.'))
       setDeleting(false)
     }
   }

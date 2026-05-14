@@ -1,7 +1,9 @@
 import { useEffect, useState, useMemo } from 'react'
-import { getFeesList, createFees, updateFees, deleteFees, getBankLedgers, getFaculty, getClasswiseFees, saveClasswiseFees } from '../../../../services/masterService.js'
+import { getFeesList, createFees, updateFees, deleteFees, getBankLedgers, getFaculty, getClasswiseFees, saveClasswiseFees, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
+import { useToast } from '../../../../context/ToastContext.jsx'
+import { getErrorMessage } from '../../../../shared/hooks/useNetworkError.js'
 
 const FEES_TYPES = ['Student','Misc','ExamFees']
 const ALL_YEAR_LEVELS = ['FY','SY','TY','4Y','5Y']
@@ -24,9 +26,10 @@ const EMPTY_FEE = {
 export default function FeesMaster({ collegeId }) {
   const { canWrite } = usePermissions()
   const rw = canWrite('masters')
-  const [rows, setRows]           = useState([])
-  const [banks, setBanks]         = useState([])
-  const [loading, setLoading]     = useState(true)
+  const toast = useToast()
+  const [rows, setRows]           = useState(() => masterCacheRead(`fees:${collegeId}`)?.data?.data ?? [])
+  const [banks, setBanks]         = useState(() => (masterCacheRead(`bank:${collegeId}`)?.data?.data ?? []).filter(b => b.is_active))
+  const [loading, setLoading]     = useState(() => !masterCacheRead(`fees:${collegeId}`) || !masterCacheRead(`bank:${collegeId}`))
   const [modal, setModal]         = useState(null)
   const [form, setForm]           = useState(EMPTY_FEE)
   const [saving, setSaving]       = useState(false)
@@ -59,14 +62,15 @@ export default function FeesMaster({ collegeId }) {
   const [cwSuccess, setCwSuccess] = useState('')
 
   function load(silent = false) {
-    if (!silent) setLoading(true)
+    const wasMiss = !masterCacheHas(`fees:${collegeId}`) || !masterCacheHas(`bank:${collegeId}`)
+    if (!silent && wasMiss) setLoading(true)
     Promise.all([
-      getFeesList(collegeId),
-      getBankLedgers(collegeId),
+      getFeesList(collegeId,    r => setRows(r.data.data || [])),
+      getBankLedgers(collegeId, r => setBanks((r.data.data || []).filter(b => b.is_active))),
     ]).then(([fRes, bRes]) => {
       setRows(fRes.data.data || [])
       setBanks((bRes.data.data || []).filter(b => b.is_active))
-    }).catch(() => setError('Failed to load.')).finally(() => { if (!silent) setLoading(false) })
+    }).catch(() => setError('Failed to load.')).finally(() => { if (!silent && wasMiss) setLoading(false) })
   }
   useEffect(() => { load() }, [collegeId])
 
@@ -82,20 +86,23 @@ export default function FeesMaster({ collegeId }) {
       if (modal === 'new') await createFees(collegeId, form)
       else await updateFees(collegeId, modal.fees_code, form)
       setModal(null); load(true)
-    } catch (e) { setError(e?.response?.data?.message || 'Save failed.') }
+    } catch (e) { setError(getErrorMessage(e, 'Save failed.')) }
     finally { setSaving(false) }
   }
 
   async function softDelete(row) {
     if (!confirm(`Deactivate "${row.fees_head}"?`)) return
     try { await deleteFees(collegeId, row.fees_code); load(true) }
-    catch { alert('Failed.') }
+    catch { toast.error('Failed.') }
   }
 
   // ── Classwise Fees ──────────────────────────────────────────
   async function openCw() {
     setCwModal(true); setCwError(''); setCwSuccess('')
-    const r = await getFaculty(collegeId)
+    const r = await getFaculty(collegeId, bg => {
+      const active = (bg.data.data || []).filter(f => f.is_active)
+      setCwFaculty(active)
+    })
     const active = (r.data.data || []).filter(f => f.is_active)
     setCwFaculty(active)
     if (active.length) { setCwSelFac(active[0].code_no) }

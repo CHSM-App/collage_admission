@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { getFaculty, createFaculty, updateFaculty, deleteFaculty } from '../../../../services/masterService.js'
+import { getFaculty, createFaculty, updateFaculty, deleteFaculty, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
+import { useToast } from '../../../../context/ToastContext.jsx'
+import { getErrorMessage } from '../../../../shared/hooks/useNetworkError.js'
 
 // Duration-driven slot count: sem codes = duration*2, year codes = duration.
 // Matrix: 2yr→4/2, 3yr→6/3, 4yr→8/4, 5yr→10/5.
@@ -25,8 +27,9 @@ const YEAR_LABELS = ['FY', 'SY', 'TY', 'Year 4', 'Year 5']
 export default function FacultyMaster({ collegeId }) {
   const { canWrite } = usePermissions()
   const rw = canWrite('masters')
-  const [rows, setRows]       = useState([])
-  const [loading, setLoading] = useState(true)
+  const toast = useToast()
+  const [rows, setRows]       = useState(() => masterCacheRead(`faculty:${collegeId}`)?.data?.data ?? [])
+  const [loading, setLoading] = useState(() => !masterCacheRead(`faculty:${collegeId}`))
   const [search, setSearch]   = useState('')
   const [modal, setModal]     = useState(null)   // null | 'new' | row object
   const [form, setForm]       = useState(EMPTY)
@@ -36,11 +39,12 @@ export default function FacultyMaster({ collegeId }) {
   const [sortDir, setSortDir] = useState('asc')
 
   function load(silent = false) {
-    if (!silent) setLoading(true)
-    getFaculty(collegeId)
+    const wasMiss = !masterCacheHas(`faculty:${collegeId}`)
+    if (!silent && wasMiss) setLoading(true)
+    getFaculty(collegeId, r => setRows(r.data.data || []))
       .then(r => setRows(r.data.data || []))
       .catch(() => setError('Failed to load.'))
-      .finally(() => { if (!silent) setLoading(false) })
+      .finally(() => { if (!silent && wasMiss) setLoading(false) })
   }
   useEffect(() => { load() }, [collegeId])
 
@@ -84,22 +88,7 @@ export default function FacultyMaster({ collegeId }) {
       }
       closeModal(); load(true)
     } catch (e) {
-      // Prefer the server's user-friendly message; fall back to a useful
-      // generic per-failure-mode rather than a bare "Save failed."
-      console.error('Faculty master save error:', e)
-      const serverMsg = e?.response?.data?.message
-      const status    = e?.response?.status
-      let msg
-      if (serverMsg) {
-        msg = serverMsg
-      } else if (e?.code === 'ERR_NETWORK' || e?.message === 'Network Error') {
-        msg = 'Could not reach the server. Check your connection and try again.'
-      } else if (status >= 500) {
-        msg = 'The server encountered an internal error. Please try again, or contact your administrator if the problem persists.'
-      } else {
-        msg = 'Could not save the degree course. Please review your input and try again.'
-      }
-      setError(msg)
+      setError(getErrorMessage(e, 'Could not save the degree course. Please review your input and try again.'))
     } finally { setSaving(false) }
   }
 
@@ -108,7 +97,7 @@ export default function FacultyMaster({ collegeId }) {
     try {
       await deleteFaculty(collegeId, row.code_no)
       load(true)
-    } catch { alert('Delete failed.') }
+    } catch { toast.error('Delete failed.') }
   }
 
   function toggleSort(col) {

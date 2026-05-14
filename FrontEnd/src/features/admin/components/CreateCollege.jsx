@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { createCollege } from '../../../services/collegeService.js'
 import Button from '../../../shared/components/Button.jsx'
+import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
 
 const EMPTY = {
   name: '', address: '', city: '', phone: '',
@@ -50,7 +51,7 @@ export default function CreateCollege({ onCreated }) {
       setForm(EMPTY)
       setTimeout(() => onCreated?.(), 1500)
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to create college.')
+      setError(getErrorMessage(err, 'Failed to create college.'))
     } finally {
       setSaving(false)
     }

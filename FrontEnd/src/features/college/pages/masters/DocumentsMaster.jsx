@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import { getFaculty, getMasterDocumentTypes, getRequiredDocumentsMaster, createRequiredDocument, updateRequiredDocument, deleteRequiredDocument } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonForm } from '../../../../shared/components/Skeleton.jsx'
+import { useToast } from '../../../../context/ToastContext.jsx'
+import { getErrorMessage } from '../../../../shared/hooks/useNetworkError.js'
 
 const ALL_yearLevels = [
   { value: 1, label: 'FY (First Year)'    },
@@ -42,6 +44,7 @@ function expectedYearForMarksheet(name) {
 export default function DocumentsMaster({ collegeId }) {
   const { canWrite } = usePermissions()
   const rw = canWrite('masters')
+  const toast = useToast()
 
   const [faculty, setFaculty]         = useState([])
   const [docTypes, setDocTypes]       = useState([])
@@ -103,7 +106,7 @@ export default function DocumentsMaster({ collegeId }) {
       setSelDocType('')
       loadRows()
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to add.')
+      setError(getErrorMessage(err, 'Failed to add.'))
     } finally {
       setAdding(false)
     }
@@ -116,7 +119,7 @@ export default function DocumentsMaster({ collegeId }) {
       })
       loadRows()
     } catch {
-      alert('Failed to update.')
+      toast.error('Failed to update.')
     }
   }
 
@@ -126,7 +129,7 @@ export default function DocumentsMaster({ collegeId }) {
       await deleteRequiredDocument(collegeId, id)
       loadRows()
     } catch {
-      alert('Failed to delete.')
+      toast.error('Failed to delete.')
     }
   }
 

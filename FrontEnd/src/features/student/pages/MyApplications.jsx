@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
+import { useToast } from '../../../context/ToastContext.jsx'
 import { deleteApplication } from '../../../services/applicationService.js'
 import { useMyApplications } from '../hooks/useMyApplications.js'
 import { useSortableTable } from '../../../shared/hooks/useSortableTable.js'
@@ -30,6 +31,7 @@ const STATUS_META = {
 export default function MyApplications() {
   const { user }    = useAuthContext()
   const navigate    = useNavigate()
+  const toast       = useToast()
   const [filterStatus, setFilterStatus]     = useState('')
   const [feePayApp, setFeePayApp]           = useState(null)
   const [receiptsAppId, setReceiptsAppId]   = useState(null)
@@ -465,6 +467,7 @@ function AppDetail({ app, navigate, setFeePayApp, setSelectSubjectsApp, fetchApp
 }
 
 function DeleteDraftButton({ appId, onDeleted }) {
+  const toast = useToast()
   const [deleting, setDeleting] = useState(false)
 
   async function handleDelete() {
@@ -474,7 +477,7 @@ function DeleteDraftButton({ appId, onDeleted }) {
       await deleteApplication(appId)
       onDeleted()
     } catch (err) {
-      alert(err?.response?.data?.message || 'Delete failed.')
+      toast.error(err?.response?.data?.message || 'Delete failed.')
       setDeleting(false)
     }
   }

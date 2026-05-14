@@ -1,15 +1,18 @@
 import { useEffect, useState, useMemo } from 'react'
-import { getBankLedgers, createBankLedger, updateBankLedger, deleteBankLedger } from '../../../../services/masterService.js'
+import { getBankLedgers, createBankLedger, updateBankLedger, deleteBankLedger, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
+import { useToast } from '../../../../context/ToastContext.jsx'
+import { getErrorMessage } from '../../../../shared/hooks/useNetworkError.js'
 
 const EMPTY = { bank_account_number: '', bank_name: '', branch: '', ifsc_code: '', account_type: 'Savings', is_active: true }
 
 export default function BankMaster({ collegeId }) {
   const { canWrite } = usePermissions()
   const rw = canWrite('masters')
-  const [rows, setRows]       = useState([])
-  const [loading, setLoading] = useState(true)
+  const toast = useToast()
+  const [rows, setRows]       = useState(() => masterCacheRead(`bank:${collegeId}`)?.data?.data ?? [])
+  const [loading, setLoading] = useState(() => !masterCacheRead(`bank:${collegeId}`))
   const [modal, setModal]     = useState(null)
   const [form, setForm]       = useState(EMPTY)
   const [saving, setSaving]   = useState(false)
@@ -30,11 +33,12 @@ export default function BankMaster({ collegeId }) {
   }), [rows, sortCol, sortDir])
 
   function load(silent = false) {
-    if (!silent) setLoading(true)
-    getBankLedgers(collegeId)
+    const wasMiss = !masterCacheHas(`bank:${collegeId}`)
+    if (!silent && wasMiss) setLoading(true)
+    getBankLedgers(collegeId, r => setRows(r.data.data || []))
       .then(r => setRows(r.data.data || []))
       .catch(() => setError('Failed to load.'))
-      .finally(() => { if (!silent) setLoading(false) })
+      .finally(() => { if (!silent && wasMiss) setLoading(false) })
   }
   useEffect(() => { load() }, [collegeId])
 
@@ -52,14 +56,14 @@ export default function BankMaster({ collegeId }) {
       if (modal === 'new') await createBankLedger(collegeId, form)
       else await updateBankLedger(collegeId, modal.ledger_code, form)
       closeModal(); load(true)
-    } catch (e) { setError(e?.response?.data?.message || 'Save failed.') }
+    } catch (e) { setError(getErrorMessage(e, 'Save failed.')) }
     finally { setSaving(false) }
   }
 
   async function softDelete(row) {
     if (!confirm(`Deactivate "${row.bank_name}"?`)) return
     try { await deleteBankLedger(collegeId, row.ledger_code); load(true) }
-    catch { alert('Failed.') }
+    catch { toast.error('Failed.') }
   }
 
   return (

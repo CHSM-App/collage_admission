@@ -4,6 +4,8 @@ import { getFaculty } from '../../../services/masterService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
+import { useToast } from '../../../context/ToastContext.jsx'
+import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 const YEAR_LONG  = {
@@ -14,6 +16,7 @@ const YEAR_LONG  = {
 export default function AdmissionPeriods({ collegeId }) {
   const { canWrite } = usePermissions()
   const rw = canWrite('masters')
+  const toast = useToast()
   const [periods, setPeriods]       = useState([])
   const [courses, setCourses]       = useState([])
   const [loading, setLoading]       = useState(true)
@@ -102,7 +105,7 @@ export default function AdmissionPeriods({ collegeId }) {
       setForm({ course_id: '', year_of_study: '1', academic_year: '2026-27', start_date: '', end_date: '', total_seats: '' })
       fetchData()
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to create period.')
+      setError(getErrorMessage(err, 'Failed to create period.'))
     } finally {
       setSaving(false)
     }
@@ -116,7 +119,7 @@ export default function AdmissionPeriods({ collegeId }) {
       try {
         await updateAdmissionPeriod(collegeId, period.id, { is_active: false })
         fetchData()
-      } catch { alert('Failed to update.') }
+      } catch { toast.error('Failed to update.') }
     } else {
       // Reopening — check conflict
       const conflict = periods.find(
@@ -126,13 +129,13 @@ export default function AdmissionPeriods({ collegeId }) {
              p.id !== period.id
       )
       if (conflict) {
-        alert(`Cannot reopen: an active period for ${period.course_name} — ${YEAR_LABEL[period.year_of_study]} already exists. Close it first.`)
+        toast.error(`Cannot reopen: an active period for ${period.course_name} — ${YEAR_LABEL[period.year_of_study]} already exists. Close it first.`)
         return
       }
       try {
         await updateAdmissionPeriod(collegeId, period.id, { is_active: true })
         fetchData()
-      } catch { alert('Failed to update.') }
+      } catch { toast.error('Failed to update.') }
     }
   }
 
@@ -142,7 +145,7 @@ export default function AdmissionPeriods({ collegeId }) {
     try {
       await updateAdmissionPeriod(collegeId, period.id, { is_active: false, is_disabled: true })
       fetchData()
-    } catch { alert('Failed to disable.') }
+    } catch { toast.error('Failed to disable.') }
   }
 
   function startEdit(period) {

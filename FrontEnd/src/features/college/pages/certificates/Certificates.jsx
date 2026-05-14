@@ -12,6 +12,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { useAuthContext } from '../../../../context/AuthContext.jsx'
+import { useToast } from '../../../../context/ToastContext.jsx'
 import {
   lookupStudent,
   getBonafideList, getBonafideNextNo, createBonafide,
@@ -71,6 +72,7 @@ function emptyForm(type) {
 
 export default function Certificates({ collegeId, readOnly }) {
   const { user } = useAuthContext()
+  const toast = useToast()
   const collegeName    = user?.name    || ''
   const collegeAddress = user?.address || (user?.city || '')
   const [certType,    setCertType]    = useState('bonafide')
@@ -254,7 +256,7 @@ export default function Certificates({ collegeId, readOnly }) {
                : type === 'character' ? buildCharacterHTML(row, college)
                : buildNocHTML(row, college)
     const win = window.open('', '_blank', 'width=860,height=900')
-    if (!win) { alert('Pop-up blocked — allow pop-ups for this site to print.'); return }
+    if (!win) { toast.error('Pop-up blocked — allow pop-ups for this site to print.'); return }
     win.document.write(html)
     win.document.close()
     win.focus()

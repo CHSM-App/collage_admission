@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { getFaculty, getGroups, getGroup, getCoursesForSemester, createGroup, updateGroup, deleteGroup } from '../../../../services/masterService.js'
+import { getFaculty, getGroups, getGroup, getCoursesForSemester, createGroup, updateGroup, deleteGroup, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
+import { useToast } from '../../../../context/ToastContext.jsx'
+import { getErrorMessage } from '../../../../shared/hooks/useNetworkError.js'
 
 const NUM_SLOTS  = 11
 const semCountFor = (yrs) => Math.max(1, Math.min(10, (parseInt(yrs) || 0) * 2))
@@ -18,8 +20,12 @@ const EMPTY_GROUP = (facultyId, sem) => ({
 export default function GroupMaster({ collegeId }) {
   const { canWrite } = usePermissions()
   const rw = canWrite('masters')
-  const [faculty, setFaculty]       = useState([])
-  const [selFaculty, setSelFaculty] = useState('')
+  const toast = useToast()
+  const [faculty, setFaculty]       = useState(() => (masterCacheRead(`faculty:${collegeId}`)?.data?.data ?? []).filter(f => f.is_active))
+  const [selFaculty, setSelFaculty] = useState(() => {
+    const cached = (masterCacheRead(`faculty:${collegeId}`)?.data?.data ?? []).filter(f => f.is_active)
+    return cached.length ? cached[0].code_no : ''
+  })
   const [selSem, setSelSem]         = useState(1)
   const [groups, setGroups]         = useState([])
   const [loading, setLoading]       = useState(false)
@@ -45,12 +51,14 @@ export default function GroupMaster({ collegeId }) {
   }), [groups, sortCol, sortDir])
 
   useEffect(() => {
-    getFaculty(collegeId)
-      .then(r => {
-        const active = (r.data.data || []).filter(f => f.is_active)
-        setFaculty(active)
-        if (active.length) setSelFaculty(active[0].code_no)
-      })
+    getFaculty(collegeId, r => {
+      const active = (r.data.data || []).filter(f => f.is_active)
+      setFaculty(active)
+    }).then(r => {
+      const active = (r.data.data || []).filter(f => f.is_active)
+      setFaculty(active)
+      if (active.length && !selFaculty) setSelFaculty(active[0].code_no)
+    })
   }, [collegeId])
 
   const selFacultyRow = faculty.find(f => f.code_no == selFaculty)
@@ -64,18 +72,19 @@ export default function GroupMaster({ collegeId }) {
 
   const loadGroups = useCallback((silent = false) => {
     if (!selFaculty) return
-    if (!silent) setLoading(true)
-    getGroups(collegeId, selFaculty, selSem)
+    const wasMiss = !masterCacheHas(`group:${collegeId}:${selFaculty}:${selSem}`)
+    if (!silent && wasMiss) setLoading(true)
+    getGroups(collegeId, selFaculty, selSem, r => setGroups(r.data.data || []))
       .then(r => setGroups(r.data.data || []))
       .catch(() => {})
-      .finally(() => { if (!silent) setLoading(false) })
+      .finally(() => { if (!silent && wasMiss) setLoading(false) })
   }, [collegeId, selFaculty, selSem])
 
   useEffect(() => { loadGroups() }, [loadGroups])
 
   // Load course hints for ALL faculties at the selected semester (for elective autocomplete)
   useEffect(() => {
-    getCoursesForSemester(collegeId, selSem)
+    getCoursesForSemester(collegeId, selSem, r => setCourseHints(r.data.data || []))
       .then(r => setCourseHints(r.data.data || []))
       .catch(() => {})
   }, [collegeId, selSem])
@@ -137,14 +146,14 @@ export default function GroupMaster({ collegeId }) {
       if (modal === 'new') await createGroup(collegeId, payload)
       else await updateGroup(collegeId, modal.id, payload)
       setModal(null); loadGroups(true)
-    } catch (e) { setError(e?.response?.data?.message || 'Save failed.') }
+    } catch (e) { setError(getErrorMessage(e, 'Save failed.')) }
     finally { setSaving(false) }
   }
 
   async function softDelete(g) {
     if (!confirm(`Deactivate group "${g.group_code}"?`)) return
     try { await deleteGroup(collegeId, g.id); loadGroups(true) }
-    catch { alert('Failed.') }
+    catch { toast.error('Failed.') }
   }
 
   return (

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Button from '../../../shared/components/Button.jsx'
 import { getSubjectSelections, getSubjectsList, saveSubjectSelections } from '../../../services/applicationService.js'
 import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
+import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
 
 const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year', 4: '4Y — Fourth Year', 5: '5Y — Fifth Year' }
 
@@ -72,7 +73,7 @@ export default function SubjectSelection({ application, onDone, onCancel }) {
       await saveSubjectSelections(application.id, { semester, subjects })
       setSaved(true)
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to save. Please try again.')
+      setError(getErrorMessage(err, 'Failed to save. Please try again.'))
     } finally {
       setSaving(false)
     }

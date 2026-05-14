@@ -1,7 +1,9 @@
 import { useEffect, useState, useCallback } from 'react'
-import { getFaculty, getCourses, updateCourse, bulkSaveCourses, deleteCourse } from '../../../../services/masterService.js'
+import { getFaculty, getCourses, updateCourse, bulkSaveCourses, deleteCourse, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
+import { useToast } from '../../../../context/ToastContext.jsx'
+import { getErrorMessage } from '../../../../shared/hooks/useNetworkError.js'
 
 const SUBJECT_TYPES = ['Core','Elective','Practical','Project','Foundation','AbilityEnhancement']
 // Semester tabs are derived from the selected program's duration: tabs = years * 2
@@ -30,33 +32,52 @@ function autoCalcTotal(row, field, val) {
 export default function CourseMaster({ collegeId }) {
   const { canWrite } = usePermissions()
   const rw = canWrite('masters')
-  const [faculty, setFaculty]     = useState([])
-  const [selFaculty, setSelFaculty] = useState('')
+  const toast = useToast()
+  const [faculty, setFaculty]     = useState(() => (masterCacheRead(`faculty:${collegeId}`)?.data?.data ?? []).filter(f => f.is_active))
+  const [selFaculty, setSelFaculty] = useState(() => {
+    const cached = (masterCacheRead(`faculty:${collegeId}`)?.data?.data ?? []).filter(f => f.is_active)
+    return cached.length ? cached[0].code_no : ''
+  })
   const [selSem, setSelSem]       = useState(1)
-  const [rows, setRows]           = useState([])
-  const [loading, setLoading]     = useState(false)
+  const [rows, setRows]           = useState(() => {
+    const fac = (masterCacheRead(`faculty:${collegeId}`)?.data?.data ?? []).filter(f => f.is_active)
+    if (!fac.length) return []
+    const cached = masterCacheRead(`course:${collegeId}:${fac[0].code_no}:1`)
+    return cached ? (cached.data?.data ?? []).filter(r => r.is_active !== false).map(r => ({ ...r, _key: r.id, is_new: false })) : []
+  })
+  const [loading, setLoading]     = useState(() => {
+    const fac = (masterCacheRead(`faculty:${collegeId}`)?.data?.data ?? []).filter(f => f.is_active)
+    if (!fac.length) return false
+    return !masterCacheRead(`course:${collegeId}:${fac[0].code_no}:1`)
+  })
   const [saving, setSaving]       = useState(false)
   const [error, setError]         = useState('')
   const [success, setSuccess]     = useState('')
   const [dirty, setDirty]         = useState(false)
 
   useEffect(() => {
-    getFaculty(collegeId)
-      .then(r => {
-        const active = (r.data.data || []).filter(f => f.is_active)
-        setFaculty(active)
-        if (active.length) setSelFaculty(active[0].code_no)
-      })
+    getFaculty(collegeId, r => {
+      const active = (r.data.data || []).filter(f => f.is_active)
+      setFaculty(active)
+    }).then(r => {
+      const active = (r.data.data || []).filter(f => f.is_active)
+      setFaculty(active)
+      if (active.length && !selFaculty) setSelFaculty(active[0].code_no)
+    })
   }, [collegeId])
 
   const loadRows = useCallback((silent = false) => {
     if (!selFaculty) return
-    if (!silent) setLoading(true)
+    const wasMiss = !masterCacheHas(`course:${collegeId}:${selFaculty}:${selSem}`)
+    if (!silent && wasMiss) setLoading(true)
     setError(''); setSuccess('')
-    getCourses(collegeId, selFaculty, selSem)
+    getCourses(collegeId, selFaculty, selSem, r => {
+      setRows((r.data.data || []).filter(row => row.is_active !== false).map(row => ({ ...row, _key: row.id, is_new: false })))
+      setDirty(false)
+    })
       .then(r => { setRows((r.data.data || []).filter(row => row.is_active !== false).map(row => ({ ...row, _key: row.id, is_new: false }))); setDirty(false) })
       .catch(() => setError('Failed to load subjects.'))
-      .finally(() => { if (!silent) setLoading(false) })
+      .finally(() => { if (!silent && wasMiss) setLoading(false) })
   }, [collegeId, selFaculty, selSem])
 
   useEffect(() => { loadRows() }, [loadRows])
@@ -132,7 +153,7 @@ export default function CourseMaster({ collegeId }) {
       setDirty(false)
       setTimeout(() => setSuccess(''), 3000)
       loadRows(true)
-    } catch (e) { setError(e?.response?.data?.message || 'Save failed.') }
+    } catch (e) { setError(getErrorMessage(e, 'Save failed.')) }
     finally { setSaving(false) }
   }
 
@@ -142,7 +163,7 @@ export default function CourseMaster({ collegeId }) {
     try {
       await deleteCourse(collegeId, row.id)
       setRows(rs => rs.filter(r => r._key !== row._key))
-    } catch { alert('Delete failed.') }
+    } catch { toast.error('Delete failed.') }
   }
 
   const selFacultyRow  = faculty.find(f => f.code_no == selFaculty)

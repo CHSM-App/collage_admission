@@ -8,6 +8,7 @@ import { usePermissions } from '../hooks/usePermissions.js'
 import { useDocumentPreview } from '../hooks/useDocumentPreview.js'
 import CollegeCollectPayPanel from '../components/CollegeCollectPayPanel.jsx'
 import { SkeletonDetail, SkeletonLines } from '../../../shared/components/Skeleton.jsx'
+import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
 import { useToast } from '../../../context/ToastContext.jsx'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000/').replace(/\/$/, '')
@@ -701,7 +702,7 @@ function FeeAmountPanel({ collegeId, appId, initialTotal, initialPayNow, readonl
       setSuccess('Fee amounts saved. Student will see these amounts when paying.')
       onSaved?.()
     } catch (err) {
-      setError(err?.response?.data?.message || 'Failed to save.')
+      setError(getErrorMessage(err, 'Failed to save.'))
     } finally { setSaving(false) }
   }
 

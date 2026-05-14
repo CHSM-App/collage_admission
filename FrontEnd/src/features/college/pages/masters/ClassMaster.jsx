@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { getFaculty, getClasses, createClass, updateClass, deleteClass } from '../../../../services/masterService.js'
+import { getFaculty, getClasses, createClass, updateClass, deleteClass, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
+import { useToast } from '../../../../context/ToastContext.jsx'
 
 const YEAR_LABELS = [
   { value: 1, short: 'FY', label: 'FY — First Year'   },
@@ -26,10 +27,11 @@ function durationFor(programs, facultyId) {
 export default function ClassMaster({ collegeId }) {
   const { canWrite } = usePermissions()
   const rw = canWrite('masters')
+  const toast = useToast()
 
-  const [programs, setPrograms] = useState([])
-  const [rows, setRows]         = useState([])
-  const [loading, setLoading]   = useState(true)
+  const [programs, setPrograms] = useState(() => (masterCacheRead(`faculty:${collegeId}`)?.data?.data ?? []).filter(f => f.is_active))
+  const [rows, setRows]         = useState(() => masterCacheRead(`class:${collegeId}`)?.data?.data ?? [])
+  const [loading, setLoading]   = useState(() => !masterCacheRead(`class:${collegeId}`))
   const [error, setError]       = useState('')
 
   // Inline "new" form
@@ -80,21 +82,23 @@ export default function ClassMaster({ collegeId }) {
   const hasFilters = search || filterProgram || filterYear
 
   useEffect(() => {
-    getFaculty(collegeId)
-      .then(r => {
-        const active = (r.data.data || []).filter(f => f.is_active)
-        setPrograms(active)
-        if (active.length) setForm(f => ({ ...f, faculty_master_id: active[0].code_no }))
-      })
-      .catch(() => setError('Failed to load programs.'))
+    getFaculty(collegeId, r => {
+      const active = (r.data.data || []).filter(f => f.is_active)
+      setPrograms(active)
+    }).then(r => {
+      const active = (r.data.data || []).filter(f => f.is_active)
+      setPrograms(active)
+      if (active.length) setForm(f => ({ ...f, faculty_master_id: active[0].code_no }))
+    }).catch(() => setError('Failed to load programs.'))
   }, [collegeId])
 
   const load = useCallback((silent = false) => {
-    if (!silent) setLoading(true)
-    getClasses(collegeId)
+    const wasMiss = !masterCacheHas(`class:${collegeId}`)
+    if (!silent && wasMiss) setLoading(true)
+    getClasses(collegeId, r => setRows(r.data.data || []))
       .then(r => setRows(r.data.data || []))
       .catch(() => setError('Failed to load classes.'))
-      .finally(() => { if (!silent) setLoading(false) })
+      .finally(() => { if (!silent && wasMiss) setLoading(false) })
   }, [collegeId])
 
   useEffect(() => { load() }, [load])
@@ -138,7 +142,7 @@ export default function ClassMaster({ collegeId }) {
       setEditId(null)
       load(true)
     } catch (err) {
-      alert(err?.response?.data?.message || 'Save failed.')
+      toast.error(err?.response?.data?.message || 'Save failed.')
     } finally { setEditSaving(false) }
   }
 
@@ -148,7 +152,7 @@ export default function ClassMaster({ collegeId }) {
       await deleteClass(collegeId, row.id)
       load(true)
     } catch (err) {
-      alert(err?.response?.data?.message || 'Delete failed.')
+      toast.error(err?.response?.data?.message || 'Delete failed.')
     }
   }
 
