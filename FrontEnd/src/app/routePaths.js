@@ -7,7 +7,7 @@ export const ROLES = {
 export const LOGIN_PATHS = {
   student: '/login/student',
   college: '/login/college',
-  admin: '/login/admin',
+  admin: '/login/vtadmin',
 }
 
 export const DASHBOARD_PATHS = {

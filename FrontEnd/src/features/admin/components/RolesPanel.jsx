@@ -45,9 +45,7 @@ const NAV_SECTIONS = [
   {
     group: 'Certificates',
     items: [
-      { key: 'cert-bonafide',  label: 'Bonafide Certificate',     desc: 'Issue bonafide certificate confirming enrolment' },
-      { key: 'cert-character', label: 'Character Certificate',    desc: 'Issue character certificate for a student' },
-      { key: 'cert-noc',       label: 'No Objection Certificate', desc: 'Issue NOC for transfer or external application' },
+      { key: 'certificates', label: 'Certificates', desc: 'Issue bonafide, character, and no objection certificates' },
     ],
   },
 ]

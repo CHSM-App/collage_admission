@@ -95,31 +95,42 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
           <Row label="Mobile"        value={data.mobile} />
           <Row label="Email"         value={data.email} />
           <Row label="Address"       value={[data.address, data.taluka, data.district, data.state].filter(Boolean).join(', ')} />
-          <Row label="Category"      value={data.category || '—'} />
+          <Row label="Category"      value={data.category} />
+          <Row label="Special Status" value={data.special_status} />
           <Row label="Fees Category" value={data.fees_category} />
         </ReviewSection>
 
         <ReviewSection title="Other Details" onEdit={() => onEditStep(3)}>
           <Row label="Date of Birth"       value={fmtDate(data.birth_date)} />
-          <Row label="Birth Place"         value={[data.birth_place, data.birth_state].filter(Boolean).join(', ')} />
+          <Row label="Birth Place"         value={[data.birth_place, data.birth_taluka, data.birth_district, data.birth_state].filter(Boolean).join(', ')} />
           <Row label="Nationality"         value={data.nationality} />
           <Row label="Marital Status"      value={data.marital_status} />
+          <Row label="Religion"            value={data.religion} />
+          <Row label="Caste"               value={data.caste} />
+          <Row label="Mother Tongue"       value={data.mother_tongue} />
+          <Row label="Blood Group"         value={data.blood_group} />
+          <Row label="Height"              value={data.height_cm ? `${data.height_cm} cm` : ''} />
+          <Row label="Weight"              value={data.weight_kg ? `${data.weight_kg} kg` : ''} />
+          <Row label="Father's Name"       value={data.father_full_name} />
+          <Row label="Son/Daughter No."    value={data.son_daughter_number} />
+          <Row label="Father's Occupation" value={data.father_occupation} />
+          <Row label="Annual Income"       value={data.annual_income ? `₹${Number(data.annual_income).toLocaleString('en-IN')}` : ''} />
           <Row label="Aadhaar"             value={maskAadhaar(data.aadhaar)} />
           <Row label="ABC ID"              value={data.abc_id} />
-          {data.prn && <Row label="PRN"    value={data.prn} />}
-          <Row label="Father's Name"       value={data.father_full_name} />
-          <Row label="Father's Occupation" value={data.father_occupation} />
-          <Row label="Annual Income"       value={data.annual_income ? `₹${Number(data.annual_income).toLocaleString('en-IN')}` : '—'} />
-          {data.bank_account && <Row label="Bank Account" value={`****${data.bank_account.slice(-4)}`} />}
+          <Row label="PRN"                 value={data.prn} />
+          <Row label="University App No."  value={data.university_app_no} />
+          <Row label="Bank Account"        value={data.bank_account ? `****${data.bank_account.slice(-4)}` : ''} />
+          <Row label="IFSC Code"           value={data.bank_ifsc} />
+          <Row label="Bank Name"           value={data.bank_name} />
+          <Row label="Bank Branch"         value={data.bank_branch} />
         </ReviewSection>
 
         <ReviewSection title="Previous Exam Details" onEdit={() => onEditStep(4)}>
           {Object.keys(data.exams || {}).length === 0 ? (
             <p className="col-span-2 text-sm text-slate-400">No exam details filled.</p>
           ) : (
-            <div className="col-span-2 overflow-x-auto">
-              <div className="rounded-lg border-2 border-slate-400 overflow-hidden">
-              <table className="w-full text-xs border-collapse">
+            <div className="col-span-2 overflow-x-auto rounded-lg border-2 border-slate-400">
+              <table className="min-w-[950px] text-xs border-collapse">
                 <thead className="bg-slate-100 border-b-2 border-slate-400">
                   <tr>
                     {['Exam','Institute','Board/Univ.','Month & Year','Seat No.','Marks','Out of','%','Class/Grade','Remark'].map(h => (
@@ -136,17 +147,16 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
                       <td className="border border-slate-200 px-2 py-1">{row.institute || '—'}</td>
                       <td className="border border-slate-200 px-2 py-1">{row.board || '—'}</td>
                       <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{row.month_year || '—'}</td>
-                      <td className="border border-slate-200 px-2 py-1">{row.seat_no || '—'}</td>
-                      <td className="border border-slate-200 px-2 py-1">{row.marks_obtained || '—'}</td>
-                      <td className="border border-slate-200 px-2 py-1">{row.marks_max || '—'}</td>
-                      <td className="border border-slate-200 px-2 py-1">{row.percentage ? `${row.percentage}%` : '—'}</td>
-                      <td className="border border-slate-200 px-2 py-1">{row.class_grade || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{row.seat_no || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{row.marks_obtained || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{row.marks_max || '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{row.percentage ? `${row.percentage}%` : '—'}</td>
+                      <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{row.class_grade || '—'}</td>
                       <td className="border border-slate-200 px-2 py-1">{row.remark || '—'}</td>
                     </tr>
                   )})}
                 </tbody>
               </table>
-              </div>
             </div>
           )}
         </ReviewSection>

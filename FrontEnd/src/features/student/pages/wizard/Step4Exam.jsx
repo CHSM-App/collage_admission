@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { StepHeader, StepFooter } from './Step1Context.jsx'
 
 // Exam rows shown per year of study
@@ -48,19 +48,6 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
   const [localError, setLocalError] = useState('')
 
   const exams = data.exams || {}
-
-  // Compute which rows were prefilled from DB at mount time only.
-  // Any row with institute + marks data is considered prefilled and locked (read-only).
-  // Using empty deps so this never re-evaluates from live form state.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const prefilledTypes = useMemo(() => {
-    const initial = data.exams || {}
-    return new Set(
-      Object.entries(initial)
-        .filter(([, row]) => !!(row.institute && row.marks_obtained && row.marks_max))
-        .map(([t]) => t)
-    )
-  }, []) // intentionally empty — snapshot at mount
 
   function getRow(type) {
     return exams[type] || emptyRow()
@@ -138,9 +125,6 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
               {rows.map(type => {
                 const row = getRow(type)
                 const isMandatory = mandatory.includes(type)
-                // SSC/HSC on SY/TY: lock only when the row had DB-prefilled data at mount time
-                const hasPrefill = yearOfStudy > 1 && prefilledTypes.has(type)
-                const isLocked = readOnly || hasPrefill
                 return (
                   <tr key={type} className={`hover:bg-blue-50 transition ${isMandatory ? 'bg-white' : 'bg-slate-50/50'}`}>
                     <td className="border border-slate-200 px-3 py-2 font-semibold text-slate-700 whitespace-nowrap text-xs">
@@ -153,10 +137,10 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
                           type={['marks_obtained', 'marks_max', 'percentage'].includes(col.key) ? 'number' : 'text'}
                           value={row[col.key] || ''}
                           onChange={e => setRowField(type, col.key, e.target.value)}
-                          readOnly={col.readOnly || isLocked}
+                          readOnly={col.readOnly || readOnly}
                           placeholder=""
                           className={`w-full px-2 py-1.5 text-sm rounded border-0 outline-none focus:ring-2 focus:ring-blue-200 focus:bg-blue-50 transition ${
-                            col.readOnly || isLocked
+                            col.readOnly || readOnly
                               ? 'bg-slate-100 text-slate-500 cursor-default'
                               : 'bg-white hover:bg-slate-50'
                           }`}
@@ -169,12 +153,6 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
             </tbody>
           </table>
         </div>
-
-        {yearOfStudy > 1 && (
-          <p className="mt-2 text-xs text-slate-400">
-            Rows pre-filled from your previous application are locked and cannot be edited.
-          </p>
-        )}
 
         {(localError || globalError) && (
           <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">

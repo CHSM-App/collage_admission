@@ -116,10 +116,12 @@ export default function DashboardLayout() {
   if (role === 'college' && isStaff) {
     currentItems = currentItems.filter((item, idx, arr) => {
       if (!item.to) {
-        const nextVisible = arr.slice(idx + 1).some(
-          i => i.to && (i.perm === null || i.perm === undefined || permissions[i.perm] !== undefined)
-        )
-        return nextVisible
+        // Separator stays only if a following item in THIS section is visible
+        for (let i = idx + 1; i < arr.length; i++) {
+          if (!arr[i].to) break
+          if (arr[i].perm === null || arr[i].perm === undefined || arr[i].perm in permissions) return true
+        }
+        return false
       }
       if (item.perm === null || item.perm === undefined) return true
       return item.perm in permissions
@@ -129,20 +131,17 @@ export default function DashboardLayout() {
   // For staff: additionally hide items based on nav_visibility
   const navVisibility = user?.nav_visibility
   if (role === 'college' && isStaff && navVisibility) {
+    const navKey = (to) => new URLSearchParams(to.split('?')[1] || '').get('section') || 'overview'
     currentItems = currentItems.filter((item, idx, arr) => {
       if (!item.to) {
-        // Keep separator only if at least one following nav item is visible
-        const nextVisible = arr.slice(idx + 1).some(i => {
-          if (!i.to) return false
-          const params = new URLSearchParams(i.to.split('?')[1] || '')
-          const key = params.get('section') || 'overview'
-          return navVisibility[key] !== false
-        })
-        return nextVisible
+        // Separator stays only if a following item in THIS section is visible
+        for (let i = idx + 1; i < arr.length; i++) {
+          if (!arr[i].to) break
+          if (navVisibility[navKey(arr[i].to)] !== false) return true
+        }
+        return false
       }
-      const params = new URLSearchParams(item.to.split('?')[1] || '')
-      const key = params.get('section') || 'overview'
-      return navVisibility[key] !== false
+      return navVisibility[navKey(item.to)] !== false
     })
   }
 

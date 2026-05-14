@@ -30,7 +30,6 @@ const roleContent = {
 const roleLinks = [
   { label: 'Student', role: 'student', to: LOGIN_PATHS.student },
   { label: 'College', role: 'college', to: LOGIN_PATHS.college },
-  { label: 'Admin', role: 'admin', to: LOGIN_PATHS.admin },
 ]
 
 export default function RoleLoginForm({ role }) {
@@ -75,7 +74,7 @@ export default function RoleLoginForm({ role }) {
 
   return (
     <AuthLayout title={content.title} subtitle={content.subtitle}>
-      <div className="mb-6 grid grid-cols-3 gap-2 rounded-lg bg-slate-100 p-1">
+      <div className="mb-6 grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1">
         {roleLinks.map((item) => (
           <Link
             key={item.role}
