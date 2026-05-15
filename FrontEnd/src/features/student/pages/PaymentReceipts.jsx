@@ -34,7 +34,7 @@ function fmtTime(str) {
   return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Kolkata' })
 }
 
-export default function PaymentReceipts({ applicationId, onClose, hideTypes = [] }) {
+export default function PaymentReceipts({ applicationId, onClose, hideTypes = [], showOrderId = false }) {
   const [data, setData]         = useState(null)
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
@@ -338,7 +338,7 @@ function ReceiptSheet({ app, pmt }) {
                   ['Payment Status',  'Paid',     false],
                   ['Payment Date',    `${fmtDate(pmt.completed_at)}  ${fmtTime(pmt.completed_at)}`, false],
                   ...(pmt.razorpay_payment_id ? [['Transaction ID', pmt.razorpay_payment_id, true]] : []),
-                  ...(pmt.razorpay_order_id   ? [['Order ID',       pmt.razorpay_order_id,   true]] : []),
+                  ...(showOrderId && pmt.razorpay_order_id ? [['Order ID', pmt.razorpay_order_id, true]] : []),
                 ].map(([label, value, mono]) => (
                   <tr key={label} className="border-b border-slate-50">
                     <td className="py-1.5 pr-4 text-slate-500 font-medium w-40 whitespace-nowrap">{label}</td>
