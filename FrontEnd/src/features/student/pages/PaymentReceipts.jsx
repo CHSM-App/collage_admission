@@ -90,7 +90,7 @@ export default function PaymentReceipts({ applicationId, onClose, hideTypes = []
               <span className="text-slate-300 text-xs">{activeId === pmt.id ? '▲' : '▼'}</span>
             </div>
           </button>
-          {activeId === pmt.id && <ReceiptSheet app={data.application} pmt={pmt} />}
+          {activeId === pmt.id && <ReceiptSheet app={data.application} pmt={pmt} showOrderId={showOrderId} />}
         </div>
       ))}
     </div>
@@ -98,7 +98,7 @@ export default function PaymentReceipts({ applicationId, onClose, hideTypes = []
 }
 
 // ── Printable receipt ────────────────────────────────────────
-function ReceiptSheet({ app, pmt }) {
+function ReceiptSheet({ app, pmt, showOrderId = false }) {
   const receiptNo   = `RCP-${String(pmt.id).padStart(6, '0')}`
   const typeLabel   = TYPE_LABEL[pmt.payment_type] || pmt.payment_type
   const fullLabel   = typeLabel
