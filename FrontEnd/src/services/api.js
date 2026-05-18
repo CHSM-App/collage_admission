@@ -1,21 +1,9 @@
 import axios from 'axios'
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/',
-  headers: { 'Content-Type': 'application/json' },
-})
-
-api.interceptors.request.use(config => {
-  try {
-    const stored = localStorage.getItem('collegeAdmissionAuth')
-    if (stored) {
-      const auth = JSON.parse(stored)
-      if (auth.token) {
-        config.headers['Authorization'] = `Bearer ${auth.token}`
-      }
-    }
-  } catch {}
-  return config
+  baseURL:      import.meta.env.VITE_API_URL || 'http://localhost:8000/',
+  headers:      { 'Content-Type': 'application/json' },
+  withCredentials: true,   // send httpOnly auth_token cookie on every request
 })
 
 api.interceptors.response.use(
@@ -38,10 +26,9 @@ api.interceptors.response.use(
       try {
         const stored = localStorage.getItem('collegeAdmissionAuth')
         const auth   = stored ? JSON.parse(stored) : null
-        // Only redirect if the user had an active session (token exists).
-        // A failed login attempt also returns 401 but has no stored token —
-        // in that case let the error propagate so the form can show the message.
-        if (auth?.token) {
+        // Only redirect if the user had an active session.
+        // A failed login attempt also returns 401 — let the error propagate.
+        if (auth?.isAuthenticated) {
           const role = auth.role
           localStorage.removeItem('collegeAdmissionAuth')
           window.location.href = role === 'admin'   ? '/login/vtadmin' :

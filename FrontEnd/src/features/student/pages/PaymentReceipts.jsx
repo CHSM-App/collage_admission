@@ -8,7 +8,7 @@ import { getPaymentReceipts } from '../../../services/paymentService.js'
 
 const YEAR_LABEL = { 1: 'First Year (FY)', 2: 'Second Year (SY)', 3: 'Third Year (TY)', 4: 'Fourth Year (4Y)', 5: 'Fifth Year (5Y)' }
 const TYPE_LABEL = {
-  application_fee: 'Application Fee',
+  application_fee: 'Platform Fee',
   college_fee:     'College Fee',
 }
 

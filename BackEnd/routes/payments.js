@@ -22,10 +22,34 @@ const mssql    = require('mssql');
 const feeSvc   = require('../services/FeeDeterminationService');
 const whatsapp = require('../services/whatsapp');
 const { authenticate } = require('../middleware/auth');
-const logger   = require('../config/logger');
+const logger    = require('../config/logger');
+const rateLimit = require('express-rate-limit');
+const { body, validationResult } = require('express-validator');
+const auditLog  = require('../middleware/auditLog');
 
-// All payment routes require authentication
+function validate(req, res, next) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ success: false, message: errors.array()[0].msg });
+  }
+  next();
+}
+
+// All payment routes require authentication + audit logging
 router.use(authenticate);
+router.use(auditLog);
+
+// 20 payment attempts per 15 minutes per IP
+const paymentLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many payment requests. Please wait 15 minutes.' },
+});
+
+router.use('/create-order', paymentLimiter);
+router.use('/verify',       paymentLimiter);
 
 async function logActivity(appId, action, actorRole, note = null) {
   try {
@@ -304,17 +328,15 @@ router.get('/receipts/:applicationId', async (req, res) => {
   }
 });
 
-// ── POST /payments/create-order ──────────────────────────────
-router.post('/create-order', async (req, res) => {
-  const { application_id, payment_type, amount: customAmount } = req.body;
-  // `customAmount` is optional — if provided, used as the Razorpay order amount (must be ≤ remaining)
+const createOrderValidators = [
+  body('application_id').isInt({ min: 1 }).withMessage('application_id must be a positive integer.').toInt(),
+  body('payment_type').isIn(['application_fee', 'college_fee']).withMessage('payment_type must be application_fee or college_fee.'),
+  body('amount').optional().isFloat({ min: 1 }).withMessage('amount must be a positive number.').toFloat(),
+];
 
-  if (!application_id || !payment_type) {
-    return res.status(400).json({ success: false, message: 'application_id and payment_type are required.' });
-  }
-  if (!['application_fee', 'college_fee'].includes(payment_type)) {
-    return res.status(400).json({ success: false, message: 'Invalid payment_type.' });
-  }
+// ── POST /payments/create-order ──────────────────────────────
+router.post('/create-order', createOrderValidators, validate, async (req, res) => {
+  const { application_id, payment_type, amount: customAmount } = req.body;
 
   try {
     const appRes = await db.request()
@@ -423,16 +445,23 @@ router.post('/create-order', async (req, res) => {
   }
 });
 
+const verifyValidators = [
+  body('application_id').isInt({ min: 1 }).withMessage('application_id must be a positive integer.').toInt(),
+  body('payment_type').isIn(['application_fee', 'college_fee']).withMessage('Invalid payment_type.'),
+  body('razorpay_order_id').isString().trim().notEmpty().withMessage('razorpay_order_id is required.')
+    .matches(/^order_[A-Za-z0-9]+$/).withMessage('Invalid razorpay_order_id format.'),
+  body('razorpay_payment_id').isString().trim().notEmpty().withMessage('razorpay_payment_id is required.')
+    .matches(/^pay_[A-Za-z0-9]+$/).withMessage('Invalid razorpay_payment_id format.'),
+  body('razorpay_signature').isString().trim().notEmpty().isLength({ min: 64, max: 64 })
+    .withMessage('Invalid razorpay_signature.'),
+];
+
 // ── POST /payments/verify ────────────────────────────────────
-router.post('/verify', async (req, res) => {
+router.post('/verify', verifyValidators, validate, async (req, res) => {
   const {
     application_id, payment_type,
     razorpay_order_id, razorpay_payment_id, razorpay_signature,
   } = req.body;
-
-  if (!application_id || !payment_type || !razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-    return res.status(400).json({ success: false, message: 'Missing required payment verification fields.' });
-  }
 
   try {
     // Verify signature

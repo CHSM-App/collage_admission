@@ -104,7 +104,7 @@ export default function ApplicationPrintView({ appId, regNumber, onClose }) {
             <PRow label="Course"          value={app.course_name} />
             <PRow label="Year of Study"   value={YEAR_LABEL[app.year_of_study]} />
             <PRow label="Academic Year"   value={app.academic_year} />
-            <PRow label="Application Fee" value={`₹${Number(app.application_fee || 0).toLocaleString('en-IN')}`} />
+            <PRow label="Platform Fee" value={`₹${Number(app.application_fee || 0).toLocaleString('en-IN')}`} />
           </PreviewSection>
 
           <PreviewSection title="Personal Details">
@@ -306,7 +306,7 @@ function buildHTML(data, regNumber) {
       row('Course',          app.course_name) +
       row('Year of Study',   YEAR_LABEL[app.year_of_study]) +
       row('Academic Year',   app.academic_year) +
-      row('Application Fee', '&#8377;' + Number(app.application_fee || 0).toLocaleString('en-IN'))
+      row('Platform Fee', '&#8377;' + Number(app.application_fee || 0).toLocaleString('en-IN'))
   )}
 
   ${section('Personal Details',

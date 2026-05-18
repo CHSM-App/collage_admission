@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 import { getApplications } from '../../../services/applicationService.js'
@@ -11,17 +11,13 @@ const ACTIVE_STATUSES = ['draft','submitted','under_review','correction_requeste
 export default function BrowseColleges() {
   const { user } = useAuthContext()
   const navigate  = useNavigate()
-  const inputRef  = useRef(null)
-  const debounceRef = useRef(null)
+  const inputRef = useRef(null)
 
-  const [query, setQuery]         = useState('')
-  const [suggestions, setSuggestions] = useState([])
-  const [showDrop, setShowDrop]   = useState(false)
-  const [result, setResult]       = useState(null)   // { college, periods }
-  const [myApps, setMyApps]       = useState([])
-  const [loading, setLoading]     = useState(false)
-  const [sugLoading, setSugLoading] = useState(false)
-  const [error, setError]         = useState('')
+  const [query, setQuery]   = useState('')
+  const [result, setResult] = useState(null)   // { college, periods }
+  const [myApps, setMyApps] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError]   = useState('')
 
   useEffect(() => {
     if (user?.id) {
@@ -31,77 +27,32 @@ export default function BrowseColleges() {
     }
   }, [user?.id])
 
-  const fetchSuggestions = useCallback((q) => {
-    clearTimeout(debounceRef.current)
-    if (!q.trim()) { setSuggestions([]); setShowDrop(false); return }
-    debounceRef.current = setTimeout(async () => {
-      setSugLoading(true)
-      try {
-        const res = await searchColleges(q)
-        setSuggestions(res.data.data || [])
-        setShowDrop(true)
-      } catch {
-        setSuggestions([])
-      } finally {
-        setSugLoading(false)
-      }
-    }, 280)
-  }, [])
-
   function handleInputChange(e) {
-    const val = e.target.value
-    setQuery(val)
+    setQuery(e.target.value)
     setError('')
     setResult(null)
-  }
-
-  async function loadCollege(collegeCode) {
-    setShowDrop(false)
-    setError('')
-    setResult(null)
-    setLoading(true)
-    try {
-      const res = await getCollegeByCode(collegeCode)
-      setResult(res.data.data)
-    } catch (err) {
-      setError(getErrorMessage(err, 'Something went wrong. Please try again.'))
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  function handleSelectSuggestion(college) {
-    setQuery(college.name)
-    setSuggestions([])
-    loadCollege(college.college_code)
   }
 
   async function handleSearch(e) {
     e.preventDefault()
     const trimmed = query.trim()
     if (!trimmed) return
-    setShowDrop(false)
-    // If it looks like a code try by-code directly, else search first
     setError('')
     setResult(null)
     setLoading(true)
     try {
-      // Try search first to get the code, then load
       const res = await searchColleges(trimmed)
       const matches = res.data.data || []
       if (matches.length === 1) {
         setQuery(matches[0].name)
-        await loadCollege(matches[0].college_code)
-      } else if (matches.length > 1) {
-        setSuggestions(matches)
-        setShowDrop(true)
-        setLoading(false)
+        const detail = await getCollegeByCode(matches[0].college_code)
+        setResult(detail.data.data)
       } else {
-        setError('No college found matching that name or code.')
-        setLoading(false)
+        setError('College not found. Please enter the exact college name or code.')
       }
-    } catch {
-      setError('Something went wrong. Please try again.')
+    } catch (err) {
+      setError(getErrorMessage(err, 'Something went wrong. Please try again.'))
+    } finally {
       setLoading(false)
     }
   }
@@ -116,8 +67,6 @@ export default function BrowseColleges() {
     setQuery('')
     setResult(null)
     setError('')
-    setSuggestions([])
-    setShowDrop(false)
     setTimeout(() => inputRef.current?.focus(), 50)
   }
 
@@ -127,7 +76,7 @@ export default function BrowseColleges() {
         <p className="text-sm font-semibold uppercase tracking-wide text-emerald-600">Student portal</p>
         <h1 className="mt-2 text-2xl sm:text-3xl font-bold text-slate-950">Find Your College</h1>
         <p className="mt-1 text-slate-600">
-          Enter your college name or code to view open admissions.
+          Enter the <strong>exact</strong> college name or college code to view open admissions.
         </p>
       </div>
 
@@ -139,7 +88,7 @@ export default function BrowseColleges() {
             type="text"
             value={query}
             onChange={handleInputChange}
-            placeholder="College name or code e.g. CL001"
+            placeholder="Exact college name or code e.g. CL001"
             className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             autoFocus
             autoComplete="off"

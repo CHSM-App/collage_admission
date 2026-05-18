@@ -6,6 +6,7 @@ var logger      = require('morgan');
 var cors        = require('cors');
 var helmet      = require('helmet');
 var pinoLogger  = require('./config/logger');
+var { startOtpCleanup } = require('./jobs/otpCleanup');
 
 var authRouter           = require('./routes/auth');
 var collegesRouter       = require('./routes/colleges');
@@ -26,16 +27,40 @@ var app = express();
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'pug');
 
+const IS_PROD = process.env.NODE_ENV === 'production';
+
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }, // allow static uploads to be fetched cross-origin
+
+  // HSTS — only meaningful over HTTPS; enforce in production
+  hsts: IS_PROD
+    ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+    : false,
+
+  // Content Security Policy
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc:     ["'self'"],
+      scriptSrc:      ["'self'"],
+      styleSrc:       ["'self'", "'unsafe-inline'"],  // pug templates may inline styles
+      imgSrc:         ["'self'", 'data:', 'blob:'],
+      connectSrc:     ["'self'"],
+      fontSrc:        ["'self'"],
+      objectSrc:      ["'none'"],
+      frameAncestors: ["'none'"],
+      baseUri:        ["'self'"],
+      formAction:     ["'self'"],
+    },
+  },
 }));
-app.use(cors({
+const corsOptions = {
   origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(o => o.trim()) : false,
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS' , 'PATCH'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Authorization', 'Content-Type'],
-}));
-app.options('*', cors());
+};
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(logger('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
@@ -67,10 +92,13 @@ app.use(function(err, req, res, next) {
   if (status >= 500) {
     pinoLogger.error({ err, url: req.url, method: req.method }, 'Unhandled error');
   }
-  res.status(status).json({
-    success: false,
-    message: err.message || 'Internal server error',
-  });
+  // In production never leak internal error details to the client.
+  // 4xx errors are intentional (validation, auth) — their messages are safe to forward.
+  const isProd = process.env.NODE_ENV === 'production';
+  const message = status < 500
+    ? (err.message || 'Bad request.')
+    : (isProd ? 'An internal server error occurred.' : (err.message || 'Internal server error'));
+  res.status(status).json({ success: false, message });
 });
 
 const PORT = process.env.PORT || 8000;
@@ -78,6 +106,7 @@ const PORTLOCAL = 5000;
 
 app.listen(PORT, function () {
   pinoLogger.info('Server listening on :' + PORT);
+  startOtpCleanup();
 });
 
 module.exports = app;

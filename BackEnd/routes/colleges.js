@@ -117,17 +117,18 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Search colleges by code OR name (student find-college page)
+// Search colleges by exact code OR exact name (student find-college page)
+// Partial / substring matches are intentionally rejected.
 router.get('/search', async (req, res) => {
   const q = (req.query.q || '').trim()
   if (!q) return res.json({ success: true, data: [] })
   try {
     const result = await db.request()
-      .input('q', `%${q}%`)
+      .input('q', q)
       .query(`
         SELECT TOP 10 id, name, city, phone, college_code
         FROM colleges
-        WHERE UPPER(college_code) LIKE UPPER(@q) OR name LIKE @q
+        WHERE UPPER(college_code) = UPPER(@q) OR UPPER(name) = UPPER(@q)
         ORDER BY name
       `)
     return res.json({ success: true, data: result.recordset })

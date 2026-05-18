@@ -202,7 +202,7 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
         ) : (
           <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm">
             <p className="font-semibold text-blue-900">
-              Application fee: ₹{Number(data.application_fee || 0).toLocaleString('en-IN')}
+              Platform fee: ₹{Number(data.application_fee || 0).toLocaleString('en-IN')}
             </p>
             <p className="text-blue-700 text-xs mt-0.5">
               Clicking "Pay & Submit" will open the Razorpay payment window. Non-refundable.

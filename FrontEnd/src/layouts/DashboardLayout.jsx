@@ -31,7 +31,7 @@ const sidebarItems = {
     { label: 'Fee Receipts',      to: `${DASHBOARD_PATHS.college}?section=fee-receipts`,          perm: 'collect_fees' },
     { label: '— Masters —',       to: null },
     { label: 'Program Master',    to: `${DASHBOARD_PATHS.college}?section=master-faculty`,       perm: 'masters' },
-    { label: 'Class Master',      to: `${DASHBOARD_PATHS.college}?section=master-class`,         perm: 'masters' },
+    // { label: 'Class Master',      to: `${DASHBOARD_PATHS.college}?section=master-class`,         perm: 'masters' },
     { label: 'Bank Master',       to: `${DASHBOARD_PATHS.college}?section=master-bank`,          perm: 'masters' },
     { label: 'Course Master',     to: `${DASHBOARD_PATHS.college}?section=master-course`,        perm: 'masters' },
     { label: 'Group Master',      to: `${DASHBOARD_PATHS.college}?section=master-group`,         perm: 'masters' },

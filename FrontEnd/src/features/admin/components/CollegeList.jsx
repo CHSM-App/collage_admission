@@ -15,7 +15,7 @@ import ClassMaster     from '../../college/pages/masters/ClassMaster.jsx'
 const TABS = [
   { key: 'roles',      label: 'Roles & Staff' },
   { key: 'faculty',    label: 'Program' },
-  { key: 'class',      label: 'Classes' },
+  // { key: 'class',      label: 'Classes' },
   { key: 'course',     label: 'Courses' },
   { key: 'group',      label: 'Groups' },
   { key: 'division',   label: 'Divisions' },

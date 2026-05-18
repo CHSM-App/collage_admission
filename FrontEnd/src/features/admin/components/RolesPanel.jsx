@@ -33,7 +33,7 @@ const NAV_SECTIONS = [
     group: 'Masters',
     items: [
       { key: 'master-faculty',   label: 'Program Master',    desc: 'Degree programs and university codes' },
-      { key: 'master-class',     label: 'Class Master',      desc: 'Class/batch configuration' },
+      // { key: 'master-class',     label: 'Class Master',      desc: 'Class/batch configuration' },
       { key: 'master-bank',      label: 'Bank Master',       desc: 'Bank account details' },
       { key: 'master-course',    label: 'Course Master',     desc: 'Course codes and names' },
       { key: 'master-group',     label: 'Group Master',      desc: 'Student group categories' },

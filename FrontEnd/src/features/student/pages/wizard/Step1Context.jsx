@@ -35,7 +35,7 @@ export default function Step1Context({ data, saving, onNext }) {
           <ReadField label="Course"         value={data.course_name} />
           <ReadField label="Year of Study"  value={YEAR_LABEL[data.year_of_study] || '—'} />
           <ReadField label="Academic Year"  value={data.academic_year} />
-          <ReadField label="Application Fee"value={`₹${Number(data.application_fee || 0).toLocaleString('en-IN')}`} />
+          <ReadField label="Platform Fee"value={`₹${Number(data.application_fee || 0).toLocaleString('en-IN')}`} />
         </div>
 
         <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">

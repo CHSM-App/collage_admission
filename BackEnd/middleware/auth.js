@@ -7,13 +7,23 @@ if (!process.env.JWT_SECRET) {
 }
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// Verify JWT and attach req.user
+// Verify JWT and attach req.user.
+// Reads from httpOnly cookie first; falls back to Authorization header for
+// API clients (e.g. Postman, server-to-server calls).
 function authenticate(req, res, next) {
-  const header = req.headers['authorization'];
-  if (!header || !header.startsWith('Bearer ')) {
+  let token = req.cookies?.auth_token;
+
+  if (!token) {
+    const header = req.headers['authorization'];
+    if (header && header.startsWith('Bearer ')) {
+      token = header.slice(7);
+    }
+  }
+
+  if (!token) {
     return res.status(401).json({ success: false, message: 'Authentication required.' });
   }
-  const token = header.slice(7);
+
   try {
     req.user = jwt.verify(token, JWT_SECRET);
     next();

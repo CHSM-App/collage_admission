@@ -9,16 +9,40 @@
  * POST /applications/:id/subjects                 — submit subject selections → enrolled
  */
 
-const express = require('express');
-const router  = express.Router();
-const db      = require('./db');
-const mssql   = require('mssql');
+const express   = require('express');
+const router    = express.Router();
+const db        = require('./db');
+const mssql     = require('mssql');
+const rateLimit = require('express-rate-limit');
 const { authenticate } = require('../middleware/auth');
 const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
-const logger  = require('../config/logger');
+const logger   = require('../config/logger');
+const { body, validationResult } = require('express-validator');
+const auditLog = require('../middleware/auditLog');
 
-// All student-facing application routes require authentication
+function validate(req, res, next) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ success: false, message: errors.array()[0].msg });
+  }
+  next();
+}
+
+// All student-facing application routes require authentication + audit logging
 router.use(authenticate);
+router.use(auditLog);
+
+// 30 application mutations per 15 minutes per IP (create/submit/subjects)
+const applicationMutationLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many requests. Please wait 15 minutes.' },
+});
+
+router.use('/subjects', applicationMutationLimiter);
+router.post('/',        applicationMutationLimiter);
 
 async function logActivity(appId, action, actorRole, note = null) {
   try {
@@ -162,13 +186,18 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// ── Create draft application ────────────────────────────────
-router.post('/', async (req, res) => {
-  const { student_id, college_id, course_id, year_of_study, academic_year, admission_period_id } = req.body;
+const createApplicationValidators = [
+  body('student_id').isInt({ min: 1 }).withMessage('student_id must be a positive integer.').toInt(),
+  body('college_id').isInt({ min: 1 }).withMessage('college_id must be a positive integer.').toInt(),
+  body('course_id').isInt({ min: 1 }).withMessage('course_id must be a positive integer.').toInt(),
+  body('year_of_study').isInt({ min: 1, max: 5 }).withMessage('year_of_study must be between 1 and 5.').toInt(),
+  body('academic_year').isString().trim().notEmpty().matches(/^\d{4}-\d{2,4}$/).withMessage('academic_year must be in format YYYY-YY or YYYY-YYYY.'),
+  body('admission_period_id').isInt({ min: 1 }).withMessage('admission_period_id must be a positive integer.').toInt(),
+];
 
-  if (!student_id || !college_id || !course_id || !year_of_study || !academic_year || !admission_period_id) {
-    return res.status(400).json({ success: false, message: 'Missing required fields.' });
-  }
+// ── Create draft application ────────────────────────────────
+router.post('/', createApplicationValidators, validate, async (req, res) => {
+  const { student_id, college_id, course_id, year_of_study, academic_year, admission_period_id } = req.body;
 
   try {
     // Check for duplicate active application this academic year for same college/course/year

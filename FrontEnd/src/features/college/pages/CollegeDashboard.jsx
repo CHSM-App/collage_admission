@@ -79,7 +79,7 @@ export default function CollegeDashboard() {
 
   const masterReadOnly = readOnly('masters')
   if (section === 'master-faculty')   return navAllowed('master-faculty')   ? <>{masterReadOnly && <ReadOnlyBanner label="Program Master" />}<FacultyMaster   collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
-  if (section === 'master-class')     return navAllowed('master-class')     ? <ClassMaster collegeId={user?.id} />                                                                                                              : <NavBlocked />
+  // if (section === 'master-class')     return navAllowed('master-class')     ? <ClassMaster collegeId={user?.id} />                                                                                                              : <NavBlocked />
   if (section === 'master-bank')      return navAllowed('master-bank')      ? <>{masterReadOnly && <ReadOnlyBanner label="Bank Master" />}<BankMaster          collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
   if (section === 'master-course')    return navAllowed('master-course')    ? <>{masterReadOnly && <ReadOnlyBanner label="Course Master" />}<CourseMaster      collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
   if (section === 'master-group')     return navAllowed('master-group')     ? <>{masterReadOnly && <ReadOnlyBanner label="Group Master" />}<GroupMaster        collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />

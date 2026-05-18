@@ -13,6 +13,16 @@ const db        = require('./db');
 const whatsapp  = require('../services/whatsapp');
 const mssql     = require('mssql');
 const logger    = require('../config/logger');
+const { body, validationResult } = require('express-validator');
+const auditLog = require('../middleware/auditLog');
+
+function validate(req, res, next) {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ message: errors.array()[0].msg });
+  }
+  next();
+}
 
 // ── Password policy ─────────────────────────────────────────
 // Returns an error string if invalid, null if valid.
@@ -74,6 +84,20 @@ async function verifyAndConsumeOtp(normPhone, otp, purpose) {
 }
 
 const JWT_SECRET = process.env.JWT_SECRET;
+const IS_PROD    = process.env.NODE_ENV === 'production';
+
+// httpOnly cookie options — token never accessible to JS
+const COOKIE_OPTS = {
+  httpOnly: true,
+  secure:   IS_PROD,          // HTTPS only in production
+  sameSite: IS_PROD ? 'strict' : 'lax',
+  maxAge:   7 * 24 * 60 * 60 * 1000, // 7 days in ms
+  path:     '/',
+};
+
+function setAuthCookie(res, token) {
+  res.cookie('auth_token', token, COOKIE_OPTS);
+}
 
 // 10 attempts per 15 minutes per IP for login endpoints
 const loginLimiter = rateLimit({
@@ -93,13 +117,24 @@ const registerLimiter = rateLimit({
   message: { message: 'Too many registration attempts. Please try again after an hour.' },
 });
 
-// ── Student login ───────────────────────────────────────────
-router.post('/login/student', loginLimiter, async (req, res) => {
-  const { phone, password } = req.body;
+const studentLoginValidators = [
+  body('phone').isString().trim().notEmpty().withMessage('Phone number is required.'),
+  body('password').isString().notEmpty().withMessage('Password is required.'),
+];
 
-  if (!phone || !password) {
-    return res.status(400).json({ message: 'Phone number and password are required.' });
-  }
+const emailLoginValidators = [
+  body('email').isEmail().normalizeEmail().withMessage('A valid email address is required.'),
+  body('password').isString().notEmpty().withMessage('Password is required.'),
+];
+
+// Audit-log all login and OTP routes (user not yet on req, so userId will be null)
+router.use('/login', auditLog);
+router.use('/otp',   auditLog);
+router.use('/forgot-password', auditLog);
+
+// ── Student login ───────────────────────────────────────────
+router.post('/login/student', loginLimiter, studentLoginValidators, validate, async (req, res) => {
+  const { phone, password } = req.body;
 
   try {
     const result = await db.request()
@@ -118,11 +153,11 @@ router.post('/login/student', loginLimiter, async (req, res) => {
     }
 
     const token = jwt.sign({ id: student.id, role: 'student' }, JWT_SECRET, { expiresIn: '7d' });
+    setAuthCookie(res, token);
 
     return res.json({
       message: 'Login successful',
       role: 'student',
-      token,
       user: {
         id:       student.id,
         name:     student.full_name,
@@ -139,12 +174,8 @@ router.post('/login/student', loginLimiter, async (req, res) => {
 });
 
 // ── College login (admin OR staff — single endpoint) ────────
-router.post('/login/college', loginLimiter, async (req, res) => {
+router.post('/login/college', loginLimiter, emailLoginValidators, validate, async (req, res) => {
   const { email, password } = req.body;
-
-  if (!email || !password) {
-    return res.status(400).json({ message: 'Email and password are required.' });
-  }
 
   try {
     // 1. Try college admin first
@@ -158,11 +189,11 @@ router.post('/login/college', loginLimiter, async (req, res) => {
       if (!match) return res.status(401).json({ message: 'Invalid email or password.' });
 
       const token = jwt.sign({ id: college.id, role: 'college', is_staff: false }, JWT_SECRET, { expiresIn: '7d' });
+      setAuthCookie(res, token);
 
       return res.json({
         message: 'Login successful',
         role: 'college',
-        token,
         user: {
           id:           college.id,
           name:         college.name,
@@ -219,11 +250,11 @@ router.post('/login/college', loginLimiter, async (req, res) => {
       JWT_SECRET,
       { expiresIn: '7d' }
     );
+    setAuthCookie(res, token);
 
     return res.json({
       message: 'Login successful',
       role: 'college',
-      token,
       user: {
         id:           staff.college_id,
         name:         staff.college_name,
@@ -245,11 +276,8 @@ router.post('/login/college', loginLimiter, async (req, res) => {
 });
 
 // ── Admin login ─────────────────────────────────────────────
-router.post('/login/admin', loginLimiter, async (req, res) => {
+router.post('/login/admin', loginLimiter, emailLoginValidators, validate, async (req, res) => {
   const { email, password } = req.body;
-  if (!email || !password) {
-    return res.status(400).json({ message: 'Email and password are required.' });
-  }
   try {
     const result = await db.request()
       .input('email', email)
@@ -264,10 +292,10 @@ router.post('/login/admin', loginLimiter, async (req, res) => {
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
     const token = jwt.sign({ id: admin.id, role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
+    setAuthCookie(res, token);
     return res.json({
       message: 'Login successful',
       role: 'admin',
-      token,
       user: { id: admin.id, name: admin.name, email: admin.email },
     });
   } catch (err) {
@@ -277,11 +305,8 @@ router.post('/login/admin', loginLimiter, async (req, res) => {
 });
 
 // ── College staff (sub-user) login ──────────────────────────
-router.post('/login/college-user', loginLimiter, async (req, res) => {
+router.post('/login/college-user', loginLimiter, emailLoginValidators, validate, async (req, res) => {
   const { email, password } = req.body;
-  if (!email || !password) {
-    return res.status(400).json({ message: 'Email and password are required.' });
-  }
   try {
     const result = await db.request()
       .input('email', email.trim().toLowerCase())
@@ -332,11 +357,11 @@ router.post('/login/college-user', loginLimiter, async (req, res) => {
       JWT_SECRET,
       { expiresIn: '7d' }
     );
+    setAuthCookie(res, token);
 
     return res.json({
       message: 'Login successful',
       role: 'college',
-      token,
       user: {
         id:           user.college_id,
         name:         user.college_name,
@@ -367,17 +392,19 @@ const otpLimiter = rateLimit({
   message: { message: 'Too many OTP requests. Please wait 10 minutes.' },
 });
 
+const otpSendValidators = [
+  body('full_name').isString().trim().notEmpty().isLength({ max: 150 }).withMessage('Full name is required (max 150 characters).'),
+  body('email').isEmail().normalizeEmail().withMessage('A valid email address is required.'),
+  body('phone').matches(/^[6-9]\d{9}$/).withMessage('Phone number must be 10 digits starting with 6–9.'),
+  body('password').isString().notEmpty().withMessage('Password is required.'),
+  body('confirm_password').isString().notEmpty().withMessage('Please confirm your password.'),
+];
+
 // ── Send OTP for phone verification ─────────────────────────
 // POST /auth/otp/send   body: { phone, ...registrationFields }
-router.post('/otp/send', otpLimiter, async (req, res) => {
+router.post('/otp/send', otpLimiter, otpSendValidators, validate, async (req, res) => {
   const { phone, full_name, email, password, confirm_password, city, category } = req.body;
 
-  if (!full_name || !email || !password || !phone) {
-    return res.status(400).json({ message: 'Name, email, password and phone are required.' });
-  }
-  if (!/^[6-9]\d{9}$/.test(phone.trim())) {
-    return res.status(400).json({ message: 'Phone number must be 10 digits starting with 6–9.' });
-  }
   const pwdErr = validatePassword(password);
   if (pwdErr) return res.status(400).json({ message: pwdErr });
   if (password !== confirm_password) {
@@ -413,14 +440,15 @@ router.post('/otp/send', otpLimiter, async (req, res) => {
   }
 });
 
+const otpVerifyValidators = [
+  body('phone').matches(/^[6-9]\d{9}$/).withMessage('A valid 10-digit phone number is required.'),
+  body('otp').isString().trim().matches(/^\d{6}$/).withMessage('OTP must be a 6-digit number.'),
+];
+
 // ── Verify OTP and complete registration ─────────────────────
 // POST /auth/otp/verify   body: { phone, otp }
-router.post('/otp/verify', async (req, res) => {
+router.post('/otp/verify', otpVerifyValidators, validate, async (req, res) => {
   const { phone, otp } = req.body;
-
-  if (!phone || !otp) {
-    return res.status(400).json({ message: 'Phone and OTP are required.' });
-  }
 
   const normPhone = whatsapp.normalisePhone(phone.trim());
 
@@ -517,11 +545,11 @@ router.post('/register/student', registerLimiter, async (req, res) => {
 
 // ── Forgot password — send OTP ───────────────────────────────
 // POST /auth/forgot-password/send-otp   body: { phone }
-router.post('/forgot-password/send-otp', otpLimiter, async (req, res) => {
+router.post('/forgot-password/send-otp', otpLimiter,
+  body('phone').matches(/^[6-9]\d{9}$/).withMessage('A valid 10-digit phone number is required.'),
+  validate,
+  async (req, res) => {
   const { phone } = req.body;
-  if (!phone || !/^[6-9]\d{9}$/.test(phone.trim())) {
-    return res.status(400).json({ message: 'A valid 10-digit phone number is required.' });
-  }
 
   try {
     const found = await db.request()
@@ -545,14 +573,17 @@ router.post('/forgot-password/send-otp', otpLimiter, async (req, res) => {
   }
 });
 
+const forgotPasswordResetValidators = [
+  body('phone').matches(/^[6-9]\d{9}$/).withMessage('A valid 10-digit phone number is required.'),
+  body('otp').isString().trim().matches(/^\d{6}$/).withMessage('OTP must be a 6-digit number.'),
+  body('new_password').isString().notEmpty().withMessage('New password is required.'),
+];
+
 // ── Forgot password — verify OTP + reset password ────────────
 // POST /auth/forgot-password/reset   body: { phone, otp, new_password }
-router.post('/forgot-password/reset', async (req, res) => {
+router.post('/forgot-password/reset', forgotPasswordResetValidators, validate, async (req, res) => {
   const { phone, otp, new_password } = req.body;
 
-  if (!phone || !otp || !new_password) {
-    return res.status(400).json({ message: 'Phone, OTP and new password are required.' });
-  }
   const pwdErr = validatePassword(new_password);
   if (pwdErr) return res.status(400).json({ message: pwdErr });
 
@@ -576,6 +607,32 @@ router.post('/forgot-password/reset', async (req, res) => {
     logger.error({ err }, 'Password reset error');
     return res.status(500).json({ message: 'Server error. Please try again.' });
   }
+});
+
+// ── Refresh token ────────────────────────────────────────────
+// Reads the existing httpOnly cookie, verifies it, and issues a fresh one.
+// Call this when the user is active but the token is near expiry (e.g. < 1 day left).
+router.post('/refresh', (req, res) => {
+  const token = req.cookies?.auth_token;
+  if (!token) return res.status(401).json({ message: 'No session found.' });
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    // Strip JWT metadata fields before re-signing
+    const { iat, exp, ...claims } = payload;
+    const newToken = jwt.sign(claims, JWT_SECRET, { expiresIn: '7d' });
+    setAuthCookie(res, newToken);
+    return res.json({ message: 'Session refreshed.' });
+  } catch {
+    res.clearCookie('auth_token', { httpOnly: true, secure: IS_PROD, sameSite: IS_PROD ? 'strict' : 'lax', path: '/' });
+    return res.status(401).json({ message: 'Session expired. Please log in again.' });
+  }
+});
+
+// ── Logout ──────────────────────────────────────────────────
+router.post('/logout', (req, res) => {
+  res.clearCookie('auth_token', { httpOnly: true, secure: IS_PROD, sameSite: IS_PROD ? 'strict' : 'lax', path: '/' });
+  return res.json({ message: 'Logged out.' });
 });
 
 module.exports = router;

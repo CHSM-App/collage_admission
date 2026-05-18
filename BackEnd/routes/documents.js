@@ -9,15 +9,16 @@
  * GET    /application-documents/:applicationId     — list docs for a specific application (college view)
  */
 
-const express = require('express')
-const multer  = require('multer')
-const path    = require('path')
-const fs      = require('fs')
-const router  = express.Router()
-const db      = require('./db')
-const mssql   = require('mssql')
+const express   = require('express')
+const multer    = require('multer')
+const path      = require('path')
+const fs        = require('fs')
+const router    = express.Router()
+const db        = require('./db')
+const mssql     = require('mssql')
 const { authenticate } = require('../middleware/auth')
-const logger  = require('../config/logger')
+const logger    = require('../config/logger')
+const { fileTypeFromBuffer } = require('file-type')
 
 // All document routes require authentication
 router.use(authenticate)
@@ -112,19 +113,38 @@ router.get('/student-documents', async (req, res) => {
   }
 })
 
+// Magic-bytes → allowed MIME types map
+const MAGIC_MIME_WHITELIST = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
+
+async function validateMagicBytes(filePath) {
+  // Read first 4 KB — enough for all supported formats
+  const fd  = fs.openSync(filePath, 'r')
+  const buf = Buffer.alloc(4096)
+  const bytesRead = fs.readSync(fd, buf, 0, 4096, 0)
+  fs.closeSync(fd)
+  const result = await fileTypeFromBuffer(buf.slice(0, bytesRead))
+  return result ? result.mime : null
+}
+
 // ── POST /student-documents (multipart) ─────────────────────
 router.post('/student-documents', upload.single('file'), async (req, res) => {
   const student_id = req.query.student_id || req.body.student_id
   const { document_type_id } = req.body
 
   if (!student_id || !document_type_id) {
-    // Clean up uploaded file if validation fails
     if (req.file) fs.unlink(req.file.path, () => {})
     return res.status(400).json({ success: false, message: 'student_id and document_type_id are required.' })
   }
 
   if (!req.file) {
     return res.status(400).json({ success: false, message: 'No file uploaded.' })
+  }
+
+  // Validate actual file content — reject files where magic bytes don't match allowed types
+  const detectedMime = await validateMagicBytes(req.file.path)
+  if (!detectedMime || !MAGIC_MIME_WHITELIST.has(detectedMime)) {
+    fs.unlink(req.file.path, () => {})
+    return res.status(400).json({ success: false, message: 'Invalid file type. Only JPG, PNG, WEBP, and PDF files are allowed.' })
   }
 
   const relativePath = `/uploads/students/${student_id}/${req.file.filename}`
