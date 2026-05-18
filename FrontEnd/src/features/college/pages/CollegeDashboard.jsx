@@ -53,7 +53,7 @@ export default function CollegeDashboard() {
   }
   if (section === 'inbox') {
     if (!navAllowed('inbox')) return <NavBlocked />
-    return <>{readOnly('review_application') && <ReadOnlyBanner label="Applications" />}<ApplicationInbox collegeId={user?.id} readOnly={readOnly('review_application')} /></>
+    return <>{readOnly('review_application') && <ReadOnlyBanner label="Applications" />}<ApplicationInbox collegeId={user?.id} collegeName={user?.name || ''} readOnly={readOnly('review_application')} /></>
   }
   if (section === 'app' && appId) return (
     <ApplicationDetail collegeId={user?.id} appId={appId}

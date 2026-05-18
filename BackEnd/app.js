@@ -28,7 +28,7 @@ var app = express();
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'pug');
 
-const IS_PROD = process.env.NODE_ENV === 'production';
+const IS_PROD = true;
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }, // allow static uploads to be fetched cross-origin
@@ -96,7 +96,7 @@ app.use(function(err, req, res, next) {
   }
   // In production never leak internal error details to the client.
   // 4xx errors are intentional (validation, auth) — their messages are safe to forward.
-  const isProd = process.env.NODE_ENV === 'production';
+  const isProd = true;
   const message = status < 500
     ? (err.message || 'Bad request.')
     : (isProd ? 'An internal server error occurred.' : (err.message || 'Internal server error'));

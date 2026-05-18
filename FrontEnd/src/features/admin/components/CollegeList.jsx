@@ -34,6 +34,7 @@ export default function CollegeList() {
   const [feeVal,      setFeeVal]      = useState('')
   const [feeSaving,   setFeeSaving]   = useState(false)
   const [feeMsg,      setFeeMsg]      = useState('')
+  const [toggling,    setToggling]    = useState(null)   // college id being toggled
   const [pagination,  setPagination]  = useState({ page: 1, totalPages: 1, total: 0 })
   const [page,        setPage]        = useState(1)
 
@@ -67,6 +68,20 @@ export default function CollegeList() {
     if (msg === 'Fee updated.') {
       feeMsgTimer.current = setTimeout(() => setFeeMsg(''), 3000)
     }
+  }
+
+  async function toggleEnabled(c, e) {
+    e.stopPropagation()
+    if (toggling) return
+    const newVal = !c.is_enabled
+    if (!window.confirm(`${newVal ? 'Enable' : 'Disable'} "${c.name}"? ${newVal ? 'College staff will be able to log in.' : 'All college staff will be logged out and cannot log in until re-enabled.'}`)) return
+    setToggling(c.id)
+    try {
+      await updateAdminCollege(c.id, { is_enabled: newVal })
+      fetchColleges()
+    } catch {
+      alert('Failed to update college status.')
+    } finally { setToggling(null) }
   }
 
   async function saveFee() {
@@ -105,6 +120,19 @@ export default function CollegeList() {
             {selected.city && (
               <span className="text-sm text-slate-500">{selected.city}</span>
             )}
+            <button
+              onClick={e => toggleEnabled(selected, e)}
+              disabled={toggling === selected.id}
+              title={selected.is_enabled ? 'Click to disable this college' : 'Click to enable this college'}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition
+                ${selected.is_enabled
+                  ? 'bg-emerald-100 text-emerald-700 hover:bg-red-100 hover:text-red-700'
+                  : 'bg-red-100 text-red-700 hover:bg-emerald-100 hover:text-emerald-700'}
+                ${toggling === selected.id ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${selected.is_enabled ? 'bg-emerald-500' : 'bg-red-500'}`} />
+              {toggling === selected.id ? '…' : selected.is_enabled ? 'Enabled' : 'Disabled'}
+            </button>
           </div>
           {/* Application fee editor */}
           <div className="flex items-center gap-2 flex-wrap">
@@ -188,6 +216,7 @@ export default function CollegeList() {
               <th className="px-4 py-3 text-right">App Fee</th>
               <th className="px-4 py-3 text-center">Roles</th>
               <th className="px-4 py-3 text-center">Staff</th>
+              <th className="px-4 py-3 text-center">Status</th>
               <th className="px-4 py-3"></th>
             </tr>
           </thead>
@@ -202,6 +231,21 @@ export default function CollegeList() {
                 </td>
                 <td className="px-4 py-3 text-center text-slate-700">{c.roles_count}</td>
                 <td className="px-4 py-3 text-center text-slate-700">{c.active_users}</td>
+                <td className="px-4 py-3 text-center">
+                  <button
+                    onClick={e => toggleEnabled(c, e)}
+                    disabled={toggling === c.id}
+                    title={c.is_enabled ? 'Click to disable this college' : 'Click to enable this college'}
+                    className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold transition
+                      ${c.is_enabled
+                        ? 'bg-emerald-100 text-emerald-700 hover:bg-red-100 hover:text-red-700'
+                        : 'bg-red-100 text-red-700 hover:bg-emerald-100 hover:text-emerald-700'}
+                      ${toggling === c.id ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${c.is_enabled ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                    {toggling === c.id ? '…' : c.is_enabled ? 'Enabled' : 'Disabled'}
+                  </button>
+                </td>
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => selectCollege(c)}

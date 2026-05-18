@@ -101,11 +101,12 @@ router.post('/', authenticate, requireAdmin, async (req, res) => {
 router.get('/', async (req, res) => {
   const { page, limit, offset } = parsePage(req.query);
   try {
-    const countRes = await db.request().query('SELECT COUNT(*) AS total FROM colleges');
+    const countRes = await db.request().query('SELECT COUNT(*) AS total FROM colleges WHERE is_enabled = 1');
     const total    = countRes.recordset[0].total;
 
     const dataRes = await db.request().query(`
       SELECT id, name, address, city, phone, email FROM colleges
+      WHERE is_enabled = 1
       ORDER BY name
       ${paginateQuery(offset, limit)}
     `);
@@ -128,7 +129,8 @@ router.get('/search', async (req, res) => {
       .query(`
         SELECT TOP 10 id, name, city, phone, college_code
         FROM colleges
-        WHERE UPPER(college_code) = UPPER(@q) OR UPPER(name) = UPPER(@q)
+        WHERE is_enabled = 1
+          AND (UPPER(college_code) = UPPER(@q) OR UPPER(name) = UPPER(@q))
         ORDER BY name
       `)
     return res.json({ success: true, data: result.recordset })
@@ -144,7 +146,7 @@ router.get('/by-code/:code', async (req, res) => {
   try {
     const collegeRes = await db.request()
       .input('code', code)
-      .query('SELECT id, name, city, phone, email FROM colleges WHERE UPPER(college_code) = @code');
+      .query('SELECT id, name, city, phone, email FROM colleges WHERE UPPER(college_code) = @code AND is_enabled = 1');
 
     if (!collegeRes.recordset.length) {
       return res.status(404).json({ success: false, message: 'No college found with that code. Please check and try again.' });

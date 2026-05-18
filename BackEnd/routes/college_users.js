@@ -59,8 +59,25 @@ const NAV_ITEMS = [
 
 // ── PUT /admin/colleges/:id ──────────────────────────────────
 router.put('/colleges/:id', authenticate, requireAdmin, async (req, res) => {
-  const { application_fee } = req.body;
+  const { application_fee, is_enabled } = req.body;
   const id = parseInt(req.params.id);
+
+  // Toggle enabled/disabled
+  if (is_enabled !== undefined) {
+    const enabled = is_enabled ? 1 : 0;
+    try {
+      await db.request()
+        .input('enabled', mssql.Bit, enabled)
+        .input('id',      mssql.Int, id)
+        .query(`UPDATE colleges SET is_enabled = @enabled WHERE id = @id`);
+      return res.json({ success: true, message: enabled ? 'College enabled.' : 'College disabled.' });
+    } catch (err) {
+      logger.error({ err });
+      return res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  }
+
+  // Update application fee
   if (application_fee === undefined || application_fee === null || application_fee === '') {
     return res.status(400).json({ success: false, message: 'application_fee is required.' });
   }
@@ -88,7 +105,7 @@ router.get('/colleges', authenticate, requireAdmin, async (req, res) => {
     const total    = countRes.recordset[0].total;
 
     const dataRes = await db.request().query(`
-      SELECT c.id, c.name, c.city, c.email, c.college_code, c.application_fee,
+      SELECT c.id, c.name, c.city, c.email, c.college_code, c.application_fee, c.is_enabled,
              (SELECT COUNT(*) FROM college_users cu WHERE cu.college_id = c.id AND cu.is_active = 1) AS active_users,
              (SELECT COUNT(*) FROM college_roles cr WHERE cr.college_id = c.id) AS roles_count
       FROM colleges c

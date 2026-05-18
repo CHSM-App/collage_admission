@@ -37,3 +37,6 @@ export const generateRollNumbers = (collegeId, data) =>
 
 export const searchStudents = (collegeId, query) =>
   api.get(`college-admin/${collegeId}/students/search?q=${encodeURIComponent(query)}`)
+
+export const exportApplications = (collegeId, params) =>
+  api.get(`college-admin/${collegeId}/applications/export?${params}`)

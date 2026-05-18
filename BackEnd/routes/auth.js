@@ -181,12 +181,13 @@ router.post('/login/college', loginLimiter, emailLoginValidators, validate, asyn
     // 1. Try college admin first
     const adminResult = await db.request()
       .input('email', email.trim().toLowerCase())
-      .query('SELECT id, name, address, admin_email, admin_password_hash, city, college_code FROM colleges WHERE admin_email = @email');
+      .query('SELECT id, name, address, admin_email, admin_password_hash, city, college_code, is_enabled FROM colleges WHERE admin_email = @email');
 
     if (adminResult.recordset.length > 0) {
       const college = adminResult.recordset[0];
       const match   = await bcrypt.compare(password, college.admin_password_hash);
       if (!match) return res.status(401).json({ message: 'Invalid email or password.' });
+      if (!college.is_enabled) return res.status(403).json({ message: 'This college account has been disabled. Please contact the platform administrator.' });
 
       const token = jwt.sign({ id: college.id, role: 'college', is_staff: false }, JWT_SECRET, { expiresIn: '7d' });
       setAuthCookie(res, token);
@@ -210,7 +211,7 @@ router.post('/login/college', loginLimiter, emailLoginValidators, validate, asyn
       .query(`
         SELECT u.id, u.full_name, u.email, u.password_hash, u.is_active,
                u.college_id, u.role_id,
-               c.name AS college_name, c.address AS college_address, c.college_code,
+               c.name AS college_name, c.address AS college_address, c.college_code, c.is_enabled AS college_enabled,
                r.role_name,
                (SELECT p.permission, p.can_write
                 FROM college_role_permissions p
@@ -227,6 +228,9 @@ router.post('/login/college', loginLimiter, emailLoginValidators, validate, asyn
     }
 
     const staff = staffResult.recordset[0];
+    if (!staff.college_enabled) {
+      return res.status(403).json({ message: 'This college account has been disabled. Please contact the platform administrator.' });
+    }
     if (!staff.is_active) {
       return res.status(403).json({ message: 'Your account has been deactivated. Contact the administrator.' });
     }

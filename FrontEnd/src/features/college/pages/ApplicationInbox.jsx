@@ -4,6 +4,7 @@ import { useApplicationsList } from '../hooks/useApplicationsList.js'
 import { useSortableTable } from '../../../shared/hooks/useSortableTable.js'
 import Pagination from '../../../shared/components/Pagination.jsx'
 import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
+import ExportDialog from '../components/ExportDialog.jsx'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 
@@ -45,7 +46,7 @@ function useStatusCounts(apps) {
   }, [apps])
 }
 
-export default function ApplicationInbox({ collegeId }) {
+export default function ApplicationInbox({ collegeId, collegeName = '' }) {
   const navigate = useNavigate()
 
   const [page, setPage]                 = useState(1)
@@ -53,6 +54,7 @@ export default function ApplicationInbox({ collegeId }) {
   const [filterStatus, setFilterStatus] = useState('')
   const [filterCourse, setFilterCourse] = useState('')
   const [filterYear, setFilterYear]     = useState('')
+  const [showExport, setShowExport]     = useState(false)
 
   // Reset to page 1 whenever filters change
   useEffect(() => { setPage(1) }, [filterStatus, filterCourse, filterYear])
@@ -103,10 +105,31 @@ export default function ApplicationInbox({ collegeId }) {
 
   return (
     <section className="space-y-5">
-      <div>
-        <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">College portal</p>
-        <h1 className="mt-2 text-3xl font-bold text-slate-950">Application Inbox</h1>
-        <p className="mt-1 text-slate-600">Review and manage student applications.</p>
+      {showExport && (
+        <ExportDialog
+          collegeId={collegeId}
+          collegeName={collegeName}
+          courseOptions={courseOptions}
+          yearOptions={yearOptions}
+          onClose={() => setShowExport(false)}
+        />
+      )}
+
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-wide text-blue-600">College portal</p>
+          <h1 className="mt-2 text-3xl font-bold text-slate-950">Application Inbox</h1>
+          <p className="mt-1 text-slate-600">Review and manage student applications.</p>
+        </div>
+        <button
+          onClick={() => setShowExport(true)}
+          className="flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 transition shrink-0 mt-2"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a2 2 0 002 2h12a2 2 0 002-2v-1M8 12l4 4 4-4M12 4v12"/>
+          </svg>
+          Export
+        </button>
       </div>
 
       {/* Filters */}

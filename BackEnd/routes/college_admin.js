@@ -287,6 +287,83 @@ router.get('/:collegeId/applications', requirePerm('review_application'), async 
   }
 });
 
+// ── Export applications (no pagination — all matching rows) ──
+router.get('/:collegeId/applications/export', requirePerm('review_application'), async (req, res) => {
+  const { status, course_id, year_of_study } = req.query;
+  try {
+    const pool = await db;
+    const collegeId = parseInt(req.params.collegeId);
+
+    let where = `WHERE a.college_id = @col AND a.status <> 'draft'`;
+    const extraInputs = [];
+
+    if (status) {
+      const statuses = status.split(',').map(s => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        where += ' AND a.status = @status';
+        extraInputs.push(r => r.input('status', statuses[0]));
+      } else {
+        const placeholders = statuses.map((_, i) => `@s${i}`).join(',');
+        where += ` AND a.status IN (${placeholders})`;
+        statuses.forEach((s, i) => extraInputs.push(r => r.input(`s${i}`, s)));
+      }
+    }
+    if (course_id) {
+      where += ' AND a.course_id = @crs';
+      extraInputs.push(r => r.input('crs', parseInt(course_id)));
+    }
+    if (year_of_study) {
+      where += ' AND a.year_of_study = @yr';
+      extraInputs.push(r => r.input('yr', parseInt(year_of_study)));
+    }
+
+    const req2 = pool.request().input('col', collegeId);
+    extraInputs.forEach(fn => fn(req2));
+
+    const dataRes = await req2.query(`
+      SELECT
+        a.registration_number,
+        s.full_name        AS student_name,
+        s.phone,
+        s.email            AS student_email,
+        a.year_of_study,
+        a.academic_year,
+        a.status,
+        a.submitted_at,
+        a.roll_number,
+        COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name,
+        -- SSC
+        ssc.board_or_college_name  AS ssc_board,
+        ssc.seat_number            AS ssc_seat_no,
+        ssc.month_year_passing     AS ssc_passing,
+        ssc.total_marks_obtained   AS ssc_marks_obtained,
+        ssc.total_marks_max        AS ssc_marks_max,
+        ssc.percentage             AS ssc_percentage,
+        ssc.class_grade            AS ssc_class,
+        -- HSC
+        hsc.board_or_college_name  AS hsc_board,
+        hsc.seat_number            AS hsc_seat_no,
+        hsc.month_year_passing     AS hsc_passing,
+        hsc.total_marks_obtained   AS hsc_marks_obtained,
+        hsc.total_marks_max        AS hsc_marks_max,
+        hsc.percentage             AS hsc_percentage,
+        hsc.class_grade            AS hsc_class
+      FROM applications a
+      JOIN students s ON s.id = a.student_id
+      LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+      LEFT JOIN application_previous_exam ssc ON ssc.application_id = a.id AND ssc.exam_type = 'SSC'
+      LEFT JOIN application_previous_exam hsc ON hsc.application_id = a.id AND hsc.exam_type = 'HSC'
+      ${where}
+      ORDER BY a.submitted_at DESC
+    `);
+
+    return res.json({ success: true, data: dataRes.recordset });
+  } catch (err) {
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
 router.get('/:collegeId/applications/:appId', requirePerm('review_application'), async (req, res) => {
   try {
     const result = await db.request()

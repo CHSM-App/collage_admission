@@ -1,4 +1,6 @@
-const jwt = require('jsonwebtoken');
+const jwt  = require('jsonwebtoken');
+const db   = require('../routes/db');
+const mssql = require('mssql');
 const logger = require('../config/logger');
 
 if (!process.env.JWT_SECRET) {
@@ -51,8 +53,9 @@ function requirePerm(perm) {
 }
 
 // Require the caller is a college (admin or staff) and their college_id matches the :collegeId param.
+// Also checks is_enabled on every request — kicks out already-logged-in staff if college is disabled.
 // Super-admins (role === 'admin') can access any college's data.
-function requireCollegeAccess(req, res, next) {
+async function requireCollegeAccess(req, res, next) {
   const u = req.user;
   if (!u) {
     return res.status(401).json({ success: false, message: 'Authentication required.' });
@@ -65,6 +68,18 @@ function requireCollegeAccess(req, res, next) {
   const paramCollegeId = parseInt(req.params.collegeId);
   if (paramCollegeId && u.id !== paramCollegeId) {
     return res.status(403).json({ success: false, message: 'Access denied to this college.' });
+  }
+  // Live check: reject if college has been disabled since token was issued
+  try {
+    const result = await db.request()
+      .input('id', mssql.Int, u.id)
+      .query('SELECT is_enabled FROM colleges WHERE id = @id');
+    if (!result.recordset.length || !result.recordset[0].is_enabled) {
+      return res.status(403).json({ success: false, message: 'This college account has been disabled. Please contact the platform administrator.' });
+    }
+  } catch (err) {
+    logger.error({ err }, 'requireCollegeAccess: DB check failed');
+    return res.status(500).json({ success: false, message: 'Server error.' });
   }
   next();
 }
