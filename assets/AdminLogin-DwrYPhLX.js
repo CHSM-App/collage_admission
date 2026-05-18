@@ -1,0 +1,1 @@
+import{n as e}from"./Button-Cd2fIBWT.js";import{t}from"./RoleLoginForm-BdbAi0S4.js";var n=e();function r(){return(0,n.jsx)(t,{role:`admin`})}export{r as default};
