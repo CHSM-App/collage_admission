@@ -1,6 +1,7 @@
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import ErrorBoundary from '../shared/components/ErrorBoundary.jsx'
+import ChatBot from '../components/ChatBot.jsx'
 import { DASHBOARD_PATHS } from '../app/routePaths.js'
 import Button from '../shared/components/Button.jsx'
 import { useAuth } from '../features/auth/hooks/useAuth.js'
@@ -342,6 +343,9 @@ export default function DashboardLayout() {
           </ErrorBoundary>
         </main>
       </div>
+
+      {/* ── AI Chatbot (floating, available on all dashboard pages) ── */}
+      <ChatBot />
 
       {/* ── New notification popup (shown once per session on login) ── */}
       {popup && (

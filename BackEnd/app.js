@@ -19,6 +19,7 @@ var mastersRouter        = require('./routes/masters');
 var collegeUsersRouter   = require('./routes/college_users');
 var notificationsRouter  = require('./routes/notifications');
 var certificatesRouter   = require('./routes/certificates');
+var chatRouter           = require('./routes/chat');
 var indexRouter          = require('./routes/index');
 
 var app = express();
@@ -79,6 +80,7 @@ app.use('/masters',       mastersRouter);
 app.use('/admin',         collegeUsersRouter);
 app.use('/notifications', notificationsRouter);
 app.use('/certificates',  certificatesRouter);
+app.use('/chat',          chatRouter);
 app.use('/',              documentsRouter);
 
 // ── 404 handler ──────────────────────────────────────────────
