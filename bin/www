@@ -1,0 +1,128 @@
+#!/usr/bin/env node
+
+// Validate required env vars before loading anything else.
+// Exits with a clear error if any are missing.
+require('../config/env');
+
+/**
+ * Module dependencies.
+ */
+
+var app = require('../app');
+var debug = require('debug')('app:server');
+var http = require('http');
+var db = require('../routes/db');
+var logger = require('../config/logger');
+
+/**
+ * Get port from environment and store in Express.
+ */
+
+var port = normalizePort(process.env.PORT || '3000');
+app.set('port', port);
+
+/**
+ * Create HTTP server.
+ */
+
+var server = http.createServer(app);
+
+/**
+ * Listen on provided port, on all network interfaces.
+ */
+
+server.listen(port);
+server.on('error', onError);
+server.on('listening', onListening);
+
+/**
+ * Graceful shutdown — stop accepting new connections, drain in-flight
+ * requests, then close the DB pool before exiting.
+ */
+const SHUTDOWN_TIMEOUT_MS = 10000;
+
+function shutdown(signal) {
+  logger.info(`${signal} received — shutting down gracefully`);
+
+  // Force-exit if graceful shutdown takes too long
+  const timer = setTimeout(() => {
+    logger.error('Shutdown timed out — forcing exit');
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+  timer.unref(); // don't keep process alive just for this timer
+
+  server.close(async () => {
+    logger.info('HTTP server closed');
+    try {
+      await db.close();
+      logger.info('DB pool closed');
+    } catch (err) {
+      logger.error({ err }, 'Error closing DB pool');
+    }
+    clearTimeout(timer);
+    process.exit(0);
+  });
+}
+
+process.on('SIGINT',  () => shutdown('SIGINT'));
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+/**
+ * Normalize a port into a number, string, or false.
+ */
+
+function normalizePort(val) {
+  var port = parseInt(val, 10);
+
+  if (isNaN(port)) {
+    // named pipe
+    return val;
+  }
+
+  if (port >= 0) {
+    // port number
+    return port;
+  }
+
+  return false;
+}
+
+/**
+ * Event listener for HTTP server "error" event.
+ */
+
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+
+  var bind = typeof port === 'string'
+    ? 'Pipe ' + port
+    : 'Port ' + port;
+
+  // handle specific listen errors with friendly messages
+  switch (error.code) {
+    case 'EACCES':
+      console.error(bind + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(bind + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+/**
+ * Event listener for HTTP server "listening" event.
+ */
+
+function onListening() {
+  var addr = server.address();
+  var bind = typeof addr === 'string'
+    ? 'pipe ' + addr
+    : 'port ' + addr.port;
+  debug('Listening on ' + bind);
+}
