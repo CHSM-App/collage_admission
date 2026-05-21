@@ -49,7 +49,7 @@ export default function CollegeDashboard() {
 
   if (section === 'periods') {
     if (!navAllowed('periods')) return <NavBlocked />
-    return <>{readOnly('masters') && <ReadOnlyBanner label="Admission Periods" />}<AdmissionPeriods collegeId={user?.id} readOnly={readOnly('masters')} /></>
+    return <>{readOnly('manage_admission_periods') && <ReadOnlyBanner label="Admission Periods" />}<AdmissionPeriods collegeId={user?.id} readOnly={readOnly('manage_admission_periods')} /></>
   }
   if (section === 'inbox') {
     if (!navAllowed('inbox')) return <NavBlocked />

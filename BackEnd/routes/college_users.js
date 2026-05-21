@@ -35,6 +35,7 @@ const ALL_PERMISSIONS = [
   'review_documents',
   'assign_subjects',
   'collect_fees',
+  'manage_admission_periods',
   'masters',
   'certificates',
 ];

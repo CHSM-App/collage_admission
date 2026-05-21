@@ -5,15 +5,16 @@ import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 
 // ── Permission definitions ────────────────────────────────────
 const ALL_PERMISSIONS = [
-  { key: 'submit_application', label: 'Submit New Application',       desc: 'Fill and submit the admission form on behalf of a student' },
-  { key: 'review_application', label: 'Review & Approve Applications', desc: 'Accept, reject, request corrections, and set fees for applications' },
-  { key: 'edit_application',   label: 'Edit Student Application',      desc: 'Edit a student\'s filled application form' },
-  { key: 'upload_documents',   label: 'Upload Documents',              desc: 'Upload documents on behalf of an applicant' },
-  { key: 'review_documents',   label: 'Verify Documents',              desc: 'Mark uploaded documents as verified' },
-  { key: 'collect_fees',       label: 'Collect Fees',                  desc: 'Record cash payments and manage fee receipts' },
-  { key: 'assign_subjects',    label: 'Assign Roll Numbers',           desc: 'Generate and assign roll numbers to enrolled students' },
-  { key: 'masters',            label: 'Manage Masters',                desc: 'Add/edit program, course, bank, fee, and document masters' },
-  { key: 'certificates',       label: 'Issue Certificates',            desc: 'Generate bonafide, character, and no objection certificates for students' },
+  { key: 'submit_application',      label: 'Submit New Application',       desc: 'Fill and submit the admission form on behalf of a student' },
+  { key: 'review_application',      label: 'Review & Approve Applications', desc: 'Accept, reject, request corrections, and set fees for applications' },
+  { key: 'edit_application',        label: 'Edit Student Application',      desc: 'Edit a student\'s filled application form' },
+  { key: 'upload_documents',        label: 'Upload Documents',              desc: 'Upload documents on behalf of an applicant' },
+  { key: 'review_documents',        label: 'Verify Documents',              desc: 'Mark uploaded documents as verified' },
+  { key: 'collect_fees',            label: 'Collect Fees',                  desc: 'Record cash payments and manage fee receipts' },
+  { key: 'assign_subjects',         label: 'Assign Roll Numbers',           desc: 'Generate and assign roll numbers to enrolled students' },
+  { key: 'manage_admission_periods', label: 'Manage Admission Periods',     desc: 'Open, close, and edit admission periods (academic year, seats, dates)' },
+  { key: 'masters',                 label: 'Manage Masters',                desc: 'Add/edit program, course, bank, fee, and document masters' },
+  { key: 'certificates',            label: 'Issue Certificates',            desc: 'Generate bonafide, character, and no objection certificates for students' },
 ]
 
 // ── Nav visibility definitions ────────────────────────────────
@@ -196,10 +197,14 @@ export default function RolesPanel({ college }) {
 
   const allUsers = roles.flatMap(r => r.users.map(u => ({ ...u, role_name: r.role_name, role_id: r.id })))
   const grantedPerms = (role) => ALL_PERMISSIONS.filter(p => role.permissions.find(rp => rp.permission === p.key)?.can_write)
-  const hiddenNav = (role) => ALL_NAV_ITEMS.filter(n => {
-    const entry = role.permissions.find(rp => rp.permission === `nav:${n.key}`)
-    return entry ? !entry.can_write : false
-  })
+  const hiddenNav = (role) => {
+    const hasPeriodsPerm = !!role.permissions.find(rp => rp.permission === 'manage_admission_periods')?.can_write
+    return ALL_NAV_ITEMS.filter(n => {
+      if (n.key === 'periods' && !hasPeriodsPerm) return true
+      const entry = role.permissions.find(rp => rp.permission === `nav:${n.key}`)
+      return entry ? !entry.can_write : false
+    })
+  }
 
   return (
     <div className="space-y-5">
@@ -287,7 +292,14 @@ export default function RolesPanel({ college }) {
                           <input
                             type="checkbox"
                             checked={!!roleForm.permissions[p.key]}
-                            onChange={e => setRoleForm(f => ({ ...f, permissions: { ...f.permissions, [p.key]: e.target.checked } }))}
+                            onChange={e => setRoleForm(f => {
+                              const next = { ...f, permissions: { ...f.permissions, [p.key]: e.target.checked } }
+                              // Gate 'periods' sidebar nav by the new permission: turning it off hides nav too.
+                              if (p.key === 'manage_admission_periods' && !e.target.checked) {
+                                next.nav_visibility = { ...f.nav_visibility, periods: false }
+                              }
+                              return next
+                            })}
                             className="sr-only"
                           />
                           <div className={`h-5 w-5 rounded-md border-2 flex items-center justify-center transition ${
@@ -331,24 +343,30 @@ export default function RolesPanel({ college }) {
                       <div key={section.group}>
                         <p className="text-xs font-bold uppercase tracking-wide text-slate-400 mb-2">{section.group}</p>
                         <div className="rounded-xl border border-slate-200 overflow-hidden divide-y divide-slate-100">
-                          {section.items.map(n => (
+                          {section.items.map(n => {
+                            const lockedByPerm = n.key === 'periods' && !roleForm.permissions.manage_admission_periods
+                            const isVisible    = !!roleForm.nav_visibility[n.key] && !lockedByPerm
+                            return (
                             <label key={n.key}
-                              className={`flex items-center gap-4 px-4 py-3 cursor-pointer transition ${
-                                roleForm.nav_visibility[n.key] ? 'bg-white hover:bg-blue-50' : 'bg-slate-50'
+                              className={`flex items-center gap-4 px-4 py-3 transition ${
+                                lockedByPerm ? 'cursor-not-allowed opacity-60 bg-slate-50' : 'cursor-pointer'
+                              } ${
+                                isVisible ? 'bg-white hover:bg-blue-50' : (lockedByPerm ? '' : 'bg-slate-50')
                               }`}>
                               <div className="shrink-0">
                                 <input
                                   type="checkbox"
-                                  checked={!!roleForm.nav_visibility[n.key]}
+                                  checked={isVisible}
+                                  disabled={lockedByPerm}
                                   onChange={e => setRoleForm(f => ({ ...f, nav_visibility: { ...f.nav_visibility, [n.key]: e.target.checked } }))}
                                   className="sr-only"
                                 />
                                 <div className={`h-5 w-5 rounded-md border-2 flex items-center justify-center transition ${
-                                  roleForm.nav_visibility[n.key]
+                                  isVisible
                                     ? 'bg-blue-500 border-blue-500'
                                     : 'border-slate-300 bg-white'
                                 }`}>
-                                  {roleForm.nav_visibility[n.key] && (
+                                  {isVisible && (
                                     <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
                                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                                     </svg>
@@ -356,20 +374,24 @@ export default function RolesPanel({ college }) {
                                 </div>
                               </div>
                               <div className="flex-1 min-w-0">
-                                <p className={`text-sm font-semibold ${roleForm.nav_visibility[n.key] ? 'text-slate-800' : 'text-slate-400'}`}>
+                                <p className={`text-sm font-semibold ${isVisible ? 'text-slate-800' : 'text-slate-400'}`}>
                                   {n.label}
                                 </p>
-                                <p className="text-xs text-slate-400 mt-0.5">{n.desc}</p>
+                                <p className="text-xs text-slate-400 mt-0.5">
+                                  {lockedByPerm
+                                    ? <>Grant <strong>Manage Admission Periods</strong> above to enable this section.</>
+                                    : n.desc}
+                                </p>
                               </div>
                               <span className={`shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${
-                                roleForm.nav_visibility[n.key]
+                                isVisible
                                   ? 'bg-blue-50 text-blue-600'
                                   : 'bg-slate-100 text-slate-400'
                               }`}>
-                                {roleForm.nav_visibility[n.key] ? 'Visible' : 'Hidden'}
+                                {isVisible ? 'Visible' : 'Hidden'}
                               </span>
                             </label>
-                          ))}
+                          )})}
                         </div>
                       </div>
                     ))}
