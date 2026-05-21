@@ -111,7 +111,7 @@ router.get('/:collegeId/admission-periods', async (req, res) => {
   }
 });
 
-router.post('/:collegeId/admission-periods', requirePerm('masters'), async (req, res) => {
+router.post('/:collegeId/admission-periods', requirePerm('manage_admission_periods'), async (req, res) => {
   const { course_id, year_of_study, academic_year, start_date, end_date, total_seats } = req.body;
 
   if (!course_id || !year_of_study || !academic_year || !start_date || !end_date || !total_seats) {
@@ -141,7 +141,7 @@ router.post('/:collegeId/admission-periods', requirePerm('masters'), async (req,
   }
 });
 
-router.put('/:collegeId/admission-periods/:periodId', requirePerm('masters'), async (req, res) => {
+router.put('/:collegeId/admission-periods/:periodId', requirePerm('manage_admission_periods'), async (req, res) => {
   const { start_date, end_date, total_seats, is_active, is_disabled } = req.body;
 
   try {
@@ -172,7 +172,7 @@ router.put('/:collegeId/admission-periods/:periodId', requirePerm('masters'), as
   }
 });
 
-router.delete('/:collegeId/admission-periods/:periodId', requirePerm('masters'), async (req, res) => {
+router.delete('/:collegeId/admission-periods/:periodId', requirePerm('manage_admission_periods'), async (req, res) => {
   const periodId  = parseInt(req.params.periodId);
   const collegeId = parseInt(req.params.collegeId);
   try {

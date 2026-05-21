@@ -15,7 +15,7 @@ const YEAR_LONG  = {
 
 export default function AdmissionPeriods({ collegeId }) {
   const { canWrite } = usePermissions()
-  const rw = canWrite('masters')
+  const rw = canWrite('manage_admission_periods')
   const toast = useToast()
   const [periods, setPeriods]       = useState([])
   const [courses, setCourses]       = useState([])
