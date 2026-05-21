@@ -237,10 +237,7 @@ async function notifyCorrectionRequested(student, applicationId) {
 async function notifyApplicationAccepted(student, applicationId) {
   const phone = normalisePhone(student.phone)
   if (!phone) return
-  const fromDate = student.start_date ? new Date(student.start_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
-  const toDate   = student.end_date   ? new Date(student.end_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : ''
-  const sample = `${student.name},${student.course_name},${student.college_name || ''},${fromDate},${toDate}`
-  return sendTemplateMessage(phone, TEMPLATES.accepted, sample, 'application_accepted', applicationId)
+  return sendTemplateMessage(phone, TEMPLATES.accepted, `${student.name},${student.course_name || ''},${student.college_name || ''}`, 'application_accepted', applicationId)
 }
 
 async function notifyApplicationRejected(student, applicationId) {
