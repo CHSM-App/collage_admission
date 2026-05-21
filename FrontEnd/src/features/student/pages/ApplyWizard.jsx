@@ -137,7 +137,7 @@ export default function ApplyWizard() {
           {currentStep === 1 && (
             <Step1Context
               {...stepProps}
-              onNext={() => saveAndNext(null, null, 2)}
+              onNext={() => saveAndNext('confirm-context', {}, 2)}
             />
           )}
           {currentStep === 2 && (

@@ -28,8 +28,10 @@ const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/p
 const whatsapp = require('../services/whatsapp');
 const logger = require('../config/logger');
 
-// All routes in this file require authentication and college ownership
-router.use(authenticate, requireCollegeAccess);
+// All routes require authentication. College ownership is enforced via router.param
+// so that req.params.collegeId is available when the check runs.
+router.use(authenticate);
+router.param('collegeId', (req, res, next) => requireCollegeAccess(req, res, next));
 
 // ── Activity log helper ─────────────────────────────────────
 async function logActivity(appId, action, actorRole, note = null) {

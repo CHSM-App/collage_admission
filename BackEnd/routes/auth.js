@@ -133,7 +133,7 @@ router.use('/otp',   auditLog);
 router.use('/forgot-password', auditLog);
 
 // ── Student login ───────────────────────────────────────────
-router.post('/login/student', loginLimiter, studentLoginValidators, validate, async (req, res) => {
+router.post('/login/student', studentLoginValidators, validate, async (req, res) => {
   const { phone, password } = req.body;
 
   try {
@@ -174,7 +174,7 @@ router.post('/login/student', loginLimiter, studentLoginValidators, validate, as
 });
 
 // ── College login (admin OR staff — single endpoint) ────────
-router.post('/login/college', loginLimiter, emailLoginValidators, validate, async (req, res) => {
+router.post('/login/college', emailLoginValidators, validate, async (req, res) => {
   const { email, password } = req.body;
 
   try {
@@ -280,7 +280,7 @@ router.post('/login/college', loginLimiter, emailLoginValidators, validate, asyn
 });
 
 // ── Admin login ─────────────────────────────────────────────
-router.post('/login/admin', loginLimiter, emailLoginValidators, validate, async (req, res) => {
+router.post('/login/admin', emailLoginValidators, validate, async (req, res) => {
   const { email, password } = req.body;
   try {
     const result = await db.request()
@@ -309,7 +309,7 @@ router.post('/login/admin', loginLimiter, emailLoginValidators, validate, async 
 });
 
 // ── College staff (sub-user) login ──────────────────────────
-router.post('/login/college-user', loginLimiter, emailLoginValidators, validate, async (req, res) => {
+router.post('/login/college-user', emailLoginValidators, validate, async (req, res) => {
   const { email, password } = req.body;
   try {
     const result = await db.request()

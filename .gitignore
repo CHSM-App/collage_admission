@@ -1,0 +1,11 @@
+# Dependencies
+node_modules/
+
+# E2E generated artifacts (auth tokens, test reports, screenshots, videos)
+e2e/auth-states/
+e2e/report/
+test-results/
+playwright-report/
+
+# Lock file (generated, managed per-environment)
+package-lock.json

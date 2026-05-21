@@ -1,0 +1,33 @@
+{
+  "name": "collage_admission",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:report": "playwright show-report e2e/report",
+    "test:e2e:auth": "playwright test e2e/tests/auth.spec.js",
+    "test:e2e:browse": "playwright test e2e/tests/student-browse-colleges.spec.js",
+    "test:e2e:wizard": "playwright test e2e/tests/application-wizard.spec.js",
+    "test:e2e:college": "playwright test e2e/tests/college-admin-review.spec.js",
+    "test:e2e:admin": "playwright test e2e/tests/admin.spec.js",
+    "test:e2e:security": "playwright test e2e/tests/security.spec.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CHSM-App/collage_admission.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/CHSM-App/collage_admission/issues"
+  },
+  "homepage": "https://github.com/CHSM-App/collage_admission#readme",
+  "devDependencies": {
+    "@playwright/test": "^1.60.0"
+  }
+}

@@ -526,6 +526,26 @@ async function assertDraft(appId, res) {
   return app;
 }
 
+// ── PATCH /api/applications/:id/confirm-context (Step 1 → advance to step 2) ───
+router.patch('/applications/:id/confirm-context', async (req, res) => {
+  const appId = parseInt(req.params.id);
+  const app = await assertDraft(appId, res);
+  if (!app) return;
+  try {
+    await db.request()
+      .input('id', mssql.Int, appId)
+      .query(`
+        UPDATE applications
+        SET current_step = CASE WHEN current_step < 2 THEN 2 ELSE current_step END
+        WHERE id = @id
+      `);
+    return res.json({ success: true, current_step: Math.max(app.current_step || 1, 2) });
+  } catch (err) {
+    console.error('[confirm-context]', err);
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
 // ── PATCH /api/applications/:id/personal-details (Step 2) ───
 router.patch('/applications/:id/personal-details', async (req, res) => {
   const appId = parseInt(req.params.id);
