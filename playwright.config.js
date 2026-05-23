@@ -1,5 +1,9 @@
 // @ts-check
 const { defineConfig, devices } = require('@playwright/test')
+const path = require('path')
+
+// Load root .env so E2E_FRONTEND_URL / E2E_BACKEND_URL are available
+try { require(path.join(__dirname, 'BackEnd/node_modules/dotenv')).config({ path: path.join(__dirname, '.env') }) } catch {}
 
 /**
  * Playwright E2E configuration.
@@ -43,8 +47,8 @@ module.exports = defineConfig({
   ],
 
   use: {
-    // Every test starts here
-    baseURL: 'http://localhost:5173',
+    // Every test starts here — override via E2E_FRONTEND_URL in .env
+    baseURL: process.env.E2E_FRONTEND_URL || 'http://localhost:5173',
 
     // Capture screenshot only on failure
     screenshot: 'only-on-failure',

@@ -13,6 +13,7 @@
 const { test, expect } = require('@playwright/test')
 const { LoginPage } = require('../pages/LoginPage')
 const { STUDENT, COLLEGE_ADMIN, SUPER_ADMIN } = require('../fixtures/users')
+const { BACKEND_URL } = require('../fixtures/env')
 
 // Security tests run unauthenticated by default; each test logs in explicitly as needed
 test.use({ storageState: { cookies: [], origins: [] } })
@@ -104,7 +105,7 @@ test.describe('API IDOR Protection', () => {
     // Try to access application ID 1 (likely belongs to a different student)
     // This test verifies the API rejects unauthorized access
     // Note: uses the same cookies as the browser session
-    const response = await page.request.get('http://localhost:8000/applications/1')
+    const response = await page.request.get('${BACKEND_URL}/applications/1')
 
     // Should be 401 (not authenticated for this resource) or 403 (forbidden)
     // or 404 (not found for this student) — any of these is acceptable
@@ -130,7 +131,7 @@ test.describe('API IDOR Protection', () => {
     await login.waitForDashboard('college')
 
     // Try to access another college's applications (college ID 99999 — doesn't exist)
-    const response = await page.request.get('http://localhost:8000/college-admin/99999/applications')
+    const response = await page.request.get('${BACKEND_URL}/college-admin/99999/applications')
 
     // Must not return 200 with another college's data — 401/403/404 all acceptable
     const status = response.status()

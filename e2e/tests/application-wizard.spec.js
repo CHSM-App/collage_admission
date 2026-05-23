@@ -25,6 +25,7 @@ const { StudentDashboardPage } = require('../pages/StudentDashboardPage')
 const { ApplyWizardPage } = require('../pages/ApplyWizardPage')
 const { STUDENT, COLLEGE_ADMIN } = require('../fixtures/users')
 const { resetDraft } = require('../helpers/resetDraft')
+const { BACKEND_URL } = require('../fixtures/env')
 
 // Navigate to student dashboard (already authenticated via storageState from global setup)
 async function ensureStudentLoggedIn(page) {
@@ -52,7 +53,7 @@ async function loginAndStartApplication(page) {
   if (!studentId) throw new Error('Could not read student ID from localStorage after login.')
 
   // Fetch applications via backend API (cookies are sent automatically)
-  const resp = await page.request.get(`http://localhost:8000/applications?student_id=${studentId}`)
+  const resp = await page.request.get(`${BACKEND_URL}/applications?student_id=${studentId}`)
   const data = await resp.json()
   const apps = data.data || []
   const draft = apps.find(a => a.status === 'draft')

@@ -1,3 +1,6 @@
+# Environment config (contains URLs — copy from .env.example)
+.env
+
 # Dependencies
 node_modules/
 
