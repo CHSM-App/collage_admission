@@ -21,7 +21,10 @@ const { LoginPage } = require('../pages/LoginPage')
 
 // Uses pre-authenticated student session
 async function gotoNotifications(page) {
+  const login = new LoginPage(page)
   await page.goto('/student/dashboard?section=notifications')
+  await page.waitForURL(/\/student\/dashboard/, { timeout: 10000 })
+  await login.dismissNotificationPopup()
   await page.waitForFunction(
     () => {
       const body = document.body.innerText

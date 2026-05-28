@@ -28,7 +28,9 @@ exports.SUPER_ADMIN = {
  * Uses timestamp suffix to avoid conflicts on re-runs.
  */
 exports.uniquePhone = () => {
-  const suffix = Date.now().toString().slice(-7)
+  // Generate a valid 10-digit phone number starting with 9
+  // Use timestamp last 9 digits to stay unique across test runs
+  const suffix = Date.now().toString().slice(-9)
   return `9${suffix}`
 }
 

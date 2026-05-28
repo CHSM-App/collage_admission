@@ -266,17 +266,20 @@ router.post('/', createApplicationValidators, validate, async (req, res) => {
     }
 
     const result = await db.request()
-      .input('sid',  parseInt(student_id))
-      .input('col',  parseInt(college_id))
-      .input('crs',  parseInt(course_id))
-      .input('yr',   parseInt(year_of_study))
-      .input('ay',   academic_year)
-      .input('apid', parseInt(admission_period_id))
+      .input('sid',   parseInt(student_id))
+      .input('col',   parseInt(college_id))
+      .input('crs',   parseInt(course_id))
+      .input('yr',    parseInt(year_of_study))
+      .input('ay',    academic_year)
+      .input('apid',  parseInt(admission_period_id))
+      .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
+        DECLARE @t TABLE (id INT);
         INSERT INTO applications
-          (student_id, college_id, course_id, year_of_study, academic_year, admission_period_id, status)
-        OUTPUT INSERTED.id
-        VALUES (@sid, @col, @crs, @yr, @ay, @apid, 'draft')
+          (student_id, college_id, course_id, year_of_study, academic_year, admission_period_id, status, created_by)
+        OUTPUT INSERTED.id INTO @t
+        VALUES (@sid, @col, @crs, @yr, @ay, @apid, 'draft', @actor);
+        SELECT id FROM @t;
       `);
 
     return res.status(201).json({
@@ -363,14 +366,16 @@ router.post('/:id/submit', async (req, res) => {
         .input('ptype',  mssql.NVarChar,'application_fee')
         .input('amount', mssql.Decimal, app.application_fee)
         .input('userId', mssql.Int,     req.user.id)
+        .input('actor',  mssql.NVarChar, String(req.user.staff_id || req.user.id))
         .query(`
-          INSERT INTO payments (application_id, payment_type, amount, status, completed_at, paid_by, paid_by_user_id)
-          VALUES (@appId, @ptype, @amount, 'success', GETDATE(), 'student', @userId)
+          INSERT INTO payments (application_id, payment_type, amount, status, completed_at, paid_by, paid_by_user_id, created_by)
+          VALUES (@appId, @ptype, @amount, 'success', GETDATE(), 'student', @userId, @actor)
         `);
 
       await tx.request()
         .input('id',     mssql.Int,      appId)
         .input('regNum', mssql.NVarChar, regNum)
+        .input('actor',  mssql.NVarChar, String(req.user.staff_id || req.user.id))
         .query(`
           UPDATE applications
           SET status = 'submitted',
@@ -378,7 +383,8 @@ router.post('/:id/submit', async (req, res) => {
               application_fee_paid = 1,
               submitted_at = GETDATE(),
               updated_at   = GETDATE(),
-              status_updated_at = GETDATE()
+              status_updated_at = GETDATE(),
+              updated_by = @actor
           WHERE id = @id
         `);
 
@@ -453,19 +459,22 @@ router.post('/:id/pay-college-fee', async (req, res) => {
         .input('ptype',  mssql.NVarChar,'college_fee')
         .input('amount', mssql.Decimal, amount)
         .input('userId', mssql.Int,     req.user.id)
+        .input('actor',  mssql.NVarChar, String(req.user.staff_id || req.user.id))
         .query(`
-          INSERT INTO payments (application_id, payment_type, amount, status, completed_at, paid_by, paid_by_user_id)
-          VALUES (@appId, @ptype, @amount, 'success', GETDATE(), 'student', @userId)
+          INSERT INTO payments (application_id, payment_type, amount, status, completed_at, paid_by, paid_by_user_id, created_by)
+          VALUES (@appId, @ptype, @amount, 'success', GETDATE(), 'student', @userId, @actor)
         `);
 
       await tx.request()
-        .input('id', mssql.Int, appId)
+        .input('id',    mssql.Int,     appId)
+        .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
         .query(`
           UPDATE applications
           SET status = 'fees_paid',
               college_fee_paid = 1,
               updated_at = GETDATE(),
-              status_updated_at = GETDATE()
+              status_updated_at = GETDATE(),
+              updated_by = @actor
           WHERE id = @id
         `);
 
@@ -568,10 +577,12 @@ router.post('/:id/subjects', async (req, res) => {
       }
 
       await tx.request()
-        .input('id', mssql.Int, appId)
+        .input('id',    mssql.Int,     appId)
+        .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
         .query(`
           UPDATE applications
-          SET status = 'enrolled', enrolled_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE()
+          SET status = 'enrolled', enrolled_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(),
+              updated_by = @actor
           WHERE id = @id
         `);
 

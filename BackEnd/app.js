@@ -102,12 +102,12 @@ app.use(function(err, req, res, next) {
     : (isProd ? 'An internal server error occurred.' : (err.message || 'Internal server error'));
   res.status(status).json({ success: false, message });
 });
-
+ 
 const PORT = process.env.PORT || 8000;
 const PORTLOCAL = 5000;
 
-app.listen(PORT, function () {
-  pinoLogger.info('Server listening on :' + PORT);
+app.listen(PORTLOCAL, '0.0.0.0', function () {
+  pinoLogger.info('Server listening on 0.0.0.0:' + PORTLOCAL);
   startOtpCleanup();
 });
 

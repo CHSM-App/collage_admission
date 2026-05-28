@@ -68,9 +68,10 @@ router.put('/colleges/:id', authenticate, requireAdmin, async (req, res) => {
     const enabled = is_enabled ? 1 : 0;
     try {
       await db.request()
-        .input('enabled', mssql.Bit, enabled)
-        .input('id',      mssql.Int, id)
-        .query(`UPDATE colleges SET is_enabled = @enabled WHERE id = @id`);
+        .input('enabled', mssql.Bit,      enabled)
+        .input('id',      mssql.Int,      id)
+        .input('actor',   mssql.NVarChar, String(req.user.id))
+        .query(`UPDATE colleges SET is_enabled = @enabled, updated_by = @actor WHERE id = @id`);
       return res.json({ success: true, message: enabled ? 'College enabled.' : 'College disabled.' });
     } catch (err) {
       logger.error({ err });
@@ -88,9 +89,10 @@ router.put('/colleges/:id', authenticate, requireAdmin, async (req, res) => {
   }
   try {
     await db.request()
-      .input('fee', mssql.Decimal, fee)
-      .input('id',  mssql.Int,     id)
-      .query(`UPDATE colleges SET application_fee = @fee WHERE id = @id`);
+      .input('fee',   mssql.Decimal,  fee)
+      .input('id',    mssql.Int,      id)
+      .input('actor', mssql.NVarChar, String(req.user.id))
+      .query(`UPDATE colleges SET application_fee = @fee, updated_by = @actor WHERE id = @id`);
     return res.json({ success: true, message: 'Application fee updated.' });
   } catch (err) {
     logger.error({ err });
@@ -169,16 +171,20 @@ router.post('/colleges/:collegeId/roles', authenticate, requireAdmin, async (req
 
   try {
     const roleRes = await db.request()
-      .input('cid',  mssql.Int,      collegeId)
-      .input('name', mssql.NVarChar, role_name.trim())
+      .input('cid',   mssql.Int,      collegeId)
+      .input('name',  mssql.NVarChar, role_name.trim())
+      .input('actor', mssql.NVarChar, String(req.user.id))
       .query(`
-        INSERT INTO college_roles (college_id, role_name)
-        OUTPUT INSERTED.id, INSERTED.role_name
-        VALUES (@cid, @name)
+        DECLARE @t TABLE (id INT, role_name NVARCHAR(100));
+        INSERT INTO college_roles (college_id, role_name, created_by)
+        OUTPUT INSERTED.id, INSERTED.role_name INTO @t
+        VALUES (@cid, @name, @actor);
+        SELECT id, role_name FROM @t;
       `);
 
     const roleId = roleRes.recordset[0].id;
 
+    const actor = String(req.user.id);
     // Insert permissions
     for (const perm of ALL_PERMISSIONS) {
       const canWrite = permissions[perm] ? 1 : 0;
@@ -186,7 +192,8 @@ router.post('/colleges/:collegeId/roles', authenticate, requireAdmin, async (req
         .input('rid',   mssql.Int,      roleId)
         .input('perm',  mssql.NVarChar, perm)
         .input('write', mssql.Bit,      canWrite)
-        .query(`INSERT INTO college_role_permissions (role_id, permission, can_write) VALUES (@rid, @perm, @write)`);
+        .input('actor', mssql.NVarChar, actor)
+        .query(`INSERT INTO college_role_permissions (role_id, permission, can_write, created_by) VALUES (@rid, @perm, @write, @actor)`);
     }
 
     // Insert nav visibility
@@ -196,7 +203,8 @@ router.post('/colleges/:collegeId/roles', authenticate, requireAdmin, async (req
         .input('rid',   mssql.Int,      roleId)
         .input('perm',  mssql.NVarChar, `nav:${key}`)
         .input('write', mssql.Bit,      visible)
-        .query(`INSERT INTO college_role_permissions (role_id, permission, can_write) VALUES (@rid, @perm, @write)`);
+        .input('actor', mssql.NVarChar, actor)
+        .query(`INSERT INTO college_role_permissions (role_id, permission, can_write, created_by) VALUES (@rid, @perm, @write, @actor)`);
     }
 
     return res.status(201).json({ success: true, data: { id: roleId, role_name: role_name.trim() } });
@@ -217,11 +225,13 @@ router.put('/colleges/:collegeId/roles/:roleId', authenticate, requireAdmin, asy
   try {
     if (role_name?.trim()) {
       await db.request()
-        .input('id',   mssql.Int,      roleId)
-        .input('name', mssql.NVarChar, role_name.trim())
-        .query(`UPDATE college_roles SET role_name = @name WHERE id = @id`);
+        .input('id',    mssql.Int,      roleId)
+        .input('name',  mssql.NVarChar, role_name.trim())
+        .input('actor', mssql.NVarChar, String(req.user.id))
+        .query(`UPDATE college_roles SET role_name = @name, updated_by = @actor WHERE id = @id`);
     }
 
+    const actor = String(req.user.id);
     // Upsert each permission
     for (const perm of ALL_PERMISSIONS) {
       const canWrite = permissions[perm] ? 1 : 0;
@@ -229,12 +239,13 @@ router.put('/colleges/:collegeId/roles/:roleId', authenticate, requireAdmin, asy
         .input('rid',   mssql.Int,      roleId)
         .input('perm',  mssql.NVarChar, perm)
         .input('write', mssql.Bit,      canWrite)
+        .input('actor', mssql.NVarChar, actor)
         .query(`
           MERGE college_role_permissions AS target
           USING (SELECT @rid AS role_id, @perm AS permission) AS src
             ON target.role_id = src.role_id AND target.permission = src.permission
-          WHEN MATCHED THEN UPDATE SET can_write = @write
-          WHEN NOT MATCHED THEN INSERT (role_id, permission, can_write) VALUES (@rid, @perm, @write);
+          WHEN MATCHED THEN UPDATE SET can_write = @write, updated_by = @actor
+          WHEN NOT MATCHED THEN INSERT (role_id, permission, can_write, created_by) VALUES (@rid, @perm, @write, @actor);
         `);
     }
 
@@ -245,12 +256,13 @@ router.put('/colleges/:collegeId/roles/:roleId', authenticate, requireAdmin, asy
         .input('rid',   mssql.Int,      roleId)
         .input('perm',  mssql.NVarChar, `nav:${key}`)
         .input('write', mssql.Bit,      visible)
+        .input('actor', mssql.NVarChar, actor)
         .query(`
           MERGE college_role_permissions AS target
           USING (SELECT @rid AS role_id, @perm AS permission) AS src
             ON target.role_id = src.role_id AND target.permission = src.permission
-          WHEN MATCHED THEN UPDATE SET can_write = @write
-          WHEN NOT MATCHED THEN INSERT (role_id, permission, can_write) VALUES (@rid, @perm, @write);
+          WHEN MATCHED THEN UPDATE SET can_write = @write, updated_by = @actor
+          WHEN NOT MATCHED THEN INSERT (role_id, permission, can_write, created_by) VALUES (@rid, @perm, @write, @actor);
         `);
     }
 
@@ -326,15 +338,18 @@ router.post('/colleges/:collegeId/users', authenticate, requireAdmin, async (req
   try {
     const hash = await bcrypt.hash(password, 10);
     const result = await db.request()
-      .input('cid',  mssql.Int,      collegeId)
-      .input('rid',  mssql.Int,      parseInt(role_id))
-      .input('name', mssql.NVarChar, full_name.trim())
-      .input('em',   mssql.NVarChar, email.trim().toLowerCase())
-      .input('hash', mssql.NVarChar, hash)
+      .input('cid',   mssql.Int,      collegeId)
+      .input('rid',   mssql.Int,      parseInt(role_id))
+      .input('name',  mssql.NVarChar, full_name.trim())
+      .input('em',    mssql.NVarChar, email.trim().toLowerCase())
+      .input('hash',  mssql.NVarChar, hash)
+      .input('actor', mssql.NVarChar, String(req.user.id))
       .query(`
-        INSERT INTO college_users (college_id, role_id, full_name, email, password_hash)
-        OUTPUT INSERTED.id, INSERTED.full_name, INSERTED.email
-        VALUES (@cid, @rid, @name, @em, @hash)
+        DECLARE @t TABLE (id INT, full_name NVARCHAR(150), email NVARCHAR(150));
+        INSERT INTO college_users (college_id, role_id, full_name, email, password_hash, created_by)
+        OUTPUT INSERTED.id, INSERTED.full_name, INSERTED.email INTO @t
+        VALUES (@cid, @rid, @name, @em, @hash, @actor);
+        SELECT id, full_name, email FROM @t;
       `);
 
     return res.status(201).json({ success: true, data: result.recordset[0] });
@@ -354,11 +369,12 @@ router.put('/colleges/:collegeId/users/:userId', authenticate, requireAdmin, asy
   try {
     let hashClause = '';
     const req2 = db.request()
-      .input('id',   mssql.Int,      userId)
-      .input('name', mssql.NVarChar, full_name  || null)
-      .input('em',   mssql.NVarChar, email?.trim().toLowerCase() || null)
-      .input('rid',  mssql.Int,      role_id    ? parseInt(role_id) : null)
-      .input('act',  mssql.Bit,      is_active !== undefined ? (is_active ? 1 : 0) : null);
+      .input('id',    mssql.Int,      userId)
+      .input('name',  mssql.NVarChar, full_name  || null)
+      .input('em',    mssql.NVarChar, email?.trim().toLowerCase() || null)
+      .input('rid',   mssql.Int,      role_id    ? parseInt(role_id) : null)
+      .input('act',   mssql.Bit,      is_active !== undefined ? (is_active ? 1 : 0) : null)
+      .input('actor', mssql.NVarChar, String(req.user.id));
 
     if (password) {
       const hash = await bcrypt.hash(password, 10);
@@ -371,7 +387,8 @@ router.put('/colleges/:collegeId/users/:userId', authenticate, requireAdmin, asy
         full_name  = COALESCE(@name, full_name),
         email      = COALESCE(@em,   email),
         role_id    = COALESCE(@rid,  role_id),
-        is_active  = COALESCE(@act,  is_active)
+        is_active  = COALESCE(@act,  is_active),
+        updated_by = @actor
         ${hashClause}
       WHERE id = @id
     `);

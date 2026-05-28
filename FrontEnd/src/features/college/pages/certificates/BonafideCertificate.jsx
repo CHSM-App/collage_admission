@@ -330,6 +330,8 @@ export default function BonafideCertificate({ collegeId, readOnly }) {
             onChange={handleChange}
             readOnly={isReadOnlyMode}
             hint="DD/MM/YYYY"
+            max={(() => { const d = new Date(); d.setFullYear(d.getFullYear() - 16); return d.toISOString().slice(0,10) })()}
+            error={errors.birth_date}
           />
           <FormField
             label="Caste / Category"

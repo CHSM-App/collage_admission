@@ -248,6 +248,7 @@ test.describe('Student Documents — Persistence', () => {
 
     // Reload
     await page.reload()
+    await page.waitForLoadState('networkidle', { timeout: 10000 })
     await page.waitForFunction(
       () => {
         const body = document.body.innerText

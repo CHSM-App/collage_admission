@@ -2,11 +2,11 @@
  * seed_e2e_runner.js — Runs seed_e2e.sql against the configured database.
  *
  * Usage:
- *   node scripts/seed_e2e_runner.js
+ *   node scripts/test/seed_e2e_runner.js
  *   npm run seed:e2e          (from BackEnd/)
  *
  * What it does:
- *   - Reads BackEnd/scripts/seed_e2e.sql
+ *   - Reads BackEnd/scripts/test/seed_e2e.sql
  *   - Splits on GO batch separators (same as migrate.js)
  *   - Runs each batch sequentially on a single connection
  *   - Reports success or the first failing batch

@@ -120,6 +120,7 @@ router.post('/:collegeId/admission-periods', requirePerm('manage_admission_perio
     return res.status(400).json({ success: false, message: 'Missing required fields.' });
   }
 
+  const actorId = String(req.user.staff_id || req.user.id);
   try {
     const result = await db.request()
       .input('col',  parseInt(req.params.collegeId))
@@ -129,11 +130,14 @@ router.post('/:collegeId/admission-periods', requirePerm('manage_admission_perio
       .input('sd',   start_date)
       .input('ed',   end_date)
       .input('seats',parseInt(total_seats))
+      .input('actor', actorId)
       .query(`
+        DECLARE @t TABLE (id INT);
         INSERT INTO admission_periods
-          (college_id, course_id, year_of_study, academic_year, start_date, end_date, total_seats, is_active)
-        OUTPUT INSERTED.id
-        VALUES (@col, @crs, @yr, @ay, @sd, @ed, @seats, 1)
+          (college_id, course_id, year_of_study, academic_year, start_date, end_date, total_seats, is_active, created_by)
+        OUTPUT INSERTED.id INTO @t
+        VALUES (@col, @crs, @yr, @ay, @sd, @ed, @seats, 1, @actor);
+        SELECT id FROM @t;
       `);
 
     return res.status(201).json({ success: true, data: { id: result.recordset[0].id } });
@@ -146,16 +150,18 @@ router.post('/:collegeId/admission-periods', requirePerm('manage_admission_perio
 router.put('/:collegeId/admission-periods/:periodId', requirePerm('manage_admission_periods'), async (req, res) => {
   const { start_date, end_date, total_seats, is_active, is_disabled } = req.body;
 
+  const actorId = String(req.user.staff_id || req.user.id);
   try {
     const mssql = require('mssql');
     await db.request()
-      .input('id',    mssql.Int,  parseInt(req.params.periodId))
-      .input('col',   mssql.Int,  parseInt(req.params.collegeId))
-      .input('sd',    mssql.NVarChar, start_date    || null)
-      .input('ed',    mssql.NVarChar, end_date      || null)
-      .input('seats', mssql.Int,  total_seats   ? parseInt(total_seats)         : null)
-      .input('act',   mssql.Bit,  is_active    !== undefined ? (is_active    ? 1 : 0) : null)
-      .input('dis',   mssql.Bit,  is_disabled  !== undefined ? (is_disabled  ? 1 : 0) : null)
+      .input('id',    mssql.Int,       parseInt(req.params.periodId))
+      .input('col',   mssql.Int,       parseInt(req.params.collegeId))
+      .input('sd',    mssql.NVarChar,  start_date    || null)
+      .input('ed',    mssql.NVarChar,  end_date      || null)
+      .input('seats', mssql.Int,       total_seats   ? parseInt(total_seats)         : null)
+      .input('act',   mssql.Bit,       is_active    !== undefined ? (is_active    ? 1 : 0) : null)
+      .input('dis',   mssql.Bit,       is_disabled  !== undefined ? (is_disabled  ? 1 : 0) : null)
+      .input('actor', mssql.NVarChar,  actorId)
       .query(`
         UPDATE admission_periods
         SET
@@ -163,7 +169,8 @@ router.put('/:collegeId/admission-periods/:periodId', requirePerm('manage_admiss
           end_date    = COALESCE(@ed,    end_date),
           total_seats = COALESCE(@seats, total_seats),
           is_active   = COALESCE(@act,   is_active),
-          is_disabled = COALESCE(@dis,   is_disabled)
+          is_disabled = COALESCE(@dis,   is_disabled),
+          updated_by  = @actor
         WHERE id = @id AND college_id = @col
       `);
 
@@ -467,11 +474,12 @@ router.post('/:collegeId/applications/:appId/request-correction', requireWrite('
     }
 
     await db.request()
-      .input('id',   mssqlShared.Int,      parseInt(req.params.appId))
-      .input('note', mssqlShared.NVarChar, note.trim())
+      .input('id',    mssqlShared.Int,      parseInt(req.params.appId))
+      .input('note',  mssqlShared.NVarChar, note.trim())
+      .input('actor', mssqlShared.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
         UPDATE applications
-        SET status = 'correction_requested', correction_note = @note, updated_at = GETDATE(), status_updated_at = GETDATE()
+        SET status = 'correction_requested', correction_note = @note, updated_at = GETDATE(), status_updated_at = GETDATE(), updated_by = @actor
         WHERE id = @id
       `);
 
@@ -510,11 +518,12 @@ router.post('/:collegeId/applications/:appId/approve', requireWrite('review_appl
         .query('UPDATE admission_periods SET filled_seats = filled_seats + 1 WHERE id = @pid AND filled_seats < total_seats');
 
       await tx1.request()
-        .input('id', mssqlShared.Int, parseInt(req.params.appId))
+        .input('id',    mssqlShared.Int,      parseInt(req.params.appId))
+        .input('actor', mssqlShared.NVarChar, String(req.user.staff_id || req.user.id))
         .query(`
           UPDATE applications
           SET status = 'doc_verified', approved_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(),
-              correction_note = NULL
+              correction_note = NULL, updated_by = @actor
           WHERE id = @id
         `);
 
@@ -552,11 +561,12 @@ router.post('/:collegeId/applications/:appId/reject', requireWrite('review_appli
     }
 
     await db.request()
-      .input('id',     parseInt(req.params.appId))
-      .input('reason', reason || null)
+      .input('id',     mssqlShared.Int,      parseInt(req.params.appId))
+      .input('reason', mssqlShared.NVarChar, reason || null)
+      .input('actor',  mssqlShared.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
         UPDATE applications
-        SET status = 'rejected', rejection_reason = @reason, updated_at = GETDATE(), status_updated_at = GETDATE()
+        SET status = 'rejected', rejection_reason = @reason, updated_at = GETDATE(), status_updated_at = GETDATE(), updated_by = @actor
         WHERE id = @id
       `);
 
@@ -610,26 +620,28 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
       if (Array.isArray(document_ids_verified) && document_ids_verified.length > 0) {
         for (const docId of document_ids_verified) {
           await tx2.request()
-            .input('docId', mssqlShared.Int, parseInt(docId))
-            .input('appId', mssqlShared.Int, parseInt(req.params.appId))
+            .input('docId', mssqlShared.Int,      parseInt(docId))
+            .input('appId', mssqlShared.Int,      parseInt(req.params.appId))
+            .input('actor', mssqlShared.NVarChar, String(req.user.staff_id || req.user.id))
             .query(`
               UPDATE application_documents
-              SET is_verified = 1, verified_at = GETDATE()
+              SET is_verified = 1, verified_at = GETDATE(), updated_by = @actor
               WHERE id = @docId AND application_id = @appId
             `);
         }
       }
 
       await tx2.request()
-        .input('id',    mssqlShared.Int,     parseInt(req.params.appId))
-        .input('total', mssqlShared.Decimal, total)
-        .input('now',   mssqlShared.Decimal, payNow)
-        .input('div',   mssqlShared.Char,    division || null)
+        .input('id',    mssqlShared.Int,      parseInt(req.params.appId))
+        .input('total', mssqlShared.Decimal,  total)
+        .input('now',   mssqlShared.Decimal,  payNow)
+        .input('div',   mssqlShared.Char,     division || null)
+        .input('actor', mssqlShared.NVarChar, String(req.user.staff_id || req.user.id))
         .query(`
           UPDATE applications
           SET status = 'confirmed', confirmed_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(),
               fee_total_amount = @total, fee_pay_now_amount = @now,
-              app_division = COALESCE(@div, app_division)
+              app_division = COALESCE(@div, app_division), updated_by = @actor
           WHERE id = @id
         `);
 
@@ -723,11 +735,12 @@ router.post('/:collegeId/applications/:appId/cancel', requireWrite('review_appli
       }
 
       await tx3.request()
-        .input('id',     mssqlShared.Int,     parseInt(req.params.appId))
-        .input('reason', mssqlShared.NVarChar, reason || null)
+        .input('id',     mssqlShared.Int,      parseInt(req.params.appId))
+        .input('reason', mssqlShared.NVarChar,  reason || null)
+        .input('actor',  mssqlShared.NVarChar,  String(req.user.staff_id || req.user.id))
         .query(`
           UPDATE applications
-          SET status = 'cancelled', cancellation_reason = @reason, updated_at = GETDATE(), status_updated_at = GETDATE()
+          SET status = 'cancelled', cancellation_reason = @reason, updated_at = GETDATE(), status_updated_at = GETDATE(), updated_by = @actor
           WHERE id = @id
         `);
 
@@ -808,25 +821,28 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
     const tx   = pool.transaction();
     await tx.begin();
     try {
+      const actor = String(req.user.staff_id || req.user.id);
       await tx.request()
         .input('appId',  mssqlShared.Int,      appId)
         .input('amount', mssqlShared.Decimal,   amt)
         .input('userId', mssqlShared.Int,       req.user.staff_id || req.user.id)
+        .input('actor',  mssqlShared.NVarChar,  actor)
         .query(`
           INSERT INTO payments (application_id, payment_type, amount, status,
-            razorpay_order_id, razorpay_payment_id, completed_at, paid_by, paid_by_user_id)
+            razorpay_order_id, razorpay_payment_id, completed_at, paid_by, paid_by_user_id, created_by)
           VALUES (@appId, 'college_fee', @amount, 'success',
             CONCAT('CASH-', CAST(@appId AS NVARCHAR), '-', CAST(CHECKSUM(NEWID()) AS NVARCHAR)),
             CONCAT('CASH-', FORMAT(GETDATE(),'yyyyMMddHHmmss')),
-            GETDATE(), 'college', @userId)
+            GETDATE(), 'college', @userId, @actor)
         `);
 
       if (firstPaid) {
         await tx.request()
-          .input('id', mssqlShared.Int, appId)
+          .input('id',    mssqlShared.Int,      appId)
+          .input('actor', mssqlShared.NVarChar, actor)
           .query(`
             UPDATE applications
-            SET status = 'fees_paid', college_fee_paid = 1, updated_at = GETDATE(), status_updated_at = GETDATE()
+            SET status = 'fees_paid', college_fee_paid = 1, updated_at = GETDATE(), status_updated_at = GETDATE(), updated_by = @actor
             WHERE id = @id
           `);
       }
@@ -906,13 +922,15 @@ router.post('/:collegeId/roll-numbers/generate', requirePerm('assign_subjects'),
     await tx4.begin();
     const assignedRolls = []; // track id→roll for post-commit notifications
     try {
+      const rollActor = String(req.user.staff_id || req.user.id);
       for (const app of pending.recordset) {
         await tx4.request()
-          .input('id',   mssqlShared.Int,     app.id)
-          .input('roll', mssqlShared.NVarChar, String(nextRoll))
+          .input('id',    mssqlShared.Int,      app.id)
+          .input('roll',  mssqlShared.NVarChar,  String(nextRoll))
+          .input('actor', mssqlShared.NVarChar,  rollActor)
           .query(`
             UPDATE applications
-            SET roll_number = @roll, status = 'roll_assigned', updated_at = GETDATE()
+            SET roll_number = @roll, status = 'roll_assigned', updated_at = GETDATE(), updated_by = @actor
             WHERE id = @id
           `);
         await logActivity(app.id, 'roll_assigned', 'college', `Roll number: ${nextRoll}`);

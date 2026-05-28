@@ -209,7 +209,7 @@ test.describe('College Apply Wizard (CollegeApplyWizard)', () => {
   test('college apply wizard redirects unauthenticated user', async ({ page }) => {
     // Override to unauthenticated for this single test
     await page.context().clearCookies()
-    await page.evaluate(() => localStorage.clear())
+    // Navigate fresh without localStorage.clear() to avoid cross-origin errors
 
     await page.goto('/college/apply/1')
     await page.waitForURL(/\/login\//, { timeout: 8000 })

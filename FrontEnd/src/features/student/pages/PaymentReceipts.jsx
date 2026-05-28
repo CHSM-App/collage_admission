@@ -206,7 +206,7 @@ function ReceiptSheet({ app, pmt, showOrderId = false }) {
           ${trow('Amount Paid',     '&#8377;' + Number(pmt.amount).toLocaleString('en-IN'))}
           ${trow('Payment Status',  'Paid')}
           ${trow('Payment Date',    fmtDate(pmt.completed_at) + '  ' + fmtTime(pmt.completed_at))}
-          ${pmt.razorpay_payment_id ? trow('Transaction ID',  pmt.razorpay_payment_id, true) : ''}
+          ${(pmt.gateway_payment_id || pmt.razorpay_payment_id) ? trow('Transaction ID', pmt.gateway_payment_id || pmt.razorpay_payment_id, true) : ''}
         </tbody>
       </table>
     </div>
@@ -337,8 +337,8 @@ function ReceiptSheet({ app, pmt, showOrderId = false }) {
                   ['Amount Paid',     `₹${Number(pmt.amount).toLocaleString('en-IN')}`, false],
                   ['Payment Status',  'Paid',     false],
                   ['Payment Date',    `${fmtDate(pmt.completed_at)}  ${fmtTime(pmt.completed_at)}`, false],
-                  ...(pmt.razorpay_payment_id ? [['Transaction ID', pmt.razorpay_payment_id, true]] : []),
-                  ...(showOrderId && pmt.razorpay_order_id ? [['Order ID', pmt.razorpay_order_id, true]] : []),
+                  ...((pmt.gateway_payment_id || pmt.razorpay_payment_id) ? [['Transaction ID', pmt.gateway_payment_id || pmt.razorpay_payment_id, true]] : []),
+                  ...(showOrderId && (pmt.gateway_txnid || pmt.razorpay_order_id) ? [['Order/Txn ID', pmt.gateway_txnid || pmt.razorpay_order_id, true]] : []),
                 ].map(([label, value, mono]) => (
                   <tr key={label} className="border-b border-slate-50">
                     <td className="py-1.5 pr-4 text-slate-500 font-medium w-40 whitespace-nowrap">{label}</td>

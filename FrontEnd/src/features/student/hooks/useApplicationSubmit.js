@@ -1,20 +1,21 @@
 /**
  * useApplicationSubmit — handles application submission (new) and resubmission (correction flow).
  *
- * New submit: acceptDeclaration → createOrder → openCheckout → verifyPayment → setRegNum
+ * New submit: acceptDeclaration → initiatePayment → redirectToPayU (browser redirect)
  * Resubmit:   acceptDeclaration → resubmitApplication → setResubmitted(true)
+ *
+ * After PayU redirect, the browser returns to /payment-result which shows success/failure.
  */
 import { useState } from 'react'
-import { useRazorpay } from '../../../shared/hooks/useRazorpay.js'
+import { usePayU } from '../../../shared/hooks/usePayU.js'
 import { acceptDeclaration, resubmitApplication } from '../../../services/applicationService.js'
-import { createOrder, verifyPayment } from '../../../services/paymentService.js'
+import { initiatePayment } from '../../../services/paymentService.js'
 
 export function useApplicationSubmit(appId) {
-  const { openCheckout, scriptError } = useRazorpay()
+  const { redirectToPayU } = usePayU()
 
   const [processing, setProcessing]     = useState(false)
   const [submitError, setSubmitError]   = useState('')
-  const [registrationNumber, setRegNum] = useState(null)
   const [resubmitted, setResubmitted]   = useState(false)
 
   // ── New application submit (pay first) ───────────────────
@@ -26,39 +27,14 @@ export function useApplicationSubmit(appId) {
     try {
       await acceptDeclaration(appId, { accepted: true })
 
-      const orderRes = await createOrder({
+      const res = await initiatePayment({
         application_id: appId,
         payment_type:   'application_fee',
       })
-      const orderData = orderRes.data.data
+      const { endpoint, fields } = res.data.data
 
-      setProcessing(false)
-
-      openCheckout({
-        orderData,
-        onSuccess: async (rzpResponse) => {
-          setProcessing(true)
-          try {
-            const verifyRes = await verifyPayment({
-              application_id:       appId,
-              payment_type:         'application_fee',
-              razorpay_order_id:    rzpResponse.razorpay_order_id,
-              razorpay_payment_id:  rzpResponse.razorpay_payment_id,
-              razorpay_signature:   rzpResponse.razorpay_signature,
-            })
-            setRegNum(verifyRes.data.data?.registration_number || '')
-          } catch (err) {
-            setSubmitError(err?.response?.data?.message || 'Payment verification failed.')
-          } finally {
-            setProcessing(false)
-          }
-        },
-        onFailure: (err) => {
-          if (err.message !== 'Payment cancelled by user.') {
-            setSubmitError(err.message || 'Payment failed.')
-          }
-        },
-      })
+      // Redirects the browser to PayU — no return from here.
+      redirectToPayU({ endpoint, fields })
     } catch (err) {
       setSubmitError(err?.response?.data?.message || 'Submission failed. Please try again.')
       setProcessing(false)
@@ -84,9 +60,7 @@ export function useApplicationSubmit(appId) {
   return {
     processing,
     submitError,
-    registrationNumber,
     resubmitted,
-    scriptError,
     handleSubmit,
     handleResubmit,
   }

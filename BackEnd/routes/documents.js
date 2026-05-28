@@ -153,13 +153,14 @@ router.post('/student-documents', upload.single('file'), async (req, res) => {
     // Always insert a new row — each upload creates its own student_document record.
     // This allows different applications to reference different versions of the same doc type.
     const ins = await db.request()
-      .input('sid',  mssql.Int,      parseInt(student_id))
-      .input('dtid', mssql.Int,      parseInt(document_type_id))
-      .input('fn',   mssql.NVarChar, req.file.originalname)
-      .input('fp',   mssql.NVarChar, relativePath)
+      .input('sid',   mssql.Int,      parseInt(student_id))
+      .input('dtid',  mssql.Int,      parseInt(document_type_id))
+      .input('fn',    mssql.NVarChar, req.file.originalname)
+      .input('fp',    mssql.NVarChar, relativePath)
+      .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
-        INSERT INTO student_documents (student_id, document_type_id, file_name, file_path)
-        OUTPUT INSERTED.id VALUES (@sid, @dtid, @fn, @fp)
+        INSERT INTO student_documents (student_id, document_type_id, file_name, file_path, created_by)
+        OUTPUT INSERTED.id VALUES (@sid, @dtid, @fn, @fp, @actor)
       `)
 
     const newId = ins.recordset[0].id

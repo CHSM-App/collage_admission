@@ -74,10 +74,13 @@ router.post('/', authenticate, requireAdmin, async (req, res) => {
       .input('hash',  mssql.NVarChar,  hash)
       .input('code',  mssql.NVarChar,  code)
       .input('fee',   mssql.Decimal,   application_fee ? parseFloat(application_fee) : null)
+      .input('actor', mssql.NVarChar,  String(req.user.id))
       .query(`
-        INSERT INTO colleges (name, address, city, phone, email, admin_email, admin_password_hash, college_code, application_fee)
-        OUTPUT INSERTED.id, INSERTED.name, INSERTED.admin_email, INSERTED.college_code
-        VALUES (@name, @addr, @city, @phone, @email, @ae, @hash, @code, @fee)
+        DECLARE @t TABLE (id INT, name NVARCHAR(200), admin_email NVARCHAR(150), college_code NVARCHAR(50));
+        INSERT INTO colleges (name, address, city, phone, email, admin_email, admin_password_hash, college_code, application_fee, created_by)
+        OUTPUT INSERTED.id, INSERTED.name, INSERTED.admin_email, INSERTED.college_code INTO @t
+        VALUES (@name, @addr, @city, @phone, @email, @ae, @hash, @code, @fee, @actor);
+        SELECT id, name, admin_email, college_code FROM @t;
       `)
 
     const college = result.recordset[0]

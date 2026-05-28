@@ -45,7 +45,6 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
     paying: saving,
     payError: err,
     paidMsg: msg,
-    scriptError,
     payOnline,
     payCash,
     setPayError: setErr,
@@ -156,17 +155,13 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
                   </button>
                   <button
                     onClick={() => { setPayMode('online'); setErr(''); setMsg(''); setAmount(String(amtDue)) }}
-                    disabled={!!scriptError}
-                    className="flex flex-col items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-4 py-4 hover:border-blue-400 hover:bg-blue-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex flex-col items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-4 py-4 hover:border-blue-400 hover:bg-blue-50 transition"
                   >
                     <span className="text-2xl">💳</span>
-                    <span className="text-sm font-semibold text-slate-800">Online (Razorpay)</span>
+                    <span className="text-sm font-semibold text-slate-800">Online (PayU)</span>
                     <span className="text-xs text-slate-400 text-center">Student pays via UPI, card, or netbanking now</span>
                   </button>
                 </div>
-                {scriptError && (
-                  <p className="text-xs text-amber-600">Payment gateway could not be loaded. Online payments unavailable.</p>
-                )}
               </div>
             )}
 
@@ -215,7 +210,7 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
             {!allPaid && payMode === 'online' && (
               <form onSubmit={handleOnline} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 space-y-3">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-blue-800">Online Payment via Razorpay</p>
+                  <p className="text-sm font-semibold text-blue-800">Online Payment via PayU</p>
                   <button type="button" onClick={() => { setPayMode(null); setErr(''); setAmount('') }}
                     className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
                 </div>
@@ -239,10 +234,10 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
                   </div>
                   <button type="submit" disabled={saving}
                     className="shrink-0 rounded-lg bg-blue-600 text-white text-sm font-semibold px-4 py-2 hover:bg-blue-700 disabled:opacity-50 transition">
-                    {saving ? 'Processing…' : 'Open Razorpay'}
+                    {saving ? 'Redirecting…' : 'Pay via PayU'}
                   </button>
                 </div>
-                <p className="text-xs text-blue-600">Razorpay checkout will open for UPI, card, or netbanking payment.</p>
+                <p className="text-xs text-blue-600">You will be redirected to PayU for UPI, card, or netbanking payment.</p>
               </form>
             )}
 
@@ -259,7 +254,7 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
                         </div>
                         <div>
                           <p className="font-medium text-slate-800">
-                            {p.razorpay_payment_id?.startsWith('CASH-') ? 'Cash / Offline' : 'Online (Razorpay)'}
+                            {p.gateway === 'cash' || p.razorpay_payment_id?.startsWith('CASH-') ? 'Cash / Offline' : `Online (${p.gateway === 'payu' ? 'PayU' : 'Online'})`}
                           </p>
                           <p className="text-xs text-slate-400">{fmtDate(p.completed_at)} {fmtTime(p.completed_at)}</p>
                         </div>

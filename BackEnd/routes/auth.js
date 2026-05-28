@@ -86,10 +86,12 @@ async function verifyAndConsumeOtp(normPhone, otp, purpose) {
 const JWT_SECRET = process.env.JWT_SECRET;
 const IS_PROD    = process.env.NODE_ENV === 'production';
 
-// httpOnly cookie options — token never accessible to JS
+// httpOnly cookie options — token never accessible to JS.
+// Cookie is kept as a convenience for same-origin deployments (production).
+// Cross-origin / LAN dev uses Authorization: Bearer header instead (see AuthContext).
 const COOKIE_OPTS = {
   httpOnly: true,
-  secure:   IS_PROD,          // HTTPS only in production
+  secure:   IS_PROD,
   sameSite: IS_PROD ? 'strict' : 'lax',
   maxAge:   7 * 24 * 60 * 60 * 1000, // 7 days in ms
   path:     '/',
@@ -100,11 +102,18 @@ function setAuthCookie(res, token) {
 }
 
 // 10 attempts per 15 minutes per IP for login endpoints
+// In development/test, raise the limit to avoid blocking E2E test runs
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: process.env.NODE_ENV === 'production' ? 10 : 10000,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => {
+    // Skip rate limiting entirely in test/development environments
+    if (process.env.NODE_ENV !== 'production') return true;
+    const ip = req.ip || '';
+    return ip === '::1' || ip === '127.0.0.1' || ip.includes('127.0.0.1');
+  },
   message: { message: 'Too many login attempts. Please try again after 15 minutes.' },
 });
 
@@ -157,6 +166,7 @@ router.post('/login/student',loginLimiter, studentLoginValidators, validate, asy
 
     return res.json({
       message: 'Login successful',
+      token,
       role: 'student',
       user: {
         id:       student.id,
@@ -194,6 +204,7 @@ router.post('/login/college', loginLimiter,emailLoginValidators, validate, async
 
       return res.json({
         message: 'Login successful',
+        token,
         role: 'college',
         user: {
           id:           college.id,
@@ -258,6 +269,7 @@ router.post('/login/college', loginLimiter,emailLoginValidators, validate, async
 
     return res.json({
       message: 'Login successful',
+      token,
       role: 'college',
       user: {
         id:           staff.college_id,
@@ -299,6 +311,7 @@ router.post('/login/admin',loginLimiter, emailLoginValidators, validate, async (
     setAuthCookie(res, token);
     return res.json({
       message: 'Login successful',
+      token,
       role: 'admin',
       user: { id: admin.id, name: admin.name, email: admin.email },
     });
@@ -365,6 +378,7 @@ router.post('/login/college-user', loginLimiter, emailLoginValidators, validate,
 
     return res.json({
       message: 'Login successful',
+      token,
       role: 'college',
       user: {
         id:           user.college_id,
@@ -471,9 +485,11 @@ router.post('/otp/verify', otpVerifyValidators, validate, async (req, res) => {
       .input('city',      city     || null)
       .input('category',  category || 'general')
       .query(`
-        INSERT INTO students (full_name, email, password_hash, phone, city, category)
-        OUTPUT INSERTED.id, INSERTED.full_name, INSERTED.email
-        VALUES (@full_name, @email, @hash, @phone, @city, @category)
+        DECLARE @t TABLE (id INT, full_name NVARCHAR(150), email NVARCHAR(150));
+        INSERT INTO students (full_name, email, password_hash, phone, city, category, created_by)
+        OUTPUT INSERTED.id, INSERTED.full_name, INSERTED.email INTO @t
+        VALUES (@full_name, @email, @hash, @phone, @city, @category, 'self');
+        SELECT id, full_name, email FROM @t;
       `);
 
     const newStudent = result.recordset[0];
@@ -525,9 +541,11 @@ router.post('/register/student', registerLimiter, async (req, res) => {
       .input('city',      city      || null)
       .input('category',  category  || 'general')
       .query(`
-        INSERT INTO students (full_name, email, password_hash, phone, dob, gender, address, city, category)
-        OUTPUT INSERTED.id, INSERTED.full_name, INSERTED.email
-        VALUES (@full_name, @email, @hash, @phone, @dob, @gender, @address, @city, @category)
+        DECLARE @t TABLE (id INT, full_name NVARCHAR(150), email NVARCHAR(150));
+        INSERT INTO students (full_name, email, password_hash, phone, dob, gender, address, city, category, created_by)
+        OUTPUT INSERTED.id, INSERTED.full_name, INSERTED.email INTO @t
+        VALUES (@full_name, @email, @hash, @phone, @dob, @gender, @address, @city, @category, 'self');
+        SELECT id, full_name, email FROM @t;
       `);
 
     const newStudent = result.recordset[0];
@@ -601,7 +619,7 @@ router.post('/forgot-password/reset', forgotPasswordResetValidators, validate, a
     const result = await db.request()
       .input('phone', pendingData.phone)
       .input('hash',  hash)
-      .query('UPDATE students SET password_hash = @hash WHERE phone = @phone');
+      .query('UPDATE students SET password_hash = @hash, updated_by = \'self\' WHERE phone = @phone');
 
     if (!result.rowsAffected[0]) {
       return res.status(404).json({ message: 'Account not found.' });
@@ -614,10 +632,14 @@ router.post('/forgot-password/reset', forgotPasswordResetValidators, validate, a
 });
 
 // ── Refresh token ────────────────────────────────────────────
-// Reads the existing httpOnly cookie, verifies it, and issues a fresh one.
-// Call this when the user is active but the token is near expiry (e.g. < 1 day left).
+// Reads the existing httpOnly cookie OR Authorization: Bearer header, verifies it,
+// and issues a fresh one (both cookie and body).
 router.post('/refresh', (req, res) => {
-  const token = req.cookies?.auth_token;
+  let token = req.cookies?.auth_token;
+  if (!token) {
+    const header = req.headers['authorization'];
+    if (header && header.startsWith('Bearer ')) token = header.slice(7);
+  }
   if (!token) return res.status(401).json({ message: 'No session found.' });
 
   try {
@@ -626,7 +648,7 @@ router.post('/refresh', (req, res) => {
     const { iat, exp, ...claims } = payload;
     const newToken = jwt.sign(claims, JWT_SECRET, { expiresIn: '7d' });
     setAuthCookie(res, newToken);
-    return res.json({ message: 'Session refreshed.' });
+    return res.json({ message: 'Session refreshed.', token: newToken });
   } catch {
     res.clearCookie('auth_token', { httpOnly: true, secure: IS_PROD, sameSite: IS_PROD ? 'strict' : 'lax', path: '/' });
     return res.status(401).json({ message: 'Session expired. Please log in again.' });

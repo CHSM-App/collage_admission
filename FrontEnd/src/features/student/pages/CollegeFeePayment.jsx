@@ -17,7 +17,6 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
     paying,
     payError,
     paidMsg,
-    scriptError,
     payOnline,
   } = useCollegePayment(application.id)
 
@@ -116,12 +115,6 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
         {payError && (
           <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{payError}</div>
         )}
-        {scriptError && (
-          <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-700">
-            Payment gateway could not be loaded. Check your internet connection.
-          </div>
-        )}
-
         {/* ── Payment ── */}
         {!fullyPaid && fs.total_fee > 0 && (
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
@@ -134,7 +127,7 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
             <Button
               onClick={payCustomAmount}
               loading={paying}
-              disabled={paying || scriptError}
+              disabled={paying}
             >
               {admitted ? 'Pay Remaining' : 'Pay Now'}
             </Button>

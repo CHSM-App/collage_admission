@@ -413,6 +413,8 @@ export default function Certificates({ collegeId, readOnly }) {
                   <FormField
                     label="Birth Date" name="birth_date" type="date"
                     value={form.birth_date} onChange={handleChange}
+                    max={(() => { const d = new Date(); d.setFullYear(d.getFullYear() - 16); return d.toISOString().slice(0,10) })()}
+                    error={errors.birth_date}
                   />
                   <FormField
                     label="Caste / Category" name="caste"

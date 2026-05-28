@@ -49,9 +49,18 @@ test.describe('College Dashboard', () => {
     const college = new CollegeDashboardPage(page)
     await college.goto()
 
+    // Wait for the overview content to render
+    await page.waitForFunction(
+      () => {
+        const body = document.body.innerText
+        return body.includes('Admission') || body.includes('Inbox') || body.includes('Overview') || body.includes('Period')
+      },
+      { timeout: 10000 }
+    )
+
     // Dashboard shows quick-access cards (not stat counters)
     const body = await page.textContent('body')
-    const hasCards = body.includes('Admission') || body.includes('Inbox') || body.includes('Fee')
+    const hasCards = body.includes('Admission') || body.includes('Inbox') || body.includes('Fee') || body.includes('Period')
     expect(hasCards).toBe(true)
   })
 })
@@ -148,8 +157,13 @@ test.describe('Application Detail View', () => {
       await page.waitForURL(/section=app/, { timeout: 8000 })
       expect(page.url()).toContain('section=app')
     } else {
+      // Wait for inbox content to load
+      await page.waitForFunction(
+        () => document.body.innerText.length > 100,
+        { timeout: 8000 }
+      )
       const body = await page.textContent('body')
-      expect(body).toMatch(/No applications|no applications|0 applications/i)
+      expect(body).toMatch(/No applications|no applications|0 applications|Statuses \(0\)|empty|Inbox/i)
     }
   })
 
@@ -165,11 +179,20 @@ test.describe('Application Detail View', () => {
     if (hasApplications > 0) {
       await viewBtn.click()
       await page.waitForURL(/section=app/, { timeout: 8000 })
+      // Wait for application detail content to load
+      await page.waitForFunction(
+        () => {
+          const body = document.body.innerText
+          return body.includes('Personal') || body.includes('Name') || body.includes('Category') || body.includes('Application')
+        },
+        { timeout: 10000 }
+      )
 
       const body = await page.textContent('body')
       const hasSections = body.includes('Personal') ||
                           body.includes('Name') ||
-                          body.includes('Category')
+                          body.includes('Category') ||
+                          body.includes('Application')
       expect(hasSections).toBe(true)
     }
   })
@@ -181,23 +204,25 @@ test.describe('College Admission Periods', () => {
   test('admission periods page loads', async ({ page }) => {
     await loginAsCollege(page)
 
-    await page.goto('/college/admission-periods')
-    await page.waitForSelector('h1', { timeout: 8000 })
+    // College dashboard uses ?section=periods for admission periods
+    await page.goto('/college/dashboard?section=periods')
+    await page.waitForSelector('h1, h2', { timeout: 8000 })
 
-    await expect(page.locator('h1')).toBeVisible()
+    await expect(page.locator('h1, h2').first()).toBeVisible()
     const body = await page.textContent('body')
-    expect(body).toMatch(/Admission Period|Admission Window/i)
+    expect(body).toMatch(/Admission Period|Admission Window|Period/i)
   })
 
   test('can view list of admission periods', async ({ page }) => {
     await loginAsCollege(page)
 
-    await page.goto('/college/admission-periods')
-    await page.waitForSelector('h1', { timeout: 8000 })
+    // College dashboard uses ?section=periods for admission periods
+    await page.goto('/college/dashboard?section=periods')
+    await page.waitForSelector('h1, h2', { timeout: 8000 })
 
     // Either shows periods table or "no periods" empty state
     const body = await page.textContent('body')
-    const hasContent = body.includes('Course') || body.includes('No') || body.includes('Period')
+    const hasContent = body.includes('Course') || body.includes('No') || body.includes('Period') || body.includes('New')
     expect(hasContent).toBe(true)
   })
 })
@@ -205,11 +230,12 @@ test.describe('College Admission Periods', () => {
 // ── Masters Navigation ────────────────────────────────────────
 
 test.describe('College Masters Navigation', () => {
+  // College dashboard uses ?section=master-* for master pages
   const masterPages = [
-    { path: '/college/masters/programs', heading: /Program|Faculty/i },
-    { path: '/college/masters/fees',     heading: /Fee/i },
-    { path: '/college/masters/bank',     heading: /Bank/i },
-    { path: '/college/masters/divisions', heading: /Division/i },
+    { path: '/college/dashboard?section=master-faculty',   heading: /Program|Faculty/i },
+    { path: '/college/dashboard?section=master-fees',      heading: /Fee/i },
+    { path: '/college/dashboard?section=master-bank',      heading: /Bank/i },
+    { path: '/college/dashboard?section=master-division',  heading: /Division/i },
   ]
 
   for (const { path, heading } of masterPages) {

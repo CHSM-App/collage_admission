@@ -37,7 +37,7 @@ async function logActivity(appId, action, actorRole, note = null) {
   } catch (e) { logger.warn({ err: e }, 'logActivity failed'); }
 }
 
-const MIN_AGE_FOR_FY = 17; // years
+const MIN_AGE_FOR_FY = 16; // years
 
 // ── Validation helpers ───────────────────────────────────────
 function validateAadhaar(v)  { return /^\d{12}$/.test(v); }
@@ -158,7 +158,9 @@ router.post('/applications/init', async (req, res) => {
       .input('yr',   mssql.Int, yr)
       .input('ay',   mssql.NVarChar, academic_year)
       .input('apid', mssql.Int, parseInt(admission_period_id))
+      .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
+        DECLARE @t TABLE (id INT, merge_action NVARCHAR(10));
         MERGE applications AS target
         USING (SELECT @sid AS student_id, @col AS college_id, @crs AS course_id,
                       @yr AS year_of_study, @ay AS academic_year) AS src
@@ -170,9 +172,12 @@ router.post('/applications/init', async (req, res) => {
           AND target.status        = 'draft'
         WHEN NOT MATCHED THEN
           INSERT (student_id, college_id, course_id, year_of_study, academic_year,
-                  admission_period_id, status, current_step)
-          VALUES (@sid, @col, @crs, @yr, @ay, @apid, 'draft', 1)
-        OUTPUT INSERTED.id, $action AS merge_action;
+                  admission_period_id, status, current_step, created_by)
+          VALUES (@sid, @col, @crs, @yr, @ay, @apid, 'draft', 1, @actor)
+        WHEN MATCHED THEN
+          UPDATE SET updated_by = @actor
+        OUTPUT INSERTED.id, $action AS merge_action INTO @t (id, merge_action);
+        SELECT id, merge_action FROM @t;
       `);
 
     // If MERGE matched an existing draft (no INSERT happened), fetch it
@@ -318,12 +323,15 @@ router.post('/applications/init-by-college', async (req, res) => {
       .input('yr',   mssql.Int, yr)
       .input('ay',   mssql.NVarChar, academic_year)
       .input('apid', mssql.Int, parseInt(admission_period_id))
+      .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
+        DECLARE @t TABLE (id INT);
         INSERT INTO applications
           (student_id, college_id, course_id, year_of_study, academic_year,
-           admission_period_id, status, current_step)
-        OUTPUT INSERTED.id
-        VALUES (@sid, @col, @crs, @yr, @ay, @apid, 'draft', 1)
+           admission_period_id, status, current_step, created_by)
+        OUTPUT INSERTED.id INTO @t
+        VALUES (@sid, @col, @crs, @yr, @ay, @apid, 'draft', 1, @actor);
+        SELECT id FROM @t;
       `);
 
     return res.status(201).json({
@@ -534,9 +542,11 @@ router.patch('/applications/:id/confirm-context', async (req, res) => {
   try {
     await db.request()
       .input('id', mssql.Int, appId)
+      .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
         UPDATE applications
-        SET current_step = CASE WHEN current_step < 2 THEN 2 ELSE current_step END
+        SET current_step = CASE WHEN current_step < 2 THEN 2 ELSE current_step END,
+            updated_by = @actor
         WHERE id = @id
       `);
     return res.json({ success: true, current_step: Math.max(app.current_step || 1, 2) });
@@ -603,6 +613,7 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
       .input('div',      mssql.Char,     division || null)
       .input('dcc',      mssql.NVarChar, degree_course_code || null)
       .input('step',     mssql.Int,      2)
+      .input('actor',    mssql.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
         UPDATE applications SET
           app_surname=@sn, app_first_name=@fn, app_middle_name=@mn, app_mother_name=@moth,
@@ -615,7 +626,8 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
           app_division=@div,
           app_degree_course_code=@dcc,
           current_step = CASE WHEN current_step < @step THEN @step ELSE current_step END,
-          updated_at=GETDATE()
+          updated_at=GETDATE(),
+          updated_by=@actor
         WHERE id=@id
       `);
 
@@ -703,6 +715,7 @@ router.patch('/applications/:id/other-details', async (req, res) => {
       .input('bnm',  mssql.NVarChar, bank_name      || null)
       .input('bbr',  mssql.NVarChar, bank_branch    || null)
       .input('step', mssql.Int,      3)
+      .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
         UPDATE applications SET
           app_birth_date=@bd, app_birth_place=@bp, app_birth_taluka=@btal,
@@ -714,7 +727,8 @@ router.patch('/applications/:id/other-details', async (req, res) => {
           app_university_app_no=@uano,
           app_bank_account=@bacc, app_bank_ifsc=@bifc, app_bank_name=@bnm, app_bank_branch=@bbr,
           current_step = CASE WHEN current_step < @step THEN @step ELSE current_step END,
-          updated_at=GETDATE()
+          updated_at=GETDATE(),
+          updated_by=@actor
         WHERE id=@id
       `);
 
@@ -785,9 +799,9 @@ router.patch('/applications/:id/previous-exam', async (req, res) => {
         .input('brd',  mssql.NVarChar, row.board?.trim()              || null)
         .input('my',   mssql.NVarChar, row.month_year?.trim()         || null)
         .input('seat', mssql.NVarChar, row.seat_no?.trim()            || null)
-        .input('tmo',  mssql.Decimal,  parseFloat(row.marks_obtained) || null)
-        .input('tmx',  mssql.Decimal,  parseFloat(row.marks_max)      || null)
-        .input('pct',  mssql.Decimal,  parseFloat(row.percentage)     || null)
+        .input('tmo',  mssql.Decimal(8, 2),  parseFloat(row.marks_obtained) || null)
+        .input('tmx',  mssql.Decimal(8, 2),  parseFloat(row.marks_max)      || null)
+        .input('pct',  mssql.Decimal(5, 2),  parseFloat(row.percentage)     || null)
         .input('cls',  mssql.NVarChar, row.class_grade?.trim()        || null)
         .input('rem',  mssql.NVarChar, row.remark?.trim()             || null)
 
@@ -817,10 +831,12 @@ router.patch('/applications/:id/previous-exam', async (req, res) => {
     await db.request()
       .input('id',   mssql.Int, appId)
       .input('step', mssql.Int, 4)
+      .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
         UPDATE applications SET
           current_step = CASE WHEN current_step < @step THEN @step ELSE current_step END,
-          updated_at=GETDATE()
+          updated_at=GETDATE(),
+          updated_by=@actor
         WHERE id=@id
       `);
 
@@ -875,11 +891,12 @@ router.post('/applications/:id/form-documents', async (req, res) => {
       } else {
         // No existing row — insert one
         const ins = await db.request()
-          .input('sid',  mssql.Int,      parseInt(student_id))
-          .input('dtid', mssql.Int,      parseInt(document_type_id))
-          .input('fn',   mssql.NVarChar, file_name)
-          .input('fp',   mssql.NVarChar, file_path)
-          .query(`INSERT INTO student_documents (student_id, document_type_id, file_name, file_path) OUTPUT INSERTED.id VALUES (@sid, @dtid, @fn, @fp)`);
+          .input('sid',   mssql.Int,      parseInt(student_id))
+          .input('dtid',  mssql.Int,      parseInt(document_type_id))
+          .input('fn',    mssql.NVarChar, file_name)
+          .input('fp',    mssql.NVarChar, file_path)
+          .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
+          .query(`INSERT INTO student_documents (student_id, document_type_id, file_name, file_path, created_by) OUTPUT INSERTED.id VALUES (@sid, @dtid, @fn, @fp, @actor)`);
         sdId = ins.recordset[0].id;
       }
     }
@@ -897,22 +914,25 @@ router.post('/applications/:id/form-documents', async (req, res) => {
         .query('UPDATE application_documents SET student_document_id=@sdId WHERE id=@id');
     } else {
       await db.request()
-        .input('appId', mssql.Int, appId)
-        .input('sdId',  mssql.Int, sdId)
-        .input('dtid',  mssql.Int, parseInt(document_type_id))
+        .input('appId', mssql.Int,      appId)
+        .input('sdId',  mssql.Int,      sdId)
+        .input('dtid',  mssql.Int,      parseInt(document_type_id))
+        .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
         .query(`
-          INSERT INTO application_documents (application_id, student_document_id, document_type_id)
-          VALUES (@appId, @sdId, @dtid)
+          INSERT INTO application_documents (application_id, student_document_id, document_type_id, created_by)
+          VALUES (@appId, @sdId, @dtid, @actor)
         `);
     }
 
     await db.request()
       .input('id',   mssql.Int, appId)
       .input('step', mssql.Int, 5)
+      .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
         UPDATE applications SET
           current_step = CASE WHEN current_step < @step THEN @step ELSE current_step END,
-          updated_at=GETDATE()
+          updated_at=GETDATE(),
+          updated_by=@actor
         WHERE id=@id
       `);
 
@@ -984,11 +1004,13 @@ router.post('/applications/:id/declaration', async (req, res) => {
     await db.request()
       .input('id',   mssql.Int,      appId)
       .input('step', mssql.Int,      6)
+      .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
         UPDATE applications SET
           declaration_accepted_at = GETDATE(),
           current_step = @step,
-          updated_at   = GETDATE()
+          updated_at   = GETDATE(),
+          updated_by   = @actor
         WHERE id = @id
       `);
 
@@ -1047,6 +1069,7 @@ router.post('/applications/:id/resubmit', async (req, res) => {
     await db.request()
       .input('id',     mssql.Int,      appId)
       .input('status', mssql.NVarChar, newStatus)
+      .input('actor',  mssql.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
         UPDATE applications SET
           status = @status,
@@ -1054,6 +1077,7 @@ router.post('/applications/:id/resubmit', async (req, res) => {
           declaration_accepted_at = GETDATE(),
           current_step = 6,
           updated_at = GETDATE(),
+          updated_by = @actor,
           status_updated_at = GETDATE()
         WHERE id = @id
       `);
@@ -1237,7 +1261,8 @@ router.post('/applications/:id/subject-selections', async (req, res) => {
       if (countRes.recordset[0].sem_count >= 2) {
         await db.request()
           .input('id', mssql.Int, appId)
-          .query(`UPDATE applications SET status = 'enrolled', updated_at = GETDATE(), status_updated_at = GETDATE() WHERE id = @id`);
+          .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
+          .query(`UPDATE applications SET status = 'enrolled', updated_at = GETDATE(), updated_by = @actor, status_updated_at = GETDATE() WHERE id = @id`);
         await logActivity(appId, 'enrolled', 'student', 'Subject selection completed');
       }
     }

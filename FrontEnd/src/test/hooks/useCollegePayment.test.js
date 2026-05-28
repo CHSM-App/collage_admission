@@ -3,10 +3,10 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 import React from 'react'
 import { useCollegePayment } from '../../shared/hooks/useCollegePayment.js'
 
-// Mock Razorpay
-const mockOpenCheckout = vi.fn()
-vi.mock('../../shared/hooks/useRazorpay.js', () => ({
-  useRazorpay: () => ({ openCheckout: mockOpenCheckout, scriptError: null }),
+// Mock PayU hook
+const mockRedirectToPayU = vi.fn()
+vi.mock('../../shared/hooks/usePayU.js', () => ({
+  usePayU: () => ({ redirectToPayU: mockRedirectToPayU }),
 }))
 
 // Mock Toast
@@ -19,8 +19,7 @@ vi.mock('../../context/ToastContext.jsx', () => ({
 // Mock payment service
 vi.mock('../../services/paymentService.js', () => ({
   getCollegeFeeStatus: vi.fn(),
-  createOrder:         vi.fn(),
-  verifyPayment:       vi.fn(),
+  initiatePayment:     vi.fn(),
 }))
 
 // Mock college admin service
@@ -28,7 +27,7 @@ vi.mock('../../services/collegeAdminService.js', () => ({
   recordCashPayment: vi.fn(),
 }))
 
-import { getCollegeFeeStatus, createOrder, verifyPayment } from '../../services/paymentService.js'
+import { getCollegeFeeStatus, initiatePayment } from '../../services/paymentService.js'
 import { recordCashPayment } from '../../services/collegeAdminService.js'
 
 const mockFeeStatus = {
@@ -73,9 +72,9 @@ describe('useCollegePayment', () => {
     expect(result.current.payError).toBe('Invalid payment amount.')
   })
 
-  it('payOnline creates order and opens checkout', async () => {
-    createOrder.mockResolvedValueOnce({
-      data: { data: { id: 'order_123', amount: 50000, currency: 'INR' } },
+  it('payOnline calls initiatePayment and redirectToPayU', async () => {
+    initiatePayment.mockResolvedValueOnce({
+      data: { data: { endpoint: 'https://test.payu.in/_payment', fields: { txnid: 'TXN-1-CF' } } },
     })
 
     const { result } = renderHook(() => useCollegePayment(1))
@@ -83,75 +82,19 @@ describe('useCollegePayment', () => {
 
     await act(async () => { await result.current.payOnline(500) })
 
-    expect(createOrder).toHaveBeenCalledWith({
+    expect(initiatePayment).toHaveBeenCalledWith({
       application_id: 1,
       payment_type:   'college_fee',
       amount:         500,
     })
-    expect(mockOpenCheckout).toHaveBeenCalled()
+    expect(mockRedirectToPayU).toHaveBeenCalledWith({
+      endpoint: 'https://test.payu.in/_payment',
+      fields:   { txnid: 'TXN-1-CF' },
+    })
   })
 
-  it('payOnline onSuccess calls verifyPayment and sets paidMsg', async () => {
-    createOrder.mockResolvedValueOnce({
-      data: { data: { id: 'order_123', amount: 50000 } },
-    })
-    verifyPayment.mockResolvedValueOnce({
-      data: { message: 'Payment verified.', data: {} },
-    })
-    // Re-fetch after success
-    getCollegeFeeStatus.mockResolvedValue({ data: { data: { ...mockFeeStatus, college_fee_paid: true } } })
-
-    mockOpenCheckout.mockImplementation(({ onSuccess }) => {
-      onSuccess({
-        razorpay_order_id:   'order_123',
-        razorpay_payment_id: 'pay_abc',
-        razorpay_signature:  'sig_xyz',
-      })
-    })
-
-    const { result } = renderHook(() => useCollegePayment(1))
-    await waitFor(() => expect(result.current.loading).toBe(false))
-
-    await act(async () => { await result.current.payOnline(500) })
-
-    expect(verifyPayment).toHaveBeenCalled()
-    expect(mockToastSuccess).toHaveBeenCalledWith('Payment verified.')
-    expect(result.current.paidMsg).toBe('Payment verified.')
-  })
-
-  it('payOnline onFailure sets payError (non-cancel)', async () => {
-    createOrder.mockResolvedValueOnce({ data: { data: { id: 'order_123' } } })
-
-    mockOpenCheckout.mockImplementation(({ onFailure }) => {
-      onFailure({ message: 'Payment failed due to network.' })
-    })
-
-    const { result } = renderHook(() => useCollegePayment(1))
-    await waitFor(() => expect(result.current.loading).toBe(false))
-
-    await act(async () => { await result.current.payOnline(500) })
-
-    expect(result.current.payError).toBe('Payment failed due to network.')
-    expect(mockToastError).toHaveBeenCalled()
-  })
-
-  it('payOnline onFailure ignores cancel message', async () => {
-    createOrder.mockResolvedValueOnce({ data: { data: { id: 'order_123' } } })
-
-    mockOpenCheckout.mockImplementation(({ onFailure }) => {
-      onFailure({ message: 'Payment cancelled by user.' })
-    })
-
-    const { result } = renderHook(() => useCollegePayment(1))
-    await waitFor(() => expect(result.current.loading).toBe(false))
-
-    await act(async () => { await result.current.payOnline(500) })
-
-    expect(result.current.payError).toBe('')
-  })
-
-  it('payOnline sets error when createOrder fails', async () => {
-    createOrder.mockRejectedValueOnce({
+  it('payOnline sets error when initiatePayment fails', async () => {
+    initiatePayment.mockRejectedValueOnce({
       response: { data: { message: 'Order creation failed.' } },
     })
 

@@ -4,6 +4,11 @@ import { StepHeader, StepFooter } from './Step1Context.jsx'
 const MARITAL = [{ value:'Unmarried', label:'Unmarried' }, { value:'Married', label:'Married' }]
 const BLOOD   = ['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(v => ({ value: v, label: v }))
 
+const today = new Date().toISOString().slice(0, 10)
+const maxBirthDate = (() => {
+  const d = new Date(); d.setFullYear(d.getFullYear() - 16); return d.toISOString().slice(0, 10)
+})()
+
 export default function Step3Other({ data, errors, globalError, saving, onChange, onBack, onNext, extraFooter, readOnly }) {
   function handleNext() {
     onNext({
@@ -38,7 +43,7 @@ export default function Step3Other({ data, errors, globalError, saving, onChange
         <Section title="Birth Information">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <FormField label="Date of Birth" name="birth_date" type="date" value={data.birth_date}
-              onChange={onChange} error={e.birth_date} required />
+              onChange={onChange} error={e.birth_date} required max={maxBirthDate} />
             <FormField label="Age" value={calcAge(data.birth_date)} readOnly
               hint="Auto-calculated from date of birth" />
             <FormField label="Birth Place" name="birth_place" value={data.birth_place}

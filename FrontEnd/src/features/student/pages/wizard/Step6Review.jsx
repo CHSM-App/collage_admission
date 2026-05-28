@@ -18,9 +18,7 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
   const {
     processing,
     submitError,
-    registrationNumber,
     resubmitted,
-    scriptError,
     handleSubmit: submitApplication,
     handleResubmit: resubmitApp,
   } = useApplicationSubmit(appId)
@@ -40,31 +38,6 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
         <h2 className="text-xl font-bold text-slate-950">Application Updated!</h2>
         <p className="text-slate-500 max-w-sm mx-auto text-sm">
           Your application has been updated and submitted. The college will review it.
-        </p>
-        <Button onClick={onDone} className="mx-auto">Go to My Applications →</Button>
-      </div>
-    )
-  }
-
-  // ── Original submit success screen ────────────────────────
-  if (registrationNumber !== null) {
-    return (
-      <div className="px-5 py-10 text-center space-y-4">
-        <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100">
-          <svg className="h-8 w-8 text-emerald-600" fill="none" viewBox="0 0 24 24">
-            <path d="M5 13l4 4L19 7" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </div>
-        <h2 className="text-xl font-bold text-slate-950">Application Submitted!</h2>
-        {registrationNumber && (
-          <p className="text-slate-600">
-            Registration number:{' '}
-            <span className="font-mono font-bold text-slate-950">{registrationNumber}</span>
-          </p>
-        )}
-        <p className="text-slate-500 max-w-sm mx-auto text-sm">
-          Application fee paid. Your application is now under review.
-          The college will contact you for document verification.
         </p>
         <Button onClick={onDone} className="mx-auto">Go to My Applications →</Button>
       </div>
@@ -205,15 +178,9 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
               Platform fee: ₹{Number(data.application_fee || 0).toLocaleString('en-IN')}
             </p>
             <p className="text-blue-700 text-xs mt-0.5">
-              Clicking "Pay & Submit" will open the Razorpay payment window. Non-refundable.
+              Clicking "Pay & Submit" will redirect you to the PayU payment page. Non-refundable.
             </p>
           </div>
-        )}
-
-        {!applicationFeePaid && scriptError && (
-          <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
-            Payment gateway could not be loaded. Please check your internet connection and try again.
-          </p>
         )}
 
         {(submitError || globalError) && (
@@ -240,8 +207,8 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
             <Button
               onClick={handleSubmit}
               loading={processing}
-              disabled={!accepted || scriptError}
-              className={`w-full sm:w-auto sm:ml-auto ${(!accepted || scriptError) ? 'opacity-50 cursor-not-allowed' : ''}`}
+              disabled={!accepted || processing}
+              className={`w-full sm:w-auto sm:ml-auto ${(!accepted || processing) ? 'opacity-50 cursor-not-allowed' : ''}`}
             >
               Pay ₹{Number(data.application_fee || 0).toLocaleString('en-IN')} &amp; Submit →
             </Button>

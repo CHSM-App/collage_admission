@@ -196,6 +196,14 @@ router.get('/:collegeId/bonafide/:id', requirePerm('certificates'), async (req, 
 })
 
 // ─── Validation helper ────────────────────────────────────────
+function ageFrom(dob) {
+  const d = new Date(dob), today = new Date()
+  let age = today.getFullYear() - d.getFullYear()
+  const m = today.getMonth() - d.getMonth()
+  if (m < 0 || (m === 0 && today.getDate() < d.getDate())) age--
+  return age
+}
+
 function validateBody(body) {
   const errors = {}
   if (!body.certificate_date)       errors.certificate_date = 'Date is required.'
@@ -204,6 +212,9 @@ function validateBody(body) {
   if (!body.academic_year?.trim())  errors.academic_year    = 'Academic year is required.'
   if (body.gender && !['Male','Female','Other'].includes(body.gender)) {
     errors.gender = 'Gender must be Male, Female, or Other.'
+  }
+  if (body.birth_date && ageFrom(body.birth_date) < 16) {
+    errors.birth_date = 'Student must be at least 16 years old.'
   }
   if (body.roll_no !== undefined && body.roll_no !== null && body.roll_no !== '' && isNaN(parseInt(body.roll_no))) {
     errors.roll_no = 'Roll number must be a number.'
@@ -225,7 +236,7 @@ router.post('/:collegeId/bonafide', requirePerm('certificates'), async (req, res
     const year      = certDate.getFullYear()
     const certNo    = await nextCertificateNumber(collegeId, year, BONAFIDE_CFG)
 
-    const userId = req.user?.id || null
+    const userId = req.user?.staff_id || req.user?.id || null
 
     const r = await db.request()
       .input('cid',  mssql.Int,      collegeId)
@@ -245,9 +256,9 @@ router.post('/:collegeId/bonafide', requirePerm('certificates'), async (req, res
         INSERT INTO certificate_bonafide
           (college_id, certificate_no, certificate_date, reg_no, student_name, gender,
            is_ex_student, class_name, academic_year, birth_date, roll_no, caste, created_by)
-        OUTPUT INSERTED.*
         VALUES
-          (@cid, @cn, @cd, @reg, @sn, @g, @ex, @cls, @ay, @bd, @roll, @cas, @uid)
+          (@cid, @cn, @cd, @reg, @sn, @g, @ex, @cls, @ay, @bd, @roll, @cas, @uid);
+        SELECT * FROM certificate_bonafide WHERE bonafide_id = SCOPE_IDENTITY();
       `)
     return res.status(201).json({ success: true, data: r.recordset[0] })
   } catch (e) {
@@ -267,7 +278,7 @@ router.put('/:collegeId/bonafide/:id', requirePerm('certificates'), async (req, 
     return res.status(422).json({ success: false, message: 'Validation failed.', errors })
   }
   try {
-    const userId = req.user?.id || null
+    const userId = req.user?.staff_id || req.user?.id || null
     const r = await db.request()
       .input('cid',  mssql.Int,      cid(req))
       .input('id',   mssql.Int,      parseInt(req.params.id))
@@ -296,8 +307,8 @@ router.put('/:collegeId/bonafide/:id', requirePerm('certificates'), async (req, 
           caste            = @cas,
           updated_by       = @uid,
           updated_date     = GETDATE()
-        OUTPUT INSERTED.*
-        WHERE bonafide_id = @id AND college_id = @cid AND is_deleted = 0
+        WHERE bonafide_id = @id AND college_id = @cid AND is_deleted = 0;
+        SELECT * FROM certificate_bonafide WHERE bonafide_id = @id AND college_id = @cid AND is_deleted = 0;
       `)
     if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Certificate not found.' })
     return res.json({ success: true, data: r.recordset[0] })
@@ -311,7 +322,7 @@ router.put('/:collegeId/bonafide/:id', requirePerm('certificates'), async (req, 
 // Soft delete — sets is_deleted=1, preserves the row for audit.
 router.delete('/:collegeId/bonafide/:id', requirePerm('certificates'), async (req, res) => {
   try {
-    const userId = req.user?.id || null
+    const userId = req.user?.staff_id || req.user?.id || null
     const r = await db.request()
       .input('cid', mssql.Int, cid(req))
       .input('id',  mssql.Int, parseInt(req.params.id))
@@ -342,6 +353,9 @@ function validateCharacterBody(body) {
   if (!body.academic_year?.trim())  errors.academic_year    = 'Academic year is required.'
   if (body.gender && !['Male','Female','Other'].includes(body.gender)) {
     errors.gender = 'Gender must be Male, Female, or Other.'
+  }
+  if (body.birth_date && ageFrom(body.birth_date) < 16) {
+    errors.birth_date = 'Student must be at least 16 years old.'
   }
   if (body.roll_no !== undefined && body.roll_no !== null && body.roll_no !== '' && isNaN(parseInt(body.roll_no))) {
     errors.roll_no = 'Roll number must be a number.'
@@ -420,7 +434,7 @@ router.post('/:collegeId/character', requirePerm('certificates'), async (req, re
     const certDate  = new Date(req.body.certificate_date)
     const year      = certDate.getFullYear()
     const certNo    = await nextCertificateNumber(collegeId, year, CHARACTER_CFG)
-    const userId    = req.user?.id || null
+    const userId    = req.user?.staff_id || req.user?.id || null
 
     const r = await db.request()
       .input('cid',  mssql.Int,      collegeId)
@@ -442,9 +456,9 @@ router.post('/:collegeId/character', requirePerm('certificates'), async (req, re
           (college_id, certificate_no, certificate_date, reg_no, student_name, gender,
            is_ex_student, class_name, academic_year, known_from_years, birth_date,
            roll_no, caste, created_by)
-        OUTPUT INSERTED.*
         VALUES
-          (@cid, @cn, @cd, @reg, @sn, @g, @ex, @cls, @ay, @kfy, @bd, @roll, @cas, @uid)
+          (@cid, @cn, @cd, @reg, @sn, @g, @ex, @cls, @ay, @kfy, @bd, @roll, @cas, @uid);
+        SELECT * FROM certificate_character WHERE character_certificate_id = SCOPE_IDENTITY();
       `)
     return res.status(201).json({ success: true, data: r.recordset[0] })
   } catch (e) {
@@ -464,7 +478,7 @@ router.put('/:collegeId/character/:id', requirePerm('certificates'), async (req,
     return res.status(422).json({ success: false, message: 'Validation failed.', errors })
   }
   try {
-    const userId = req.user?.id || null
+    const userId = req.user?.staff_id || req.user?.id || null
     const r = await db.request()
       .input('cid',  mssql.Int,      cid(req))
       .input('id',   mssql.Int,      parseInt(req.params.id))
@@ -495,8 +509,8 @@ router.put('/:collegeId/character/:id', requirePerm('certificates'), async (req,
           caste            = @cas,
           updated_by       = @uid,
           updated_date     = GETDATE()
-        OUTPUT INSERTED.*
-        WHERE character_certificate_id = @id AND college_id = @cid AND is_deleted = 0
+        WHERE character_certificate_id = @id AND college_id = @cid AND is_deleted = 0;
+        SELECT * FROM certificate_character WHERE character_certificate_id = @id AND college_id = @cid AND is_deleted = 0;
       `)
     if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Certificate not found.' })
     return res.json({ success: true, data: r.recordset[0] })
@@ -509,7 +523,7 @@ router.put('/:collegeId/character/:id', requirePerm('certificates'), async (req,
 // ─── DELETE /certificates/:cid/character/:id ──────────────────
 router.delete('/:collegeId/character/:id', requirePerm('certificates'), async (req, res) => {
   try {
-    const userId = req.user?.id || null
+    const userId = req.user?.staff_id || req.user?.id || null
     const r = await db.request()
       .input('cid', mssql.Int, cid(req))
       .input('id',  mssql.Int, parseInt(req.params.id))
@@ -538,6 +552,9 @@ function validateNocBody(body) {
   if (!body.class_name?.trim())    errors.class_name       = 'Class is required.'
   if (body.gender && !['Male','Female','Other'].includes(body.gender)) {
     errors.gender = 'Gender must be Male, Female, or Other.'
+  }
+  if (body.birth_date && ageFrom(body.birth_date) < 16) {
+    errors.birth_date = 'Student must be at least 16 years old.'
   }
   // From/To date range — both optional individually, but if both supplied, from <= to.
   if (body.from_date && body.to_date) {
@@ -617,7 +634,7 @@ router.post('/:collegeId/noc', requirePerm('certificates'), async (req, res) => 
     const certDate  = new Date(req.body.certificate_date)
     const year      = certDate.getFullYear()
     const certNo    = await nextCertificateNumber(collegeId, year, NOC_CFG)
-    const userId    = req.user?.id || null
+    const userId    = req.user?.staff_id || req.user?.id || null
 
     const r = await db.request()
       .input('cid',  mssql.Int,      collegeId)
@@ -637,9 +654,9 @@ router.post('/:collegeId/noc', requirePerm('certificates'), async (req, res) => 
         INSERT INTO certificate_noc
           (college_id, certificate_no, certificate_date, reg_no, student_name, gender,
            is_ex_student, class_name, from_date, to_date, prn_no, final_confirmation_no, created_by)
-        OUTPUT INSERTED.*
         VALUES
-          (@cid, @cn, @cd, @reg, @sn, @g, @ex, @cls, @fd, @td, @prn, @fc, @uid)
+          (@cid, @cn, @cd, @reg, @sn, @g, @ex, @cls, @fd, @td, @prn, @fc, @uid);
+        SELECT * FROM certificate_noc WHERE noc_certificate_id = SCOPE_IDENTITY();
       `)
     return res.status(201).json({ success: true, data: r.recordset[0] })
   } catch (e) {
@@ -661,7 +678,7 @@ router.put('/:collegeId/noc/:id', requirePerm('certificates'), async (req, res) 
     return res.status(422).json({ success: false, message: 'Validation failed.', errors })
   }
   try {
-    const userId = req.user?.id || null
+    const userId = req.user?.staff_id || req.user?.id || null
     const r = await db.request()
       .input('cid',  mssql.Int,      cid(req))
       .input('id',   mssql.Int,      parseInt(req.params.id))
@@ -690,8 +707,8 @@ router.put('/:collegeId/noc/:id', requirePerm('certificates'), async (req, res) 
           final_confirmation_no = @fc,
           updated_by            = @uid,
           updated_date          = GETDATE()
-        OUTPUT INSERTED.*
-        WHERE noc_certificate_id = @id AND college_id = @cid AND is_deleted = 0
+        WHERE noc_certificate_id = @id AND college_id = @cid AND is_deleted = 0;
+        SELECT * FROM certificate_noc WHERE noc_certificate_id = @id AND college_id = @cid AND is_deleted = 0;
       `)
     if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Certificate not found.' })
     return res.json({ success: true, data: r.recordset[0] })
@@ -707,7 +724,7 @@ router.put('/:collegeId/noc/:id', requirePerm('certificates'), async (req, res) 
 // ─── DELETE /certificates/:cid/noc/:id ────────────────────────
 router.delete('/:collegeId/noc/:id', requirePerm('certificates'), async (req, res) => {
   try {
-    const userId = req.user?.id || null
+    const userId = req.user?.staff_id || req.user?.id || null
     const r = await db.request()
       .input('cid', mssql.Int, cid(req))
       .input('id',  mssql.Int, parseInt(req.params.id))

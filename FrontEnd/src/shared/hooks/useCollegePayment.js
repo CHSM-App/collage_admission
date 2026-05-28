@@ -1,16 +1,19 @@
 /**
- * useCollegePayment — orchestrates college-fee payment (online via Razorpay or cash).
+ * useCollegePayment — orchestrates college-fee payment (online via PayU or cash).
  *
  * Usage (online-only callers like CollegeFeePayment):
  *   const { feeStatus, loading, paying, payError, paidMsg, fetchStatus, payOnline } = useCollegePayment(appId)
  *
  * Usage (cash + online callers like CollegePayPanel / CollegeFeePanel):
  *   const { feeStatus, loading, paying, payError, paidMsg, fetchStatus, payOnline, payCash } = useCollegePayment(appId, collegeId, { onPaid })
+ *
+ * PayU uses a redirect flow — payOnline() redirects the browser to PayU.
+ * The browser returns to /payment-result after success/failure.
  */
 import { useEffect, useState } from 'react'
-import { useRazorpay } from './useRazorpay.js'
+import { usePayU } from './usePayU.js'
 import { useToast } from '../../context/ToastContext.jsx'
-import { getCollegeFeeStatus, createOrder, verifyPayment } from '../../services/paymentService.js'
+import { getCollegeFeeStatus, initiatePayment } from '../../services/paymentService.js'
 import { recordCashPayment } from '../../services/collegeAdminService.js'
 
 /**
@@ -20,7 +23,7 @@ import { recordCashPayment } from '../../services/collegeAdminService.js'
  */
 export function useCollegePayment(appId, collegeId, options = {}) {
   const { onPaid } = options
-  const { openCheckout, scriptError } = useRazorpay()
+  const { redirectToPayU } = usePayU()
   const toast = useToast()
 
   const [feeStatus, setFeeStatus] = useState(null)
@@ -40,53 +43,23 @@ export function useCollegePayment(appId, collegeId, options = {}) {
   useEffect(() => { fetchStatus() }, [appId])
 
   /**
-   * Pay online via Razorpay.
+   * Pay online via PayU (browser redirect).
    * @param {number} amt - amount in rupees
-   * @param {{ onSuccess?: (msg: string) => void }} [opts]
    */
-  async function payOnline(amt, opts = {}) {
+  async function payOnline(amt) {
     if (!amt || amt <= 0) { setPayError('Invalid payment amount.'); return }
     setPayError(''); setPaidMsg(''); setPaying(true)
 
     try {
-      const orderRes = await createOrder({
+      const res = await initiatePayment({
         application_id: appId,
         payment_type:   'college_fee',
         amount:         amt,
       })
-      const orderData = orderRes.data.data
-      setPaying(false)
+      const { endpoint, fields } = res.data.data
 
-      openCheckout({
-        orderData,
-        onSuccess: async (rzpResponse) => {
-          setPaying(true)
-          try {
-            const verifyRes = await verifyPayment({
-              application_id:      appId,
-              payment_type:        'college_fee',
-              razorpay_order_id:   rzpResponse.razorpay_order_id,
-              razorpay_payment_id: rzpResponse.razorpay_payment_id,
-              razorpay_signature:  rzpResponse.razorpay_signature,
-            })
-            const msg = verifyRes.data.message
-            toast.success(msg)
-            setPaidMsg(msg)
-            fetchStatus()
-            onPaid?.()
-            opts.onSuccess?.(msg, verifyRes.data.data)
-          } catch (err) {
-            const msg = err?.response?.data?.message || 'Payment verification failed.'
-            setPayError(msg); toast.error(msg)
-          } finally { setPaying(false) }
-        },
-        onFailure: (err) => {
-          setPaying(false)
-          if (err.message !== 'Payment cancelled by user.') {
-            setPayError(err.message); toast.error(err.message)
-          }
-        },
-      })
+      // Redirects the browser to PayU — no return from here.
+      redirectToPayU({ endpoint, fields })
     } catch (err) {
       const msg = err?.response?.data?.message || 'Could not initiate payment.'
       setPayError(msg); toast.error(msg)
@@ -125,7 +98,6 @@ export function useCollegePayment(appId, collegeId, options = {}) {
     paying,
     payError,
     paidMsg,
-    scriptError,
     fetchStatus,
     payOnline,
     payCash,

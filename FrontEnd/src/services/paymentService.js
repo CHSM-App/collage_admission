@@ -3,11 +3,8 @@ import api from './api'
 export const getCollegeFeeStatus = (appId) =>
   api.get(`payments/college-fee-status/${appId}`)
 
-export const createOrder = (data) =>
-  api.post('payments/create-order', data)
-
-export const verifyPayment = (data) =>
-  api.post('payments/verify', data)
+export const initiatePayment = (data) =>
+  api.post('payments/initiate', data)
 
 export const getPaymentReceipts = (applicationId) =>
   api.get(`payments/receipts/${applicationId}`)
