@@ -329,7 +329,7 @@ async function markPaymentFailed(txnid, reason) {
 
 // ── Frontend redirect URL helper ─────────────────────────────
 function frontendUrl(path) {
-  const base = (process.env.CORS_ORIGIN || '').split(',')[0].trim() || 'http://localhost:5173';
+  const base = (process.env.FRONTEND_URL || 'http://localhost:5173').trim();
   return `${base}${path}`;
 }
 

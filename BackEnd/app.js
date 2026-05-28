@@ -28,7 +28,7 @@ var app = express();
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'pug');
 
-const IS_PROD = true;
+const IS_PROD = process.env.NODE_ENV === 'production';
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }, // allow static uploads to be fetched cross-origin
@@ -96,18 +96,17 @@ app.use(function(err, req, res, next) {
   }
   // In production never leak internal error details to the client.
   // 4xx errors are intentional (validation, auth) — their messages are safe to forward.
-  const isProd = true;
+  const isProd = IS_PROD;
   const message = status < 500
     ? (err.message || 'Bad request.')
     : (isProd ? 'An internal server error occurred.' : (err.message || 'Internal server error'));
   res.status(status).json({ success: false, message });
 });
  
-const PORT = process.env.PORT || 8000;
-const PORTLOCAL = 5000;
+const PORT = process.env.PORT || (IS_PROD ? 8000 : 5000);
 
-app.listen(PORTLOCAL, '0.0.0.0', function () {
-  pinoLogger.info('Server listening on 0.0.0.0:' + PORTLOCAL);
+app.listen(PORT, '0.0.0.0', function () {
+  pinoLogger.info('Server listening on 0.0.0.0:' + PORT);
   startOtpCleanup();
 });
 
