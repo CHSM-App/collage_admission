@@ -8,7 +8,7 @@
   -- Safe to re-run — drops existing trigger before recreating.
   -- ============================================================
 
-  USE college_test;
+  USE college_db;
   GO
 
   -- ============================================================

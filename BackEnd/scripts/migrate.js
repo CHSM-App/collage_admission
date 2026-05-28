@@ -35,8 +35,7 @@ const config = {
   connectionTimeout: 15000,
 };
 
-const MIGRATIONS_DIR      = path.join(__dirname, 'migrations');
-const AUDIT_TRIGGERS_FILE = path.join(__dirname, 'create_audit_triggers.sql');
+const MIGRATIONS_DIR = path.join(__dirname, 'migrations');
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -122,16 +121,8 @@ async function main() {
   const pending = files.filter(f => !applied.has(f));
 
   if (pending.length === 0) {
-    console.log('[migrate] All migrations already applied. Re-applying triggers.\n');
-    try {
-      await applyAuditTriggers(pool);
-    } catch (err) {
-      console.error('\n[migrate] ✗ Failed to apply triggers:');
-      console.error('  Message:', err.message);
-      console.error('  Number: ', err.number);
-      await pool.close();
-      process.exit(1);
-    }
+    console.log('[migrate] All migrations already applied. Nothing to do.');
+    console.log('[migrate] Run create_audit_triggers.sql manually in SSMS to (re-)apply triggers.');
     await pool.close();
     return;
   }
@@ -169,106 +160,9 @@ async function main() {
     }
   }
 
-  // Post-step: re-create all 66 audit triggers.
-  try {
-    await applyAuditTriggers(pool);
-  } catch (err) {
-    console.error('\n[migrate] ✗ Failed to apply triggers:');
-    console.error('  Message:', err.message);
-    console.error('  Number: ', err.number);
-    await pool.close();
-    process.exit(1);
-  }
-
   console.log(`\n[migrate] ✓ ${pending.length} migration(s) applied successfully.`);
+  console.log('[migrate] Remember to run create_audit_triggers.sql manually in SSMS.');
   await pool.close();
-}
-
-// ── Audit triggers ────────────────────────────────────────────
-// Reads create_audit_triggers.sql and runs it batch-by-batch.
-// The file uses DROP-then-CREATE so it is safe to re-run (idempotent).
-// Must be executed by a DB user with ALTER permission on each audited table
-// (i.e. sa / db_owner in SSMS, or the app user after GRANT ALTER is run).
-async function applyAuditTriggers(pool) {
-  if (!fs.existsSync(AUDIT_TRIGGERS_FILE)) {
-    console.log('  Audit triggers skipped (create_audit_triggers.sql not found)');
-    return;
-  }
-
-  // Skip if $Arc tables haven't been created yet (migration 011 not applied)
-  const arcCheck = await pool.request().query(
-    `SELECT OBJECT_ID('admission_periods$Arc', 'U') AS oid`
-  );
-  if (!arcCheck.recordset[0].oid) {
-    console.log('  Audit triggers skipped ($Arc tables not found — run migration 011 first)');
-    return;
-  }
-
-  const sql     = fs.readFileSync(AUDIT_TRIGGERS_FILE, 'utf8');
-  const batches = splitBatches(sql);
-
-  // Pair each DROP batch with the following CREATE batch and run them together
-  // using EXEC(N'...') so CREATE TRIGGER is the first statement in its own
-  // dynamic-SQL batch, while the DROP runs in the outer batch first.
-  let batchNo = 0;
-  let i = 0;
-  while (i < batches.length) {
-    const batch = batches[i];
-    batchNo++;
-
-    // Skip USE and comment-only batches
-    if (/^\s*USE\s+\w+\s*;?\s*$/i.test(batch)) { i++; continue; }
-    if (/^[\s\-]+$/.test(batch))                  { i++; continue; }
-
-    // If this batch is a DROP and the next is a CREATE TRIGGER, combine them:
-    // run DROP then EXEC the CREATE so CREATE is first in its own inner batch.
-    const isDropBatch   = /DROP TRIGGER/i.test(batch) && !/CREATE TRIGGER/i.test(batch);
-    const nextBatch     = batches[i + 1];
-    const nextIsCreate  = nextBatch && /^\s*CREATE TRIGGER/i.test(nextBatch);
-
-    if (isDropBatch && nextIsCreate) {
-      // Extract trigger name from the CREATE batch
-      const nameMatch = nextBatch.match(/CREATE\s+TRIGGER\s+(\w+)/i);
-      const trigName  = nameMatch ? nameMatch[1] : null;
-
-      // Step 1: drop using sys.objects (works on Azure SQL where OBJECT_ID type 'TR' returns NULL)
-      if (trigName) {
-        const dropSql = `
-          IF EXISTS (SELECT 1 FROM sys.objects WHERE name = '${trigName}' AND type = 'TR')
-            DROP TRIGGER dbo.${trigName};`;
-        try {
-          await pool.request().batch(dropSql);
-        } catch (dropErr) {
-          // ignore "does not exist" errors
-        }
-      }
-
-      // Step 2: CREATE TRIGGER must be the only statement — run it as its own batch
-      const escaped  = nextBatch.replace(/'/g, "''");
-      const execSql  = `EXEC(N'${escaped}')`;
-      try {
-        await pool.request().batch(execSql);
-      } catch (err) {
-        throw new Error(
-          `Audit trigger batch ${batchNo} failed: ${err.message}\n` +
-          `  (batch: ${nextBatch.slice(0, 200)})`
-        );
-      }
-      i += 2; // consumed both DROP and CREATE batches
-    } else {
-      try {
-        await pool.request().batch(batch);
-      } catch (err) {
-        throw new Error(
-          `Audit trigger batch ${batchNo} failed: ${err.message}\n` +
-          `  (batch: ${batch.slice(0, 200)})`
-        );
-      }
-      i++;
-    }
-  }
-
-  console.log('  Audit triggers (66)                           ✓ done');
 }
 
 main();

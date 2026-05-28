@@ -6,6 +6,10 @@
 -- Also adds prn column to students (used for autofill).
 -- Also ensures paid_by / paid_by_user_id exist on payments.
 -- Safe to run on existing databases — all changes are idempotent.
+--
+-- NOTE: All these columns are already in 001_base_schema.sql.
+-- This file is only needed for databases created before 001 was
+-- consolidated (i.e. existing production databases).
 -- ============================================================
 
 -- ── applications: multi-step form tracker ──────────────────

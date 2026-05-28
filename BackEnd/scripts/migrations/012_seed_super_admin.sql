@@ -18,7 +18,7 @@ IF NOT EXISTS (SELECT 1 FROM admins WHERE email = 'admin@vengurlatech.com')
     VALUES (
         'Super Admin',
         'admin@vengurlatech.com',
-        '$2a$10$Iu4D3b3U8bFmFNjq3J2fYOv6yYB0J8dT8rO0XJkKjT1TfUvP6mOSO'
+        '$2a$10$xisAkzCk/0T2JszosMFWcORXOXWMYGd4uADmWm9cd31WUPkutv4Bi'
         -- bcrypt hash of: Admin@123
         -- REPLACE this hash with a strong password before going live
     );
