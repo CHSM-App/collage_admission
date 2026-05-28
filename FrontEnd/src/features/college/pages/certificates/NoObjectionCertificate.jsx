@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { getNocList, getNocNextNo, createNoc, updateNoc, lookupStudent } from '../../../../services/certificateService.js'
+import { getClasses } from '../../../../services/masterService.js'
 import FormField from '../../../../shared/components/FormField.jsx'
 import {
   GenderRadio,
@@ -50,6 +51,7 @@ export default function NoObjectionCertificate({ collegeId, readOnly }) {
   const [saving,  setSaving]  = useState(false)
   const [lookingUp, setLookingUp] = useState(false)
   const [original, setOriginal]   = useState(null)
+  const [classList, setClassList] = useState([])
 
   const isReadOnlyMode = mode === 'view'
   const canEdit = !readOnly
@@ -70,6 +72,11 @@ export default function NoObjectionCertificate({ collegeId, readOnly }) {
   }, [collegeId])
 
   useEffect(() => { loadList() }, [loadList])
+  useEffect(() => {
+    getClasses(collegeId)
+      .then(r => setClassList(r.data.data || []))
+      .catch(() => {})
+  }, [collegeId])
   useEffect(() => {
     if (mode === 'new' && !form.certificate_no) loadNextNo()
   }, [mode, form.certificate_no, loadNextNo])
@@ -262,16 +269,30 @@ export default function NoObjectionCertificate({ collegeId, readOnly }) {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <FormField
-            label="Class"
-            name="class_name"
-            value={form.class_name}
-            onChange={handleChange}
-            error={errors.class_name}
-            required
-            readOnly={isReadOnlyMode}
-            placeholder="e.g. SY BCOM"
-          />
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+              Class <span className="text-red-500">*</span>
+            </label>
+            {isReadOnlyMode ? (
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">
+                {form.class_name || '—'}
+              </p>
+            ) : (
+              <select
+                name="class_name"
+                value={form.class_name}
+                onChange={handleChange}
+                className={`rounded-lg border px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${errors.class_name ? 'border-red-400' : 'border-slate-300'}`}
+              >
+                <option value="">— Select class —</option>
+                {classList.map(c => {
+                  const label = c.label || `${c.degree_course_code} Year ${c.year_of_study}`
+                  return <option key={c.id} value={label}>{label}</option>
+                })}
+              </select>
+            )}
+            {errors.class_name && <p className="text-xs text-red-500">{errors.class_name}</p>}
+          </div>
           <FormField
             label="From Date"
             name="from_date"
