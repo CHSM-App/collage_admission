@@ -917,9 +917,9 @@ router.delete('/:collegeId/fees/:id', requirePerm('masters'), async (req, res) =
 
 // ── Classwise Fees ───────────────────────────────────────────
 
-// GET /masters/:collegeId/fees/classwise?faculty_id=&year_level=
+// GET /masters/:collegeId/fees/classwise?faculty_id=&year_level=&student_type=
 router.get('/:collegeId/fees/classwise', requireCollegeAccess, async (req, res) => {
-  const { faculty_id, year_level } = req.query
+  const { faculty_id, year_level, student_type } = req.query
   try {
     let q = `
       SELECT cf.*, fm_row.fees_head, fm_row.short_name, fm_row.fees_type,
@@ -930,19 +930,44 @@ router.get('/:collegeId/fees/classwise', requireCollegeAccess, async (req, res) 
       WHERE cf.college_id = @cid
     `
     const req2 = db.request().input('cid', mssql.Int, cid(req))
-    if (faculty_id) { q += ' AND cf.faculty_master_id=@fid'; req2.input('fid', mssql.Int, parseInt(faculty_id)) }
-    if (year_level) { q += ' AND cf.year_level=@yl';         req2.input('yl',  mssql.NVarChar, year_level) }
+    if (faculty_id)    { q += ' AND cf.faculty_master_id=@fid'; req2.input('fid', mssql.Int,      parseInt(faculty_id)) }
+    if (year_level)    { q += ' AND cf.year_level=@yl';         req2.input('yl',  mssql.NVarChar, year_level) }
+    if (student_type)  { q += ' AND cf.student_type=@st';       req2.input('st',  mssql.NVarChar, student_type) }
     q += ' ORDER BY fm_row.sequence_auto_fees'
     const r = await req2.query(q)
     res.json({ success: true, data: r.recordset })
   } catch (e) { logger.error({ err: e }, 'get classwise fees'); res.status(500).json({ success: false, message: e.message }) }
 })
 
+// DELETE /masters/:collegeId/fees/classwise — remove a specific classwise override row
+router.delete('/:collegeId/fees/classwise', requirePerm('masters'), async (req, res) => {
+  const { faculty_master_id, year_level, student_type, fees_code } = req.body
+  if (!faculty_master_id || !year_level || !student_type || !fees_code)
+    return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, student_type, fees_code required.' })
+  try {
+    await db.request()
+      .input('cid', mssql.Int,      cid(req))
+      .input('fid', mssql.Int,      parseInt(faculty_master_id))
+      .input('yl',  mssql.NVarChar, year_level)
+      .input('st',  mssql.NVarChar, student_type)
+      .input('fc',  mssql.Int,      parseInt(fees_code))
+      .query(`
+        DELETE FROM classwise_fees
+        WHERE college_id=@cid AND faculty_master_id=@fid
+          AND year_level=@yl AND student_type=@st AND fees_code=@fc
+      `)
+    res.json({ success: true })
+  } catch (e) { logger.error({ err: e }, 'delete classwise fee'); res.status(500).json({ success: false, message: e.message }) }
+})
+
 // POST /masters/:collegeId/fees/classwise/save — upsert classwise fees
 router.post('/:collegeId/fees/classwise/save', requirePerm('masters'), async (req, res) => {
-  const { faculty_master_id, year_level, rows } = req.body
-  if (!faculty_master_id || !year_level || !Array.isArray(rows))
-    return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, rows[] required.' })
+  const { faculty_master_id, year_level, student_type, rows } = req.body
+  const VALID_STUDENT_TYPES = ['Grand', 'NonGrand', 'Outsider']
+  if (!faculty_master_id || !year_level || !student_type || !Array.isArray(rows))
+    return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, student_type, rows[] required.' })
+  if (!VALID_STUDENT_TYPES.includes(student_type))
+    return res.status(422).json({ success: false, message: `student_type must be one of: ${VALID_STUDENT_TYPES.join(', ')}` })
   const actor = String(req.user.staff_id || req.user.id)
   try {
     for (const row of rows) {
@@ -950,6 +975,7 @@ router.post('/:collegeId/fees/classwise/save', requirePerm('masters'), async (re
         .input('cid',   mssql.Int,      cid(req))
         .input('fid',   mssql.Int,      parseInt(faculty_master_id))
         .input('yl',    mssql.NVarChar, year_level)
+        .input('st',    mssql.NVarChar, student_type)
         .input('fc',    mssql.Int,      parseInt(row.fees_code))
         .input('a1',    mssql.Decimal,  row.cat1_amount != null ? parseFloat(row.cat1_amount) : null)
         .input('a2',    mssql.Decimal,  row.cat2_amount != null ? parseFloat(row.cat2_amount) : null)
@@ -958,13 +984,15 @@ router.post('/:collegeId/fees/classwise/save', requirePerm('masters'), async (re
         .input('actor', mssql.NVarChar, actor)
         .query(`
           MERGE classwise_fees AS target
-          USING (SELECT @cid AS college_id, @fid AS faculty_master_id, @yl AS year_level, @fc AS fees_code) AS src
+          USING (SELECT @cid AS college_id, @fid AS faculty_master_id, @yl AS year_level,
+                        @fc AS fees_code, @st AS student_type) AS src
           ON target.college_id=src.college_id AND target.faculty_master_id=src.faculty_master_id
              AND target.year_level=src.year_level AND target.fees_code=src.fees_code
+             AND target.student_type=src.student_type
           WHEN MATCHED THEN UPDATE SET cat1_amount=@a1,cat2_amount=@a2,cat3_amount=@a3,cat4_amount=@a4,updated_by=@actor
           WHEN NOT MATCHED THEN INSERT
-            (college_id,faculty_master_id,year_level,fees_code,cat1_amount,cat2_amount,cat3_amount,cat4_amount,created_by)
-          VALUES (@cid,@fid,@yl,@fc,@a1,@a2,@a3,@a4,@actor);
+            (college_id,faculty_master_id,year_level,fees_code,student_type,cat1_amount,cat2_amount,cat3_amount,cat4_amount,created_by)
+          VALUES (@cid,@fid,@yl,@fc,@st,@a1,@a2,@a3,@a4,@actor);
         `)
     }
     res.json({ success: true })
@@ -981,7 +1009,7 @@ router.post('/:collegeId/fees/classwise/save', requirePerm('masters'), async (re
  * Returns full fee breakdown + payment mode + slab for the given student context.
  */
 router.post('/:collegeId/fees/compute', async (req, res) => {
-  const { faculty_master_id, year_level, division_letter, caste, special_status } = req.body
+  const { faculty_master_id, year_level, division_letter, caste, special_status, student_type } = req.body
   try {
     const result = await feeSvc.compute({
       collegeId:       cid(req),
@@ -990,6 +1018,7 @@ router.post('/:collegeId/fees/compute', async (req, res) => {
       divisionLetter:  division_letter || null,
       caste:           caste || null,
       specialStatus:   special_status || null,
+      studentType:     student_type || 'Grand',
       pool:            db,
     })
     res.json({ success: true, data: result })

@@ -15,6 +15,7 @@ import FeesMaster          from './masters/FeesMaster.jsx'
 import DocumentsMaster     from './masters/DocumentsMaster.jsx'
 import ClassMaster         from './masters/ClassMaster.jsx'
 import FeeReceipts         from './FeeReceipts.jsx'
+import Reports             from './Reports.jsx'
 import Certificates from './certificates/Certificates.jsx'
 
 function ReadOnlyBanner({ label }) {
@@ -87,6 +88,7 @@ export default function CollegeDashboard() {
   if (section === 'master-fees')      return navAllowed('master-fees')      ? <>{masterReadOnly && <ReadOnlyBanner label="Fees Master" />}<FeesMaster          collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
   if (section === 'master-documents') return navAllowed('master-documents') ? <>{masterReadOnly && <ReadOnlyBanner label="Required Documents" />}<DocumentsMaster collegeId={user?.id} readOnly={masterReadOnly} /></> : <NavBlocked />
   if (section === 'fee-receipts')     return navAllowed('fee-receipts')     ? <FeeReceipts collegeId={user?.id} />                                                                                                             : <NavBlocked />
+  if (section === 'reports')          return navAllowed('reports')          ? <Reports     collegeId={user?.id} />                                                                                                                : <NavBlocked />
 
   // Certificates
   if (section === 'certificates') return navAllowed('certificates') ? <Certificates collegeId={user?.id} readOnly={readOnly('certificates')} /> : <NavBlocked />
@@ -101,6 +103,7 @@ function Overview({ user, navAllowed }) {
     { title: 'Add Application',      desc: 'Fill in the admission form on behalf of a student.', section: 'add-application',  accent: 'indigo' },
     { title: 'Roll Numbers',         desc: 'Generate roll numbers for confirmed students.',       section: 'rollnumbers',      accent: 'violet' },
     { title: 'Fee Receipts',         desc: 'View pending and paid college fee receipts.',          section: 'fee-receipts',     accent: 'orange' },
+    { title: 'Reports',              desc: 'Fee collection reports by date, class, and year.',     section: 'reports',          accent: 'green' },
     { title: 'Faculty Master',       desc: 'Manage degree programs and university codes.',        section: 'master-faculty',   accent: 'slate' },
     { title: 'Fees Master',          desc: 'Configure fee heads, slabs, and classwise overrides.',section: 'master-fees',     accent: 'rose' },
   ]
@@ -161,6 +164,7 @@ function ActionCard({ title, desc, section, accent }) {
     violet: 'hover:border-violet-300 hover:bg-violet-50',
     slate:  'hover:border-slate-300 hover:bg-slate-50',
     rose:   'hover:border-rose-300 hover:bg-rose-50',
+    green:  'hover:border-green-300 hover:bg-green-50',
   }
   const dots = {
     blue:   'bg-blue-600',
@@ -170,6 +174,7 @@ function ActionCard({ title, desc, section, accent }) {
     violet: 'bg-violet-600',
     slate:  'bg-slate-600',
     rose:   'bg-rose-500',
+    green:  'bg-green-600',
   }
 
   return (

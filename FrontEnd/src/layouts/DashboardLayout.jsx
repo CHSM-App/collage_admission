@@ -26,21 +26,21 @@ const sidebarItems = {
   college: [
     { label: 'Overview',          to: DASHBOARD_PATHS.college,                                   perm: null },
     { label: 'Admission Periods', to: `${DASHBOARD_PATHS.college}?section=periods`,              perm: null },
-    { label: 'Admission Inbox', to: `${DASHBOARD_PATHS.college}?section=inbox`,                perm: 'review_application' },
-    { label: 'Admission',   to: `${DASHBOARD_PATHS.college}?section=add-application`,      perm: 'submit_application' },
+    { label: 'Admission Inbox',   to: `${DASHBOARD_PATHS.college}?section=inbox`,                perm: 'review_application' },
+    { label: 'Admission',         to: `${DASHBOARD_PATHS.college}?section=add-application`,      perm: 'submit_application' },
     { label: 'Roll Numbers',      to: `${DASHBOARD_PATHS.college}?section=rollnumbers`,          perm: 'assign_subjects' },
-    { label: 'Fee Receipts',      to: `${DASHBOARD_PATHS.college}?section=fee-receipts`,          perm: 'collect_fees' },
-    { label: '— Masters —',       to: null },
-    { label: 'Program Master',    to: `${DASHBOARD_PATHS.college}?section=master-faculty`,       perm: 'masters' },
-    // { label: 'Class Master',      to: `${DASHBOARD_PATHS.college}?section=master-class`,         perm: 'masters' },
-    { label: 'Bank Master',       to: `${DASHBOARD_PATHS.college}?section=master-bank`,          perm: 'masters' },
-    { label: 'Course Master',     to: `${DASHBOARD_PATHS.college}?section=master-course`,        perm: 'masters' },
-    { label: 'Group Master',      to: `${DASHBOARD_PATHS.college}?section=master-group`,         perm: 'masters' },
-    { label: 'Division Master',   to: `${DASHBOARD_PATHS.college}?section=master-division`,      perm: 'masters' },
-    { label: 'Fees Master',       to: `${DASHBOARD_PATHS.college}?section=master-fees`,          perm: 'masters' },
-    { label: 'Req. Documents',    to: `${DASHBOARD_PATHS.college}?section=master-documents`,     perm: 'masters' },
-    { label: '— Certificates —',  to: null },
-    { label: 'Certificates',      to: `${DASHBOARD_PATHS.college}?section=certificates`, perm: 'certificates' },
+    { label: 'Fee Receipts',      to: `${DASHBOARD_PATHS.college}?section=fee-receipts`,         perm: 'collect_fees' },
+    { label: 'Reports',           to: `${DASHBOARD_PATHS.college}?section=reports`,              perm: 'collect_fees' },
+    { label: 'Masters',           to: null, group: 'masters' },
+    { label: 'Program Master',    to: `${DASHBOARD_PATHS.college}?section=master-faculty`,       perm: 'masters', group: 'masters' },
+    { label: 'Bank Master',       to: `${DASHBOARD_PATHS.college}?section=master-bank`,          perm: 'masters', group: 'masters' },
+    { label: 'Course Master',     to: `${DASHBOARD_PATHS.college}?section=master-course`,        perm: 'masters', group: 'masters' },
+    { label: 'Group Master',      to: `${DASHBOARD_PATHS.college}?section=master-group`,         perm: 'masters', group: 'masters' },
+    { label: 'Division Master',   to: `${DASHBOARD_PATHS.college}?section=master-division`,      perm: 'masters', group: 'masters' },
+    { label: 'Fees Master',       to: `${DASHBOARD_PATHS.college}?section=master-fees`,          perm: 'masters', group: 'masters' },
+    { label: 'Req. Documents',    to: `${DASHBOARD_PATHS.college}?section=master-documents`,     perm: 'masters', group: 'masters' },
+    { label: 'Certificates',      to: null, group: 'certificates' },
+    { label: 'Certificates',      to: `${DASHBOARD_PATHS.college}?section=certificates`,         perm: 'certificates', group: 'certificates' },
   ],
   admin: [
     { label: 'Colleges & Roles', to: DASHBOARD_PATHS.admin },
@@ -58,6 +58,16 @@ export default function DashboardLayout() {
   const { user, role, logout } = useAuth()
   const [hasPayments, setHasPayments] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [collapsedGroups, setCollapsedGroups] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('sidebar_collapsed') || '{}') } catch { return {} }
+  })
+  function toggleGroup(group) {
+    setCollapsedGroups(prev => {
+      const next = { ...prev, [group]: !prev[group] }
+      localStorage.setItem('sidebar_collapsed', JSON.stringify(next))
+      return next
+    })
+  }
   const currentPath = `${location.pathname}${location.search}`
 
   const isStaff       = !!user?.is_staff
@@ -187,21 +197,41 @@ export default function DashboardLayout() {
 
           <nav className="mt-6 flex flex-col gap-1">
             {currentItems.map((item, idx) => {
+              // ── Group header (collapsible separator) ──
               if (!item.to) {
+                const isCollapsed = !!collapsedGroups[item.group]
                 return (
-                  <p key={`sep-${idx}`} className="px-3 pt-3 pb-1 text-xs font-bold uppercase tracking-wider text-slate-400">
-                    {item.label.replace(/—/g, '').trim()}
-                  </p>
+                  <button
+                    key={`sep-${idx}`}
+                    onClick={() => item.group && toggleGroup(item.group)}
+                    className="flex items-center justify-between w-full px-3 pt-3 pb-1 text-xs font-bold uppercase tracking-wider text-slate-400 hover:text-slate-600 transition text-left"
+                  >
+                    <span>{item.label}</span>
+                    {item.group && (
+                      <svg
+                        className={`w-3.5 h-3.5 transition-transform ${isCollapsed ? '-rotate-90' : ''}`}
+                        fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                      </svg>
+                    )}
+                  </button>
                 )
               }
-              const isActive  = currentPath === item.to
-              const readOnly  = isStaff && item.perm && permissions[item.perm] === false
+
+              // ── Hidden when group is collapsed ──
+              if (item.group && collapsedGroups[item.group]) return null
+
+              const isActive    = currentPath === item.to
+              const readOnly    = isStaff && item.perm && permissions[item.perm] === false
               const isNotifItem = item.to?.includes('section=notifications')
               return (
                 <Link
                   key={item.to}
                   to={item.to}
                   className={`rounded-md px-3 py-2 text-sm font-semibold transition flex items-center justify-between gap-2 ${
+                    item.group ? 'pl-5' : ''
+                  } ${
                     isActive
                       ? 'bg-slate-950 text-white'
                       : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'
@@ -345,7 +375,7 @@ export default function DashboardLayout() {
       </div>
 
       {/* ── AI Chatbot (floating, available on all dashboard pages) ── */}
-      <ChatBot />
+      {/* <ChatBot /> */}
 
       {/* ── New notification popup (shown once per session on login) ── */}
       {popup && (

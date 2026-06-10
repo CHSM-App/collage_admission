@@ -211,6 +211,43 @@ function ReceiptSheet({ app, pmt, showOrderId = false }) {
       </table>
     </div>
 
+    ${pmt.fee_heads?.length ? `
+    <!-- Fee Head Breakdown -->
+    <div style="margin-top:20px;">
+      <div style="font-size:8.5px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#94a3b8;margin-bottom:8px;padding-bottom:4px;border-bottom:2px solid #0f172a;">Fee Head Breakdown</div>
+      <table style="width:100%;border-collapse:collapse;font-size:11px;">
+        <thead>
+          <tr style="background:#f8fafc;">
+            <th style="padding:7px 10px;text-align:left;font-weight:600;color:#64748b;border-bottom:1px solid #e2e8f0;">Fee Head</th>
+            <th style="padding:7px 10px;text-align:right;font-weight:600;color:#64748b;border-bottom:1px solid #e2e8f0;width:100px;">Total (&#8377;)</th>
+            <th style="padding:7px 10px;text-align:right;font-weight:600;color:#64748b;border-bottom:1px solid #e2e8f0;width:100px;">Paid Now (&#8377;)</th>
+            <th style="padding:7px 10px;text-align:center;font-weight:600;color:#64748b;border-bottom:1px solid #e2e8f0;width:80px;">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${pmt.fee_heads.map(h => `
+          <tr style="${h.cleared ? 'background:#f0fdf4;' : ''}">
+            <td style="padding:6px 10px;color:#1e293b;border-bottom:1px solid #f1f5f9;">${h.fees_head}${h.short_name ? ` <span style="color:#94a3b8;font-size:10px;">${h.short_name}</span>` : ''}</td>
+            <td style="padding:6px 10px;text-align:right;font-family:monospace;color:#64748b;border-bottom:1px solid #f1f5f9;">${Number(h.amount).toLocaleString('en-IN')}</td>
+            <td style="padding:6px 10px;text-align:right;font-family:monospace;font-weight:700;color:#0f172a;border-bottom:1px solid #f1f5f9;">${Number(h.paid).toLocaleString('en-IN')}</td>
+            <td style="padding:6px 10px;text-align:center;border-bottom:1px solid #f1f5f9;">
+              ${h.cleared
+                ? '<span style="background:#dcfce7;color:#15803d;font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:20px;">Cleared</span>'
+                : '<span style="background:#fef9c3;color:#854d0e;font-size:9.5px;font-weight:700;padding:2px 8px;border-radius:20px;">Partial</span>'
+              }
+            </td>
+          </tr>`).join('')}
+        </tbody>
+        <tfoot>
+          <tr style="background:#f8fafc;border-top:2px solid #e2e8f0;">
+            <td style="padding:7px 10px;font-weight:700;color:#0f172a;" colspan="2">This Payment Total</td>
+            <td style="padding:7px 10px;text-align:right;font-family:monospace;font-weight:800;color:#16a34a;">&#8377;${Number(pmt.amount).toLocaleString('en-IN')}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>` : ''}
+
     <!-- Stamp + Declaration row -->
     <div style="margin-top:24px;display:flex;justify-content:space-between;align-items:flex-end;gap:16px;">
       <div style="flex:1;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;padding:12px 16px;">
@@ -348,6 +385,54 @@ function ReceiptSheet({ app, pmt, showOrderId = false }) {
               </tbody>
             </table>
           </div>
+
+          {/* Fee head breakdown — only for college_fee payments */}
+          {pmt.fee_heads?.length > 0 && (
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-slate-400 border-b-2 border-slate-900 pb-1 mb-2">Fee Head Breakdown</p>
+              <table className="w-full text-xs">
+                <thead className="bg-slate-50">
+                  <tr>
+                    <th className="py-2 pr-3 text-left font-semibold text-slate-500">Fee Head</th>
+                    <th className="py-2 pr-3 text-right font-semibold text-slate-500 w-24">Total (₹)</th>
+                    <th className="py-2 pr-3 text-right font-semibold text-slate-500 w-24">Paid Now (₹)</th>
+                    <th className="py-2 text-center font-semibold text-slate-500 w-20">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {pmt.fee_heads.map(h => (
+                    <tr key={h.fees_code} className={h.cleared ? 'bg-emerald-50/50' : ''}>
+                      <td className="py-1.5 pr-3 text-slate-700">
+                        {h.fees_head}
+                        {h.short_name && <span className="ml-1.5 text-slate-400">{h.short_name}</span>}
+                      </td>
+                      <td className="py-1.5 pr-3 text-right font-mono text-slate-500">
+                        {Number(h.amount).toLocaleString('en-IN')}
+                      </td>
+                      <td className="py-1.5 pr-3 text-right font-mono font-bold text-slate-900">
+                        {Number(h.paid).toLocaleString('en-IN')}
+                      </td>
+                      <td className="py-1.5 text-center">
+                        {h.cleared
+                          ? <span className="text-xs font-semibold text-emerald-700 bg-emerald-100 rounded-full px-2 py-0.5">Cleared</span>
+                          : <span className="text-xs font-semibold text-amber-700 bg-amber-100 rounded-full px-2 py-0.5">Partial</span>
+                        }
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="border-t-2 border-slate-200 bg-slate-50">
+                  <tr>
+                    <td className="py-2 font-bold text-slate-800" colSpan={2}>This Payment Total</td>
+                    <td className="py-2 text-right font-mono font-bold text-emerald-700">
+                      ₹{Number(pmt.amount).toLocaleString('en-IN')}
+                    </td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
 
           {/* Bottom row: note + stamp */}
           <div className="flex items-end justify-between gap-4 pt-1">

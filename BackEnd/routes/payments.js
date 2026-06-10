@@ -249,10 +249,34 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
 
   // college_fee
   const feeInfo = await getCollegeFeTotal(app);
-  const totalFee        = feeInfo?.source === 'manual'
+  const totalFee = feeInfo?.source === 'manual'
     ? (feeInfo?.total_fee ?? 0)
     : (feeInfo?.student_payable ?? feeInfo?.total_fee ?? 0);
-  const payNowThreshold = app.fee_pay_now_amount ? parseFloat(app.fee_pay_now_amount) : totalFee;
+
+  // Determine pay-now threshold from installment plan if set, else full total
+  const instRes = await db.request()
+    .input('appId', mssql.Int, appId)
+    .query(`SELECT installment_no, amount FROM fee_installments WHERE application_id=@appId ORDER BY installment_no`);
+  const installments = instRes.recordset.map(r => parseFloat(r.amount));
+  // Threshold = cumulative sum up to and including first installment not yet paid
+  // (evaluated BEFORE this payment, so we use prior totalPaid)
+  const priorPaidRes = await db.request()
+    .input('appId', mssql.Int, appId)
+    .query(`SELECT ISNULL(SUM(amount),0) AS total_paid FROM payments WHERE application_id=@appId AND payment_type='college_fee' AND status='success'`);
+  const priorPaid = parseFloat(priorPaidRes.recordset[0].total_paid) || 0;
+
+  let payNowThreshold = totalFee; // default: full amount
+  if (installments.length > 0) {
+    let cumulative = 0;
+    for (const amt of installments) {
+      cumulative += amt;
+      if (priorPaid < cumulative - 0.01) {
+        payNowThreshold = cumulative;
+        break;
+      }
+    }
+    // all installments already paid → threshold = totalFee (free remainder)
+  }
 
   const pool = await db;
   const tx   = pool.transaction();
@@ -342,8 +366,14 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
       .query(`
         SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study,
                a.admission_period_id, a.college_fee_paid,
-               a.fee_total_amount, a.fee_pay_now_amount
-        FROM applications a WHERE a.id = @id
+               a.fee_total_amount, a.fee_pay_now_amount,
+               a.app_division, a.app_caste, a.app_special_status,
+               fm.code_no AS faculty_master_id,
+               CASE a.year_of_study WHEN 1 THEN 'FY' WHEN 2 THEN 'SY' WHEN 3 THEN 'TY'
+                                    WHEN 4 THEN '4Y' WHEN 5 THEN '5Y' ELSE NULL END AS year_level
+        FROM applications a
+        LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+        WHERE a.id = @id
       `);
     if (!appRes.recordset.length) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
@@ -354,6 +384,21 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
     const totalFee = feeInfo?.source === 'manual'
       ? (feeInfo?.total_fee ?? 0)
       : (feeInfo?.student_payable ?? feeInfo?.total_fee ?? 0);
+
+    // Fetch fee breakdown from FeeDeterminationService for head-level payment display
+    let breakdown = [];
+    try {
+      const feeResult = await feeSvc.compute({
+        collegeId:       app.college_id,
+        facultyMasterId: app.faculty_master_id,
+        yearLevel:       app.year_level,
+        divisionLetter:  app.app_division,
+        caste:           app.app_caste,
+        specialStatus:   app.app_special_status,
+        pool:            db,
+      });
+      breakdown = feeResult?.breakdown || [];
+    } catch (_) { /* breakdown stays empty if fee not configured */ }
 
     const paidRes = await db.request()
       .input('appId', mssql.Int, appId)
@@ -367,17 +412,60 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
     const totalPaid   = paidRecords.reduce((s, p) => s + parseFloat(p.amount), 0);
     const remaining   = Math.max(0, totalFee - totalPaid);
 
+    // Compute head-level payment status: heads clear sequentially (first head first).
+    // For each head: paid_amount = how much of this head has been covered by totalPaid.
+    // status: 'paid' | 'partial' | 'unpaid'
+    let runningPaid = totalPaid;
+    const breakdownWithStatus = breakdown.map(h => {
+      const amt = parseFloat(h.amount) || 0;
+      if (runningPaid >= amt - 0.01) {
+        runningPaid -= amt;
+        return { ...h, paid_amount: amt, status: 'paid' };
+      } else if (runningPaid > 0.01) {
+        const partial = runningPaid;
+        runningPaid = 0;
+        return { ...h, paid_amount: partial, status: 'partial' };
+      } else {
+        return { ...h, paid_amount: 0, status: 'unpaid' };
+      }
+    });
+
+    // Fetch installment plan
+    const instRes = await db.request()
+      .input('appId', mssql.Int, appId)
+      .query(`SELECT installment_no, due_date, amount FROM fee_installments WHERE application_id=@appId ORDER BY installment_no`);
+    const installments = instRes.recordset.map(r => ({ ...r, amount: parseFloat(r.amount) }));
+
+    // Compute current due amount from installment plan:
+    // Sum of all installment amounts up to the first installment not yet fully covered by totalPaid.
+    // After all fixed installments are satisfied, student can pay freely (remaining balance).
+    let currentDue = remaining; // default: free payment
+    if (installments.length > 0) {
+      let cumulative = 0;
+      for (const inst of installments) {
+        cumulative += inst.amount;
+        if (totalPaid < cumulative - 0.01) {
+          // This installment is not yet fully paid — current due is this installment's cumulative threshold minus what's paid
+          currentDue = Math.min(cumulative - totalPaid, remaining);
+          break;
+        }
+      }
+      // If all installments satisfied, currentDue = remaining (free payment)
+    }
+
     return res.json({
       success: true,
       data: {
-        application_id:     appId,
-        status:             app.status,
-        college_fee_paid:   app.college_fee_paid,
-        total_fee:          feeInfo?.total_fee || 0,
-        fee_pay_now_amount: app.fee_pay_now_amount ? parseFloat(app.fee_pay_now_amount) : null,
-        total_paid:         totalPaid,
+        application_id:   appId,
+        status:           app.status,
+        college_fee_paid: app.college_fee_paid,
+        total_fee:        feeInfo?.total_fee || 0,
+        total_paid:       totalPaid,
         remaining,
-        paid_records:       paidRecords,
+        current_due:      currentDue,
+        breakdown:        breakdownWithStatus,
+        installments,
+        paid_records:     paidRecords,
       },
     });
   } catch (err) {
@@ -452,8 +540,76 @@ router.get('/receipts/:applicationId', async (req, res) => {
         WHERE application_id = @appId AND status = 'success'
         ORDER BY completed_at ASC
       `);
+    const payments = pmtRes.recordset;
 
-    return res.json({ success: true, data: { application: app, payments: pmtRes.recordset } });
+    // Build fee breakdown for college_fee payments
+    // Compute head-level status per payment: heads clear sequentially (first head first).
+    // For each payment we track the cumulative paid BEFORE that payment, then AFTER.
+    let feeBreakdown = [];
+    try {
+      const appExtra = await db.request()
+        .input('id2', mssql.Int, appId)
+        .query(`
+          SELECT a.college_id, a.course_id, a.year_of_study, a.app_division, a.app_caste, a.app_special_status,
+                 fm.code_no AS faculty_master_id,
+                 CASE a.year_of_study WHEN 1 THEN 'FY' WHEN 2 THEN 'SY' WHEN 3 THEN 'TY'
+                                      WHEN 4 THEN '4Y' WHEN 5 THEN '5Y' ELSE NULL END AS year_level
+          FROM applications a
+          LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+          WHERE a.id = @id2
+        `);
+      if (appExtra.recordset.length) {
+        const ae = appExtra.recordset[0];
+        const feeResult = await feeSvc.compute({
+          collegeId:       ae.college_id,
+          facultyMasterId: ae.faculty_master_id,
+          yearLevel:       ae.year_level,
+          divisionLetter:  ae.app_division,
+          caste:           ae.app_caste,
+          specialStatus:   ae.app_special_status,
+          pool:            db,
+        });
+        feeBreakdown = feeResult?.breakdown || [];
+      }
+    } catch (_) { /* leave feeBreakdown empty */ }
+
+    // For each college_fee payment, compute which heads it covered (partially or fully)
+    // by tracking running cumulative paid before/after this payment.
+    let cumulativeBefore = 0;
+    const paymentsWithHeads = payments.map(pmt => {
+      if (pmt.payment_type !== 'college_fee' || feeBreakdown.length === 0) {
+        cumulativeBefore += parseFloat(pmt.amount);
+        return pmt;
+      }
+      const pmtAmt = parseFloat(pmt.amount);
+      const cumulativeAfter = cumulativeBefore + pmtAmt;
+      // Walk heads and determine what this payment covered
+      let runningTotal = 0;
+      const headRows = feeBreakdown.map(h => {
+        const headAmt = parseFloat(h.amount) || 0;
+        const headStart = runningTotal;
+        const headEnd   = runningTotal + headAmt;
+        runningTotal = headEnd;
+        // How much of this head was paid in this payment:
+        // overlap between [cumulativeBefore, cumulativeAfter] and [headStart, headEnd]
+        const overlapStart = Math.max(cumulativeBefore, headStart);
+        const overlapEnd   = Math.min(cumulativeAfter, headEnd);
+        const paidInThis   = Math.max(0, overlapEnd - overlapStart);
+        if (paidInThis < 0.01) return null; // this head not touched by this payment
+        return {
+          fees_code:  h.fees_code,
+          fees_head:  h.fees_head,
+          short_name: h.short_name,
+          amount:     headAmt,
+          paid:       paidInThis,
+          cleared:    headEnd <= cumulativeAfter + 0.01,
+        };
+      }).filter(Boolean);
+      cumulativeBefore = cumulativeAfter;
+      return { ...pmt, fee_heads: headRows };
+    });
+
+    return res.json({ success: true, data: { application: app, payments: paymentsWithHeads } });
   } catch (err) {
     logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
@@ -526,10 +682,23 @@ router.post('/initiate', initiateValidators, validate, async (req, res) => {
         }
         amount = reqAmt;
       } else {
-        const payNowDefault = app.fee_pay_now_amount
-          ? parseFloat(app.fee_pay_now_amount)
-          : parseFloat(app.fee_total_amount);
-        amount = totalPaid > 0 ? remaining : payNowDefault;
+        // Compute current_due from installment plan (same logic as college-fee-status)
+        const instRes2 = await db.request()
+          .input('appId2', mssql.Int, parseInt(application_id))
+          .query(`SELECT installment_no, amount FROM fee_installments WHERE application_id=@appId2 ORDER BY installment_no`);
+        const instRows = instRes2.recordset;
+        let currentDue = remaining;
+        if (instRows.length > 0) {
+          let cumulative = 0;
+          for (const inst of instRows) {
+            cumulative += parseFloat(inst.amount);
+            if (totalPaid < cumulative - 0.01) {
+              currentDue = Math.min(cumulative - totalPaid, remaining);
+              break;
+            }
+          }
+        }
+        amount = currentDue > 0 ? currentDue : remaining;
       }
       if (!amount || amount <= 0) {
         return res.status(400).json({ success: false, message: 'No outstanding balance to pay.' });

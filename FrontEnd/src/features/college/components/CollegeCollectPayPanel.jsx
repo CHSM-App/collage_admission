@@ -53,7 +53,13 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
 
   const fs      = feeStatus
   const allPaid = fs && fs.total_fee > 0 && fs.remaining <= 0
-  const amtDue  = fs ? (fs.total_paid > 0 ? fs.remaining : (fs.fee_pay_now_amount || fs.remaining)) : 0
+  // current_due: computed from installment plan — the exact amount due for this payment step.
+  // If installments are configured, it's the cumulative threshold minus amount paid so far.
+  // Falls back to remaining if no installment plan is set.
+  const amtDue      = fs ? (fs.current_due ?? fs.remaining) : 0
+  // Amount is fixed (read-only) when there are installments and current_due < remaining
+  // (meaning the student is still in a fixed-installment phase, not free payment phase)
+  const amtIsFixed  = fs && fs.installments?.length > 0 && amtDue < fs.remaining - 0.01
 
   async function handleCash(e) {
     e.preventDefault()
@@ -124,6 +130,46 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
               </div>
             </div>
 
+            {/* ── Fee head breakdown with payment status ─ */}
+            {fs.breakdown?.length > 0 && (
+              <div className="rounded-lg border border-slate-200 overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-semibold">Fee Head</th>
+                      <th className="px-3 py-2 text-right font-semibold w-24">Amount (₹)</th>
+                      <th className="px-3 py-2 text-right font-semibold w-24">Paid (₹)</th>
+                      <th className="px-3 py-2 text-center font-semibold w-20">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {fs.breakdown.map(h => (
+                      <tr key={h.fees_code} className={h.status === 'paid' ? 'bg-emerald-50/40' : ''}>
+                        <td className="px-3 py-1.5 text-slate-700">
+                          {h.fees_head}
+                          {h.short_name && <span className="ml-1.5 text-slate-400">{h.short_name}</span>}
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-mono text-slate-600">
+                          {parseFloat(h.amount).toLocaleString('en-IN')}
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-mono text-slate-800">
+                          {h.paid_amount > 0 ? parseFloat(h.paid_amount).toLocaleString('en-IN') : '—'}
+                        </td>
+                        <td className="px-3 py-1.5 text-center">
+                          {h.status === 'paid'
+                            ? <span className="text-xs font-semibold text-emerald-700 bg-emerald-100 rounded-full px-2 py-0.5">Cleared</span>
+                            : h.status === 'partial'
+                            ? <span className="text-xs font-semibold text-amber-700 bg-amber-100 rounded-full px-2 py-0.5">Partial</span>
+                            : <span className="text-xs font-semibold text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">Pending</span>
+                          }
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             {/* ── Status messages ────────────────────────── */}
             {msg && <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800 font-medium">{msg}</div>}
             {err && <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{err}</div>}
@@ -177,16 +223,16 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
                   <div className="flex-1">
                     <label className="text-xs text-slate-500 mb-1 block">
                       Amount (₹)
-                      {fs.total_paid <= 0 && <span className="ml-1 text-slate-400">(first instalment — fixed)</span>}
+                      {amtIsFixed && <span className="ml-1 text-slate-400">(fixed instalment)</span>}
                     </label>
                     <input
                       type="text" inputMode="numeric"
                       value={amount}
                       onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
-                      readOnly={fs.total_paid <= 0}
+                      readOnly={amtIsFixed}
                       placeholder={`Max ${fmtINR(fs.remaining)}`}
                       className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 ${
-                        fs.total_paid <= 0 ? 'bg-slate-100 border-slate-200 text-slate-600 cursor-not-allowed' : 'border-slate-200'
+                        amtIsFixed ? 'bg-slate-100 border-slate-200 text-slate-600 cursor-not-allowed' : 'border-slate-200'
                       }`}
                       required
                     />
@@ -218,16 +264,16 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
                   <div className="flex-1">
                     <label className="text-xs text-blue-700 mb-1 block">
                       Amount (₹)
-                      {fs.total_paid <= 0 && <span className="ml-1 text-blue-400">(first instalment — fixed)</span>}
+                      {amtIsFixed && <span className="ml-1 text-blue-400">(fixed instalment)</span>}
                     </label>
                     <input
                       type="text" inputMode="numeric"
                       value={amount}
                       onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
-                      readOnly={fs.total_paid <= 0}
+                      readOnly={amtIsFixed}
                       placeholder={`Max ${fmtINR(fs.remaining)}`}
                       className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${
-                        fs.total_paid <= 0 ? 'bg-blue-100 border-blue-200 text-blue-700 cursor-not-allowed' : 'border-blue-200 bg-white'
+                        amtIsFixed ? 'bg-blue-100 border-blue-200 text-blue-700 cursor-not-allowed' : 'border-blue-200 bg-white'
                       }`}
                       required
                     />

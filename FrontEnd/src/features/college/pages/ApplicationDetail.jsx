@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getApplicationDetail, postApplicationAction, confirmApplication, setApplicationFee } from '../../../services/collegeAdminService.js'
+import { getApplicationDetail, postApplicationAction, confirmApplication, setApplicationFee, getComputedFee, getAppInstallments } from '../../../services/collegeAdminService.js'
 import { getDivisions } from '../../../services/masterService.js'
 import { getSubjectSelections } from '../../../services/applicationService.js'
 import Button from '../../../shared/components/Button.jsx'
@@ -60,9 +60,11 @@ export default function ApplicationDetail({ collegeId, appId }) {
   const [showCorrection, setShowCorrection] = useState(false)
   const [showConfirm, setShowConfirm]       = useState(false)
   const [correctionNote, setCorrectionNote] = useState('')
-  const [feeTotal,    setFeeTotal]    = useState('')
-  const [feePayNow,   setFeePayNow]   = useState('')
-  const [feeError,    setFeeError]    = useState('')
+  const [feeTotal,        setFeeTotal]        = useState(null)
+  const [feeBreakdown,    setFeeBreakdown]    = useState([])
+  const [feeTotalLoading, setFeeTotalLoading] = useState(false)
+  const [installments,    setInstallments]    = useState([{ amount: '', due_date: '' }, { amount: '', due_date: '' }, { amount: '', due_date: '' }, { amount: '', due_date: '' }])
+  const [feeError,        setFeeError]        = useState('')
   const [division,    setDivision]    = useState('')
   const [divisions,   setDivisions]   = useState([])
   const [error, setError]     = useState('')
@@ -87,6 +89,20 @@ export default function ApplicationDetail({ collegeId, appId }) {
     }
   }, [app])
 
+  // Re-fetch computed fee whenever confirm panel is open and division changes
+  useEffect(() => {
+    if (!showConfirm) return
+    // If there are divisions, only fetch after one is selected
+    if (divisions.length > 0 && !division) {
+      setFeeTotal(null); setFeeBreakdown([]); setInstallments([{ amount: '', due_date: '' }, { amount: '', due_date: '' }, { amount: '', due_date: '' }, { amount: '', due_date: '' }]); return
+    }
+    setFeeTotalLoading(true); setInstallments([{ amount: '', due_date: '' }, { amount: '', due_date: '' }, { amount: '', due_date: '' }, { amount: '', due_date: '' }])
+    getComputedFee(collegeId, appId, division || undefined)
+      .then(r => { setFeeTotal(r.data.data?.totalFee ?? null); setFeeBreakdown(r.data.data?.breakdown || []) })
+      .catch(() => { setFeeTotal(null); setFeeBreakdown([]) })
+      .finally(() => setFeeTotalLoading(false))
+  }, [showConfirm, division, divisions.length])
+
   async function doAction(endpoint, body = {}, successMsg) {
     setActing(true)
     setError('')
@@ -105,18 +121,16 @@ export default function ApplicationDetail({ collegeId, appId }) {
 
   async function doConfirm() {
     setFeeError('')
-    const total  = parseFloat(feeTotal)
-    const payNow = parseFloat(feePayNow)
-    if (!total  || total  <= 0) { setFeeError('Enter the total payable amount.'); return }
-    if (!payNow || payNow <= 0) { setFeeError('Enter the amount to pay now.'); return }
-    if (payNow > total + 0.01)  { setFeeError('Amount to pay now cannot exceed the total.'); return }
+    const validInst = installments.filter(i => i.amount !== '' && parseFloat(i.amount) > 0)
+    if (validInst.length === 0) { setFeeError('Enter at least one installment amount.'); return }
+    const instTotal = validInst.reduce((s, i) => s + parseFloat(i.amount), 0)
+    if (feeTotal != null && instTotal > feeTotal + 0.01) { setFeeError(`Installment total (₹${instTotal.toLocaleString('en-IN')}) cannot exceed fee total (₹${feeTotal.toLocaleString('en-IN')}).`); return }
     setActing(true)
     setError('')
     try {
       await confirmApplication(collegeId, appId, {
-        fee_total_amount:   total,
-        fee_pay_now_amount: payNow,
-        division:           division || null,
+        installments:          validInst.map((i, idx) => ({ installment_no: idx + 1, amount: parseFloat(i.amount), due_date: i.due_date || null })),
+        division:              division || null,
         document_ids_verified: app?.documents?.map(d => d.id) || [],
       })
       toast.success('Admission confirmed. Student can now pay the college fee.')
@@ -343,44 +357,55 @@ export default function ApplicationDetail({ collegeId, appId }) {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Total Payable Amount <span className="text-red-500">*</span>
-                  </label>
-                  <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500">
-                    <span className="px-3 py-2 bg-slate-50 border-r border-slate-200 text-slate-500 text-sm font-semibold">₹</span>
-                    <input
-                      type="text" inputMode="numeric"
-                      value={feeTotal}
-                      onChange={e => { setFeeTotal(e.target.value.replace(/[^0-9.]/g, '')); setFeeError('') }}
-                      placeholder="e.g. 14000"
-                      className="flex-1 px-3 py-2 text-sm outline-none"
-                    />
-                  </div>
+              {/* Fee breakdown table */}
+              {divisions.length > 0 && !division ? (
+                <p className="text-xs text-slate-500 italic">← Select a division above to see the fee breakdown.</p>
+              ) : feeTotalLoading ? (
+                <p className="text-xs text-slate-400">Computing fee…</p>
+              ) : feeBreakdown.length > 0 ? (
+                <div className="rounded-lg border border-emerald-200 overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-emerald-100 text-emerald-800">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-semibold">Fee Head</th>
+                        <th className="px-3 py-2 text-right font-semibold w-28">Amount (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-emerald-100 bg-white">
+                      {feeBreakdown.map(h => (
+                        <tr key={h.fees_code}>
+                          <td className="px-3 py-1.5 text-slate-700">{h.fees_head}
+                            <span className="ml-1.5 text-slate-400">{h.short_name}</span>
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono text-slate-800">
+                            {parseFloat(h.amount).toLocaleString('en-IN')}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-emerald-50 border-t-2 border-emerald-300">
+                      <tr>
+                        <td className="px-3 py-2 font-bold text-emerald-900">Total</td>
+                        <td className="px-3 py-2 text-right font-bold font-mono text-emerald-900">
+                          {feeTotal != null ? feeTotal.toLocaleString('en-IN') : '—'}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Amount to Pay Now <span className="text-red-500">*</span>
-                  </label>
-                  <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden bg-white focus-within:ring-2 focus-within:ring-emerald-500">
-                    <span className="px-3 py-2 bg-slate-50 border-r border-slate-200 text-slate-500 text-sm font-semibold">₹</span>
-                    <input
-                      type="text" inputMode="numeric"
-                      value={feePayNow}
-                      onChange={e => { setFeePayNow(e.target.value.replace(/[^0-9.]/g, '')); setFeeError('') }}
-                      placeholder="e.g. 14000"
-                      className="flex-1 px-3 py-2 text-sm outline-none"
-                    />
-                  </div>
-                  {parseFloat(feeTotal) > 0 && (
-                    <button type="button" onClick={() => { setFeePayNow(feeTotal); setFeeError('') }}
-                      className="mt-1 text-xs text-emerald-600 hover:underline font-semibold">
-                      Same as total
-                    </button>
-                  )}
-                </div>
-              </div>
+              ) : (
+                <p className="text-xs text-red-500">No fees configured for this division. Please set up Classwise Fees in Fees Master for this class and student type.</p>
+              )}
+
+              {/* Installment plan — only show once fee is loaded */}
+              {(divisions.length === 0 || division) && !feeTotalLoading && feeTotal != null && (
+                <InstallmentPlanInput
+                  installments={installments}
+                  onChange={setInstallments}
+                  feeTotal={feeTotal}
+                  onError={setFeeError}
+                />
+              )}
               {feeError && <p className="text-sm text-red-600">{feeError}</p>}
               <div className="flex gap-3">
                 <Button loading={acting} onClick={doConfirm}>Proceed</Button>
@@ -675,31 +700,189 @@ function StatusBadge({ status }) {
   )
 }
 
-function FeeAmountPanel({ collegeId, appId, initialTotal, initialPayNow, readonly, onSaved }) {
-  // Lock editing once fees have already been set (initialTotal present) or status is fees_paid
-  const locked = readonly || (initialTotal && parseFloat(initialTotal) > 0)
-  const [total,  setTotal]   = useState(initialTotal  ? String(initialTotal)  : '')
-  const [payNow, setPayNow]  = useState(initialPayNow ? String(initialPayNow) : '')
-  const [saving, setSaving]  = useState(false)
-  const [error,  setError]   = useState('')
-  const [success, setSuccess] = useState('')
+// ── InstallmentPlanInput ─────────────────────────────────────────────────────
+// Used in the confirm panel (doc_verified → confirmed transition).
+// feeTotal: number (total fee from FeeDeterminationService)
+// installments: array of 4 { amount: '', due_date: '' }
+// onChange: setter
+// onError: (msg) => void — clears when valid
+function InstallmentPlanInput({ installments, onChange, feeTotal, onError }) {
+  // Which rows have a value entered
+  const filled = installments.map(i => i.amount !== '' && parseFloat(i.amount) > 0)
 
-  const totalNum  = parseFloat(total)  || 0
-  const payNowNum = parseFloat(payNow) || 0
-  const isPartial = totalNum > 0 && payNowNum > 0 && payNowNum < totalNum - 0.01
+  // Fixed installments: contiguous filled rows from the start
+  // e.g. [filled, filled, empty, empty] → 2 fixed
+  // e.g. [filled, empty, filled, empty] → 1 fixed (gap breaks the chain)
+  let fixedCount = 0
+  for (let i = 0; i < 4; i++) {
+    if (filled[i]) fixedCount = i + 1
+    else break
+  }
+
+  const instTotal = installments.reduce((s, inst) => {
+    const v = parseFloat(inst.amount)
+    return s + (isNaN(v) ? 0 : v)
+  }, 0)
+
+  function handleChange(idx, field, val) {
+    const next = installments.map((inst, i) => i === idx ? { ...inst, [field]: val } : inst)
+    onChange(next)
+    onError('')
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="text-sm font-semibold text-slate-700 mb-0.5">Installment Plan</p>
+        <p className="text-xs text-slate-500">
+          Fill installments the student <em>must</em> pay in order. Leave trailing rows empty for free payment.
+        </p>
+      </div>
+      <div className="rounded-lg border border-slate-200 overflow-hidden">
+        <table className="w-full text-xs">
+          <thead className="bg-slate-100 text-slate-600">
+            <tr>
+              <th className="px-3 py-2 text-left font-semibold">Installment</th>
+              <th className="px-3 py-2 text-left font-semibold">Due Date</th>
+              <th className="px-3 py-2 text-left font-semibold">Amount (₹)</th>
+              <th className="px-3 py-2 text-left font-semibold w-20">Type</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {installments.map((inst, idx) => {
+              const isFixed = filled[idx] && idx < fixedCount
+              const isFree  = filled[idx] && idx === fixedCount - 1 && !filled[idx + 1]
+                                && fixedCount > 0 && instTotal < (feeTotal || 0) - 0.01
+              // A row is "free last" if it's the last filled and doesn't reach total
+              const isFreeLast = filled[idx] && !filled[idx + 1] && instTotal < (feeTotal || 0) - 0.01 && fixedCount > 0
+              return (
+                <tr key={idx} className={filled[idx] ? '' : 'opacity-50'}>
+                  <td className="px-3 py-2 font-semibold text-slate-700">Installment {idx + 1}</td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="date"
+                      value={inst.due_date}
+                      onChange={e => handleChange(idx, 'due_date', e.target.value)}
+                      className="border border-slate-200 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center rounded-md border border-slate-200 overflow-hidden focus-within:ring-1 focus-within:ring-emerald-500 w-32">
+                      <span className="px-2 py-1 bg-slate-50 border-r border-slate-200 text-slate-400 text-xs">₹</span>
+                      <input
+                        type="text" inputMode="numeric"
+                        value={inst.amount}
+                        onChange={e => handleChange(idx, 'amount', e.target.value.replace(/[^0-9.]/g, ''))}
+                        placeholder="0"
+                        className="flex-1 px-2 py-1 text-xs outline-none bg-transparent w-20"
+                      />
+                    </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    {!filled[idx] ? (
+                      <span className="text-slate-300">—</span>
+                    ) : isFreeLast ? (
+                      <span className="text-xs text-amber-700 bg-amber-50 rounded-full px-2 py-0.5 font-semibold">Fixed</span>
+                    ) : filled[idx] ? (
+                      <span className="text-xs text-emerald-700 bg-emerald-50 rounded-full px-2 py-0.5 font-semibold">Fixed</span>
+                    ) : null}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+          {instTotal > 0 && (
+            <tfoot className="bg-slate-50 border-t-2 border-slate-200">
+              <tr>
+                <td className="px-3 py-2 font-bold text-slate-700" colSpan={2}>Total scheduled</td>
+                <td className="px-3 py-2 font-bold font-mono text-slate-800">
+                  ₹{instTotal.toLocaleString('en-IN')}
+                  {feeTotal != null && instTotal < feeTotal - 0.01 && (
+                    <span className="ml-2 text-amber-600 font-normal">(₹{(feeTotal - instTotal).toLocaleString('en-IN')} free)</span>
+                  )}
+                </td>
+                <td />
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+      {instTotal > 0 && feeTotal != null && (
+        <div className={`rounded-lg px-3 py-2 text-xs ${instTotal > feeTotal + 0.01 ? 'bg-red-50 border border-red-200 text-red-700' : instTotal < feeTotal - 0.01 ? 'bg-amber-50 border border-amber-200 text-amber-800' : 'bg-emerald-50 border border-emerald-200 text-emerald-800'}`}>
+          {instTotal > feeTotal + 0.01
+            ? <>Installment total <strong>₹{instTotal.toLocaleString('en-IN')}</strong> exceeds the fee total <strong>₹{feeTotal.toLocaleString('en-IN')}</strong>.</>
+            : instTotal < feeTotal - 0.01
+            ? <>Student pays <strong>₹{instTotal.toLocaleString('en-IN')}</strong> in fixed installments, then pays the remaining <strong>₹{(feeTotal - instTotal).toLocaleString('en-IN')}</strong> freely.</>
+            : <>Student pays exactly <strong>₹{feeTotal.toLocaleString('en-IN')}</strong> in {installments.filter((i, idx) => filled[idx]).length} installment{installments.filter((i, idx) => filled[idx]).length !== 1 ? 's' : ''}.</>
+          }
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── FeeAmountPanel ────────────────────────────────────────────────────────────
+// Shown after confirmation (confirmed / fees_paid status).
+// Displays fee breakdown + installment plan; allows editing until fees_paid.
+function FeeAmountPanel({ collegeId, appId, initialTotal, initialPayNow, readonly, onSaved }) {
+  const locked   = readonly
+  const totalNum = parseFloat(initialTotal) || 0
+  const [saving,    setSaving]    = useState(false)
+  const [error,     setError]     = useState('')
+  const [success,   setSuccess]   = useState('')
+  const [breakdown,    setBreakdown]    = useState([])
+  const [brkLoading,   setBrkLoading]   = useState(true)
+  const [brkNoFees,    setBrkNoFees]    = useState(false)
+  const [installments, setInstallments] = useState([
+    { amount: '', due_date: '' }, { amount: '', due_date: '' },
+    { amount: '', due_date: '' }, { amount: '', due_date: '' },
+  ])
+  const [instLoading, setInstLoading] = useState(true)
+
+  useEffect(() => {
+    setBrkLoading(true); setBrkNoFees(false)
+    getComputedFee(collegeId, appId)
+      .then(r => {
+        const rows = r.data.data?.breakdown || []
+        setBreakdown(rows)
+        setBrkNoFees(rows.length === 0)
+      })
+      .catch(() => setBrkNoFees(true))
+      .finally(() => setBrkLoading(false))
+  }, [collegeId, appId])
+
+  useEffect(() => {
+    setInstLoading(true)
+    getAppInstallments(collegeId, appId)
+      .then(r => {
+        const rows = r.data.data || []
+        // Map DB rows back into the 4-slot array
+        const slots = [
+          { amount: '', due_date: '' }, { amount: '', due_date: '' },
+          { amount: '', due_date: '' }, { amount: '', due_date: '' },
+        ]
+        rows.forEach(row => {
+          const idx = (row.installment_no || 1) - 1
+          if (idx >= 0 && idx < 4) slots[idx] = { amount: String(row.amount), due_date: row.due_date ? row.due_date.split('T')[0] : '' }
+        })
+        setInstallments(slots)
+      })
+      .catch(() => {})
+      .finally(() => setInstLoading(false))
+  }, [collegeId, appId])
 
   async function handleSave() {
     setError(''); setSuccess('')
-    if (!totalNum || totalNum <= 0) { setError('Enter the total payable amount.'); return }
-    if (!payNowNum || payNowNum <= 0) { setError('Enter the amount to pay now.'); return }
-    if (payNowNum > totalNum + 0.01) { setError('Amount to pay now cannot exceed the total.'); return }
+    const validInst = installments.filter(i => i.amount !== '' && parseFloat(i.amount) > 0)
+    if (validInst.length === 0) { setError('Enter at least one installment amount.'); return }
+    const instTotal = validInst.reduce((s, i) => s + parseFloat(i.amount), 0)
+    if (totalNum > 0 && instTotal > totalNum + 0.01) { setError(`Installment total (₹${instTotal.toLocaleString('en-IN')}) cannot exceed fee total (₹${totalNum.toLocaleString('en-IN')}).`); return }
     setSaving(true)
     try {
       await setApplicationFee(collegeId, appId, {
-        fee_total_amount: totalNum,
-        fee_pay_now_amount: payNowNum,
+        installments: validInst.map((i, idx) => ({ installment_no: idx + 1, amount: parseFloat(i.amount), due_date: i.due_date || null })),
       })
-      setSuccess('Fee amounts saved. Student will see these amounts when paying.')
+      setSuccess('Installment plan saved.')
       onSaved?.()
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to save.'))
@@ -711,78 +894,92 @@ function FeeAmountPanel({ collegeId, appId, initialTotal, initialPayNow, readonl
       <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
         <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Fee Details</p>
         <p className="text-xs text-slate-400 mt-0.5">
-          {locked
-            ? 'Fee amounts are locked after being set.'
-            : 'Enter the total fee and how much the student must pay now. Student will see both amounts.'}
+          {locked ? 'Fee amounts are locked.' : 'Update the installment plan if needed.'}
         </p>
       </div>
       <div className="px-4 py-4 space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">
-              Total Payable Amount {!locked && <span className="text-red-500">*</span>}
-            </label>
-            <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500">
-              <span className="px-3 py-2 bg-slate-50 border-r border-slate-200 text-slate-500 text-sm font-semibold">₹</span>
-              <input
-                type="text" inputMode="numeric"
-                value={total}
-                onChange={e => { setTotal(e.target.value.replace(/[^0-9.]/g, '')); setError(''); setSuccess('') }}
-                disabled={locked}
-                placeholder="e.g. 14000"
-                className="flex-1 px-3 py-2 text-sm outline-none bg-transparent disabled:bg-slate-50 disabled:text-slate-500"
-              />
-            </div>
-            <p className="mt-1 text-xs text-slate-400">Full fee the student owes</p>
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">
-              Amount to Pay Now {!locked && <span className="text-red-500">*</span>}
-            </label>
-            <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500">
-              <span className="px-3 py-2 bg-slate-50 border-r border-slate-200 text-slate-500 text-sm font-semibold">₹</span>
-              <input
-                type="text" inputMode="numeric"
-                value={payNow}
-                onChange={e => { setPayNow(e.target.value.replace(/[^0-9.]/g, '')); setError(''); setSuccess('') }}
-                disabled={locked}
-                placeholder="e.g. 14000"
-                className="flex-1 px-3 py-2 text-sm outline-none bg-transparent disabled:bg-slate-50 disabled:text-slate-500"
-              />
-            </div>
-            <p className="mt-1 text-xs text-slate-400">
-              {!locked && totalNum > 0 && (
-                <button
-                  type="button"
-                  onClick={() => { setPayNow(total); setError(''); setSuccess('') }}
-                  className="text-emerald-600 hover:underline font-semibold"
-                >
-                  Same as total
-                </button>
-              )}
-              {!locked && totalNum > 0 && ' · '}
-              Can be less if college allows partial payment
-            </p>
-          </div>
-        </div>
-
-        {isPartial && (
-          <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
-            Student pays <strong>₹{payNowNum.toLocaleString('en-IN')}</strong> now.
-            Remaining <strong>₹{(totalNum - payNowNum).toLocaleString('en-IN')}</strong> can be paid later.
+        {/* Fee breakdown table */}
+        {brkLoading ? (
+          <p className="text-xs text-slate-400">Loading fee breakdown…</p>
+        ) : brkNoFees ? (
+          <p className="text-xs text-red-500">No fees configured for this class. Please set up Classwise Fees in Fees Master.</p>
+        ) : (
+          <div className="rounded-lg border border-slate-200 overflow-hidden">
+            <table className="w-full text-xs">
+              <thead className="bg-slate-100 text-slate-600">
+                <tr>
+                  <th className="px-3 py-2 text-left font-semibold">Fee Head</th>
+                  <th className="px-3 py-2 text-right font-semibold w-28">Amount (₹)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {breakdown.map(h => (
+                  <tr key={h.fees_code}>
+                    <td className="px-3 py-1.5 text-slate-700">{h.fees_head}
+                      <span className="ml-1.5 text-slate-400">{h.short_name}</span>
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono text-slate-800">
+                      {parseFloat(h.amount).toLocaleString('en-IN')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot className="bg-slate-50 border-t-2 border-slate-300">
+                <tr>
+                  <td className="px-3 py-2 font-bold text-slate-800">Total</td>
+                  <td className="px-3 py-2 text-right font-bold font-mono text-slate-900">
+                    {totalNum > 0 ? totalNum.toLocaleString('en-IN') : '—'}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
           </div>
         )}
-        {totalNum > 0 && payNowNum > 0 && !isPartial && payNowNum <= totalNum + 0.01 && (
-          <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2 text-xs text-emerald-800">
-            Student pays the full fee of <strong>₹{totalNum.toLocaleString('en-IN')}</strong> at once.
+
+        {/* Installment plan */}
+        {instLoading ? (
+          <p className="text-xs text-slate-400">Loading installment plan…</p>
+        ) : locked ? (
+          // Read-only display when fees are paid
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Installment Plan</p>
+            <div className="rounded-lg border border-slate-200 overflow-hidden">
+              <table className="w-full text-xs">
+                <thead className="bg-slate-100 text-slate-600">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-semibold">Installment</th>
+                    <th className="px-3 py-2 text-left font-semibold">Due Date</th>
+                    <th className="px-3 py-2 text-right font-semibold">Amount (₹)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 bg-white">
+                  {installments.filter(i => i.amount !== '').map((inst, idx) => (
+                    <tr key={idx}>
+                      <td className="px-3 py-1.5 font-medium text-slate-700">Installment {idx + 1}</td>
+                      <td className="px-3 py-1.5 text-slate-500">{inst.due_date || '—'}</td>
+                      <td className="px-3 py-1.5 text-right font-mono text-slate-800">
+                        {parseFloat(inst.amount).toLocaleString('en-IN')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
+        ) : (
+          <InstallmentPlanInput
+            installments={installments}
+            onChange={setInstallments}
+            feeTotal={totalNum || null}
+            onError={setError}
+          />
         )}
 
         {error   && <p className="text-sm text-red-600">{error}</p>}
         {success && <p className="text-sm text-emerald-600">{success}</p>}
 
         {!locked && (
-          <Button onClick={handleSave} loading={saving}>Save Fee Amounts</Button>
+          <Button onClick={handleSave} loading={saving}>Save Installment Plan</Button>
         )}
       </div>
     </div>

@@ -12,6 +12,12 @@ export const postApplicationAction = (collegeId, appId, endpoint, data) =>
 export const confirmApplication = (collegeId, appId, data) =>
   api.post(`college-admin/${collegeId}/applications/${appId}/confirm`, data)
 
+export const getComputedFee = (collegeId, appId, division) =>
+  api.get(`college-admin/${collegeId}/applications/${appId}/computed-fee${division ? `?division=${division}` : ''}`)
+
+export const getAppInstallments = (collegeId, appId) =>
+  api.get(`college-admin/${collegeId}/applications/${appId}/installments`)
+
 export const setApplicationFee = (collegeId, appId, data) =>
   api.post(`college-admin/${collegeId}/applications/${appId}/set-fee`, data)
 
@@ -40,3 +46,6 @@ export const searchStudents = (collegeId, query) =>
 
 export const exportApplications = (collegeId, params) =>
   api.get(`college-admin/${collegeId}/applications/export?${params}`)
+
+export const getFeesCollectionReport = (collegeId, params) =>
+  api.get(`college-admin/${collegeId}/reports/fees-collection?${params}`)

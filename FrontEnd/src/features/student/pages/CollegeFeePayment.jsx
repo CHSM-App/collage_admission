@@ -1,7 +1,7 @@
 /**
- * CollegeFeePayment — shown when a student's application is approved / document_verification / confirmed.
- * Student can pay any amount up to the remaining balance (partial payments allowed).
- * Shows total fee, amount due now (set by college), and paid/remaining amounts.
+ * CollegeFeePayment — shown when a student's application is confirmed.
+ * - If an installment plan is set: shows current instalment amount (fixed, no input).
+ * - If no installment plan: shows remaining balance with a free-entry amount input.
  */
 import { useState } from 'react'
 import { useCollegePayment } from '../../../shared/hooks/useCollegePayment.js'
@@ -10,6 +10,7 @@ import PaymentReceipts from './PaymentReceipts.jsx'
 
 export default function CollegeFeePayment({ application, onDone, onCancel }) {
   const [showReceipts, setShowReceipts] = useState(false)
+  const [customAmt, setCustomAmt]       = useState('')
 
   const {
     feeStatus,
@@ -18,11 +19,28 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
     payError,
     paidMsg,
     payOnline,
+    setPayError,
   } = useCollegePayment(application.id)
 
-  async function payCustomAmount() {
-    const fs  = feeStatus
-    const amt = parseFloat(fs?.total_paid > 0 ? fs?.remaining : (fs?.fee_pay_now_amount || fs?.remaining))
+  const fs = feeStatus
+
+  // current_due: from installment plan logic (backend)
+  // If installments configured → fixed amount student must pay next
+  // If no installments → remaining (student chooses how much)
+  const hasInstallments = fs?.installments?.length > 0
+  const currentDue      = fs ? (fs.current_due ?? fs.remaining) : 0
+  const amtIsFixed      = hasInstallments && currentDue < (fs?.remaining ?? 0) - 0.01
+
+  async function handlePay() {
+    setPayError('')
+    let amt
+    if (amtIsFixed) {
+      amt = currentDue
+    } else {
+      amt = parseFloat(customAmt)
+      if (!amt || amt <= 0) { setPayError('Enter a valid amount.'); return }
+      if (fs && amt > fs.remaining + 0.01) { setPayError(`Amount cannot exceed remaining balance ₹${fs.remaining.toLocaleString('en-IN')}.`); return }
+    }
     await payOnline(amt, {
       onSuccess: (_msg, data) => {
         setShowReceipts(true)
@@ -40,13 +58,10 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
     )
   }
 
-  if (!feeStatus) return null
+  if (!fs) return null
 
-  const fs         = feeStatus
-  // Admission confirmed = first instalment paid (college_fee_paid=1) OR remaining=0
-  const admitted   = fs.college_fee_paid || fs.remaining <= 0
-  // Fully paid = nothing remaining
-  const fullyPaid  = fs.remaining <= 0
+  const admitted  = fs.college_fee_paid || fs.remaining <= 0
+  const fullyPaid = fs.remaining <= 0
 
   return (
     <div className="rounded-xl border border-emerald-200 bg-white overflow-hidden">
@@ -65,13 +80,13 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
       </div>
 
       <div className="px-5 py-4 space-y-4">
-        {/* Fee summary */}
         {fs.total_fee === 0 ? (
           <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
             The college has not yet entered the fee details. Please contact the college.
           </div>
         ) : (
           <>
+            {/* Fee summary cards */}
             <div className={`grid gap-2 sm:gap-3 text-sm ${fs.remaining > 0 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
               <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-center">
                 <p className="text-xs text-slate-400">Total Fee</p>
@@ -94,14 +109,15 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
                 </p>
               </div>
             </div>
-            {fs.fee_pay_now_amount && fs.fee_pay_now_amount < fs.total_fee - 0.01 && fs.total_paid <= 0 && (
-              <p className="text-xs text-slate-500">
-                Your total fee is ₹{Number(fs.total_fee).toLocaleString('en-IN')}. Pay ₹{Number(fs.fee_pay_now_amount).toLocaleString('en-IN')} now to confirm admission; the remaining ₹{Number(fs.total_fee - fs.fee_pay_now_amount).toLocaleString('en-IN')} can be paid later.
-              </p>
+
+            {/* Installment plan summary */}
+            {hasInstallments && !fullyPaid && (
+              <InstallmentSummary installments={fs.installments} totalPaid={fs.total_paid} />
             )}
+
             {admitted && fs.remaining > 0 && (
               <div className="rounded-lg bg-teal-50 border border-teal-200 px-4 py-2.5 text-sm text-teal-800">
-                Your admission is confirmed. ₹{Number(fs.remaining).toLocaleString('en-IN')} remaining balance can be paid below.
+                Your admission is confirmed. Pay the remaining balance below.
               </div>
             )}
           </>
@@ -115,23 +131,56 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
         {payError && (
           <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{payError}</div>
         )}
-        {/* ── Payment ── */}
+
+        {/* ── Payment section ── */}
         {!fullyPaid && fs.total_fee > 0 && (
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-            <div>
-              <p className="text-xs text-slate-500">{admitted ? 'Remaining balance' : 'Amount due now'}</p>
-              <p className="text-xl font-bold text-slate-950">
-                ₹{Number(fs.total_paid > 0 ? fs.remaining : (fs.fee_pay_now_amount || fs.remaining)).toLocaleString('en-IN')}
-              </p>
+          amtIsFixed ? (
+            // Fixed instalment — no input, just show the locked amount
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+              <div>
+                <p className="text-xs text-slate-500">
+                  {admitted ? 'Next instalment' : 'Amount due now'} <span className="text-slate-400">(fixed)</span>
+                </p>
+                <p className="text-xl font-bold text-slate-950">₹{Number(currentDue).toLocaleString('en-IN')}</p>
+              </div>
+              <Button onClick={handlePay} loading={paying} disabled={paying}>
+                {admitted ? 'Pay Instalment' : 'Pay Now'}
+              </Button>
             </div>
-            <Button
-              onClick={payCustomAmount}
-              loading={paying}
-              disabled={paying}
-            >
-              {admitted ? 'Pay Remaining' : 'Pay Now'}
-            </Button>
-          </div>
+          ) : (
+            // Free payment — student enters any amount up to remaining
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 space-y-3">
+              <div>
+                <p className="text-xs text-slate-500 mb-1">
+                  {admitted ? 'Enter amount to pay' : 'Amount due now'}
+                </p>
+                <div className="flex gap-3 items-center">
+                  <div className="flex items-center rounded-lg border border-slate-300 overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 bg-white flex-1 max-w-xs">
+                    <span className="px-3 py-2 bg-slate-50 border-r border-slate-200 text-slate-500 text-sm font-semibold">₹</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={customAmt}
+                      onChange={e => { setCustomAmt(e.target.value.replace(/[^0-9.]/g, '')); setPayError('') }}
+                      placeholder={`Max ${Number(fs.remaining).toLocaleString('en-IN')}`}
+                      className="flex-1 px-3 py-2 text-sm outline-none bg-transparent"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setCustomAmt(String(fs.remaining)); setPayError('') }}
+                    className="text-xs text-emerald-600 hover:underline font-semibold whitespace-nowrap"
+                  >
+                    Pay full
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">You can pay any amount up to ₹{Number(fs.remaining).toLocaleString('en-IN')}.</p>
+              </div>
+              <Button onClick={handlePay} loading={paying} disabled={paying || !customAmt}>
+                {admitted ? 'Pay Now' : 'Pay Now'}
+              </Button>
+            </div>
+          )
         )}
 
         {/* Fully paid */}
@@ -152,21 +201,56 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
             </svg>
             {showReceipts ? 'Hide Receipts' : 'View Payment Receipts'}
           </button>
-
           {showReceipts && (
-            <PaymentReceipts
-              applicationId={application.id}
-              onClose={() => setShowReceipts(false)}
-            />
+            <PaymentReceipts applicationId={application.id} onClose={() => setShowReceipts(false)} />
           )}
         </div>
 
         <div className="flex justify-end">
-          <button onClick={onCancel} className="text-sm text-slate-400 hover:text-slate-600">
-            Close
-          </button>
+          <button onClick={onCancel} className="text-sm text-slate-400 hover:text-slate-600">Close</button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// Shows the installment plan with which ones are done / current / upcoming
+function InstallmentSummary({ installments, totalPaid }) {
+  let cumulative = 0
+  return (
+    <div className="rounded-lg border border-slate-200 overflow-hidden">
+      <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
+        <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Installment Plan</p>
+      </div>
+      <table className="w-full text-xs">
+        <tbody className="divide-y divide-slate-100">
+          {installments.map((inst, idx) => {
+            const prevCumulative = cumulative
+            cumulative += inst.amount
+            const done    = totalPaid >= cumulative - 0.01
+            const current = !done && totalPaid >= prevCumulative - 0.01
+            return (
+              <tr key={idx} className={done ? 'bg-emerald-50/50' : current ? 'bg-amber-50/50' : ''}>
+                <td className="px-3 py-2 font-medium text-slate-700">Instalment {inst.installment_no}</td>
+                <td className="px-3 py-2 text-slate-500">
+                  {inst.due_date ? new Date(inst.due_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
+                </td>
+                <td className="px-3 py-2 font-mono font-semibold text-slate-800 text-right">
+                  ₹{Number(inst.amount).toLocaleString('en-IN')}
+                </td>
+                <td className="px-3 py-2 text-right">
+                  {done
+                    ? <span className="text-xs font-semibold text-emerald-700 bg-emerald-100 rounded-full px-2 py-0.5">Paid</span>
+                    : current
+                    ? <span className="text-xs font-semibold text-amber-700 bg-amber-100 rounded-full px-2 py-0.5">Due Now</span>
+                    : <span className="text-xs font-semibold text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">Upcoming</span>
+                  }
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }

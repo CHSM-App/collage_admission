@@ -27,6 +27,7 @@ const { authenticate, requireCollegeAccess, requirePerm, requireWrite } = requir
 const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
 const whatsapp = require('../services/whatsapp');
 const logger = require('../config/logger');
+const feeSvc = require('../services/FeeDeterminationService');
 
 // All routes require authentication. College ownership is enforced via router.param
 // so that req.params.collegeId is available when the check runs.
@@ -581,22 +582,88 @@ router.post('/:collegeId/applications/:appId/reject', requireWrite('review_appli
 });
 
 // ── Confirm after doc visit: set fees and move to confirmed ──────────────────
+// ── Helper: compute fee total from FeeDeterminationService for an application ─
+async function computeFeeForApp(appId, collegeId, divisionOverride) {
+  const r = await db.request()
+    .input('id',  mssqlShared.Int, appId)
+    .input('col', mssqlShared.Int, collegeId)
+    .query(`
+      SELECT course_id, year_of_study, app_division, app_caste,
+             app_special_status, fees_category
+      FROM applications WHERE id=@id AND college_id=@col
+    `);
+  if (!r.recordset.length) return null;
+  const a = r.recordset[0];
+  const yearMap = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' };
+  return feeSvc.compute({
+    collegeId,
+    facultyMasterId: a.course_id,
+    yearLevel:       yearMap[a.year_of_study] || null,
+    divisionLetter:  divisionOverride || a.app_division || null,
+    caste:           a.app_caste || null,
+    specialStatus:   a.app_special_status || null,
+    pool:            db,
+  });
+}
+
+// GET /:collegeId/applications/:appId/computed-fee?division=A
+router.get('/:collegeId/applications/:appId/computed-fee', requirePerm('review_application'), async (req, res) => {
+  try {
+    const divisionOverride = req.query.division || null;
+    const result = await computeFeeForApp(parseInt(req.params.appId), parseInt(req.params.collegeId), divisionOverride);
+    if (!result) return res.status(404).json({ success: false, message: 'Application not found.' });
+    res.json({ success: true, data: result });
+  } catch (e) {
+    logger.error({ err: e }, 'computed-fee');
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+// ── Helper: upsert installment plan for an application ────────
+async function saveInstallments(appId, installments, actor, tx) {
+  const runner = tx || db;
+  // Delete existing installments first
+  await runner.request()
+    .input('appId', mssqlShared.Int, appId)
+    .query(`DELETE FROM fee_installments WHERE application_id = @appId`);
+  for (const inst of installments) {
+    await runner.request()
+      .input('appId',  mssqlShared.Int,      appId)
+      .input('no',     mssqlShared.TinyInt,  inst.installment_no)
+      .input('amt',    mssqlShared.Decimal,  parseFloat(inst.amount))
+      .input('due',    mssqlShared.Date,     inst.due_date || null)
+      .input('actor',  mssqlShared.NVarChar, actor)
+      .query(`
+        INSERT INTO fee_installments (application_id, installment_no, due_date, amount, created_by)
+        VALUES (@appId, @no, @due, @amt, @actor)
+      `);
+  }
+}
+
+// GET /:collegeId/applications/:appId/installments
+router.get('/:collegeId/applications/:appId/installments', requirePerm('review_application'), async (req, res) => {
+  try {
+    const r = await db.request()
+      .input('appId', mssqlShared.Int, parseInt(req.params.appId))
+      .query(`SELECT installment_no, due_date, amount FROM fee_installments WHERE application_id=@appId ORDER BY installment_no`);
+    res.json({ success: true, data: r.recordset });
+  } catch (e) {
+    logger.error({ err: e }, 'get installments');
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
 // Student visited college. College verifies docs, sets fees, confirms admission.
 // Status: doc_verified → confirmed
 router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_application'), async (req, res) => {
-  const { fee_total_amount, fee_pay_now_amount, division, document_ids_verified } = req.body;
+  const { installments, division, document_ids_verified } = req.body;
 
-  const total  = parseFloat(fee_total_amount);
-  const payNow = parseFloat(fee_pay_now_amount);
+  const validInstallments = (Array.isArray(installments) ? installments : [])
+    .filter(i => i.amount && parseFloat(i.amount) > 0)
+    .map((i, idx) => ({ installment_no: idx + 1, amount: parseFloat(i.amount), due_date: i.due_date || null }));
 
-  if (!total || total <= 0) {
-    return res.status(400).json({ success: false, message: 'Total payable amount is required and must be positive.' });
-  }
-  if (isNaN(payNow) || payNow <= 0) {
-    return res.status(400).json({ success: false, message: 'Amount to pay now must be a positive number.' });
-  }
-  if (payNow > total + 0.01) {
-    return res.status(400).json({ success: false, message: 'Amount to pay now cannot exceed the total payable amount.' });
+  if (validInstallments.length === 0) {
+    return res.status(400).json({ success: false, message: 'At least one installment with an amount is required.' });
   }
 
   try {
@@ -612,17 +679,28 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
       return res.status(400).json({ success: false, message: 'Application must be in doc_verified status to confirm.' });
     }
 
+    // Compute total fee from fees master
+    const feeResult = await computeFeeForApp(parseInt(req.params.appId), parseInt(req.params.collegeId), division || null);
+    const total = feeResult ? feeResult.totalFee : 0;
+    if (!total || total <= 0) {
+      return res.status(400).json({ success: false, message: 'Could not compute fee total. Please configure classwise fees in Fees Master first.' });
+    }
+    const instTotal = validInstallments.reduce((s, i) => s + i.amount, 0);
+    if (instTotal > total + 0.01) {
+      return res.status(400).json({ success: false, message: `Installment total (₹${instTotal}) cannot exceed fee total (₹${total}).` });
+    }
+
+    const actor = String(req.user.staff_id || req.user.id);
     const pool2 = await db;
     const tx2   = pool2.transaction();
     await tx2.begin();
     try {
-      // Mark documents as physically verified
       if (Array.isArray(document_ids_verified) && document_ids_verified.length > 0) {
         for (const docId of document_ids_verified) {
           await tx2.request()
             .input('docId', mssqlShared.Int,      parseInt(docId))
             .input('appId', mssqlShared.Int,      parseInt(req.params.appId))
-            .input('actor', mssqlShared.NVarChar, String(req.user.staff_id || req.user.id))
+            .input('actor', mssqlShared.NVarChar, actor)
             .query(`
               UPDATE application_documents
               SET is_verified = 1, verified_at = GETDATE(), updated_by = @actor
@@ -631,12 +709,14 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
         }
       }
 
+      // Store pay_now as first installment amount for backward-compat with payments.js
+      const firstInstAmt = validInstallments[0].amount;
       await tx2.request()
         .input('id',    mssqlShared.Int,      parseInt(req.params.appId))
         .input('total', mssqlShared.Decimal,  total)
-        .input('now',   mssqlShared.Decimal,  payNow)
+        .input('now',   mssqlShared.Decimal,  firstInstAmt)
         .input('div',   mssqlShared.Char,     division || null)
-        .input('actor', mssqlShared.NVarChar, String(req.user.staff_id || req.user.id))
+        .input('actor', mssqlShared.NVarChar, actor)
         .query(`
           UPDATE applications
           SET status = 'confirmed', confirmed_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(),
@@ -651,7 +731,11 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
       throw txErr;
     }
 
-    await logActivity(req.params.appId, 'confirmed', 'college', `Total fee: ₹${total}, Pay now: ₹${payNow}`);
+    // Save installment plan outside transaction (non-critical — replace any existing)
+    await saveInstallments(parseInt(req.params.appId), validInstallments, actor, null);
+
+    const instSummary = validInstallments.map(i => `Inst-${i.installment_no}: ₹${i.amount}`).join(', ');
+    await logActivity(req.params.appId, 'confirmed', 'college', `Total fee: ₹${total}. Installments: ${instSummary}`);
 
     return res.json({ success: true, message: 'Admission confirmed. Student can now pay the college fee.' });
   } catch (err) {
@@ -660,21 +744,16 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
   }
 });
 
-// ── Set fee amounts (college enters total fee and amount due now) ─────────────
+// ── Set fee amounts (total fetched from fees master; college enters amount due now) ─
 router.post('/:collegeId/applications/:appId/set-fee', requireWrite('review_application'), async (req, res) => {
-  const { fee_total_amount, fee_pay_now_amount } = req.body;
+  const { installments } = req.body;
 
-  const total  = parseFloat(fee_total_amount);
-  const payNow = parseFloat(fee_pay_now_amount);
+  const validInstallments = (Array.isArray(installments) ? installments : [])
+    .filter(i => i.amount && parseFloat(i.amount) > 0)
+    .map((i, idx) => ({ installment_no: idx + 1, amount: parseFloat(i.amount), due_date: i.due_date || null }));
 
-  if (!total || total <= 0) {
-    return res.status(400).json({ success: false, message: 'Total payable amount is required and must be positive.' });
-  }
-  if (isNaN(payNow) || payNow <= 0) {
-    return res.status(400).json({ success: false, message: 'Amount to pay now must be a positive number.' });
-  }
-  if (payNow > total + 0.01) {
-    return res.status(400).json({ success: false, message: 'Amount to pay now cannot exceed the total payable amount.' });
+  if (validInstallments.length === 0) {
+    return res.status(400).json({ success: false, message: 'At least one installment with an amount is required.' });
   }
 
   try {
@@ -690,17 +769,32 @@ router.post('/:collegeId/applications/:appId/set-fee', requireWrite('review_appl
       return res.status(400).json({ success: false, message: 'Fee can only be set for accepted or confirmed applications.' });
     }
 
+    const feeResult = await computeFeeForApp(parseInt(req.params.appId), parseInt(req.params.collegeId));
+    const total = feeResult ? feeResult.totalFee : 0;
+    if (!total || total <= 0) {
+      return res.status(400).json({ success: false, message: 'Could not compute fee total. Please configure classwise fees in Fees Master first.' });
+    }
+    const instTotal = validInstallments.reduce((s, i) => s + i.amount, 0);
+    if (instTotal > total + 0.01) {
+      return res.status(400).json({ success: false, message: `Installment total (₹${instTotal}) cannot exceed fee total (₹${total}).` });
+    }
+
+    const actor = String(req.user.staff_id || req.user.id);
+    const firstInstAmt = validInstallments[0].amount;
+
     await db.request()
-      .input('id',    parseInt(req.params.appId))
-      .input('total', require('mssql').Decimal, total)
-      .input('now',   require('mssql').Decimal, payNow)
+      .input('id',    mssqlShared.Int,     parseInt(req.params.appId))
+      .input('total', mssqlShared.Decimal, total)
+      .input('now',   mssqlShared.Decimal, firstInstAmt)
       .query(`
         UPDATE applications
         SET fee_total_amount = @total, fee_pay_now_amount = @now, updated_at = GETDATE()
         WHERE id = @id
       `);
 
-    return res.json({ success: true, message: 'Fee amounts saved.' });
+    await saveInstallments(parseInt(req.params.appId), validInstallments, actor, null);
+
+    return res.json({ success: true, message: 'Installment plan saved.' });
   } catch (err) {
     logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
@@ -828,9 +922,9 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
         .input('userId', mssqlShared.Int,       req.user.staff_id || req.user.id)
         .input('actor',  mssqlShared.NVarChar,  actor)
         .query(`
-          INSERT INTO payments (application_id, payment_type, amount, status,
-            razorpay_order_id, razorpay_payment_id, completed_at, paid_by, paid_by_user_id, created_by)
-          VALUES (@appId, 'college_fee', @amount, 'success',
+          INSERT INTO payments (application_id, payment_type, amount, status, gateway,
+            gateway_txnid, gateway_payment_id, completed_at, paid_by, paid_by_user_id, created_by)
+          VALUES (@appId, 'college_fee', @amount, 'success', 'cash',
             CONCAT('CASH-', CAST(@appId AS NVARCHAR), '-', CAST(CHECKSUM(NEWID()) AS NVARCHAR)),
             CONCAT('CASH-', FORMAT(GETDATE(),'yyyyMMddHHmmss')),
             GETDATE(), 'college', @userId, @actor)
@@ -1044,6 +1138,166 @@ router.get('/:collegeId/fee-receipts', requirePerm('collect_fees'), async (req, 
     return res.json(paginatedResponse(dataRes.recordset, countRes2.recordset[0].total, page, limit));
   } catch (err) {
     logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── GET /:collegeId/reports/fees-collection ───────────────────────────────────
+// Query params:
+//   date_from   YYYY-MM-DD  (default: today)
+//   date_to     YYYY-MM-DD  (default: today)
+//   course_id   number      (optional)
+//   year_of_study 1-5       (optional)
+//   payment_type college_fee|application_fee|all (default: college_fee)
+//   group_by    day|course|year  (default: day)
+router.get('/:collegeId/reports/fees-collection', requirePerm('collect_fees'), async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId);
+  const {
+    date_from,
+    date_to,
+    course_id,
+    year_of_study,
+    payment_type = 'college_fee',
+    group_by = 'day',
+  } = req.query;
+
+  // Default to today
+  const today = new Date().toISOString().slice(0, 10);
+  const from  = date_from || today;
+  const to    = date_to   || today;
+
+  try {
+    const r = db.request()
+      .input('cid',   mssqlShared.Int,      collegeId)
+      .input('from',  mssqlShared.Date,     from)
+      .input('to',    mssqlShared.Date,     to);
+
+    // Optional filters
+    const courseFilter = course_id    ? `AND a.course_id = @cid2`       : '';
+    const yearFilter   = year_of_study ? `AND a.year_of_study = @yr`    : '';
+    const typeFilter   = payment_type !== 'all' ? `AND p.payment_type = @ptype` : '';
+    if (course_id)     r.input('cid2',  mssqlShared.Int,      parseInt(course_id));
+    if (year_of_study) r.input('yr',    mssqlShared.TinyInt,  parseInt(year_of_study));
+    if (payment_type !== 'all') r.input('ptype', mssqlShared.NVarChar, payment_type);
+
+    // ── Summary totals ────────────────────────────────────────────────────────
+    const summaryRes = await r.query(`
+      SELECT
+        COUNT(DISTINCT p.id)           AS txn_count,
+        ISNULL(SUM(p.amount), 0)       AS total_collected,
+        COUNT(DISTINCT p.application_id) AS student_count,
+        ISNULL(SUM(CASE WHEN p.gateway='cash' OR p.gateway_txnid LIKE 'CASH-%' OR p.gateway IS NULL THEN p.amount ELSE 0 END), 0) AS cash_amount,
+        ISNULL(SUM(CASE WHEN p.gateway IS NOT NULL AND p.gateway<>'cash' AND p.gateway_txnid NOT LIKE 'CASH-%' THEN p.amount ELSE 0 END), 0) AS online_amount
+      FROM payments p
+      JOIN applications a ON a.id = p.application_id
+      WHERE a.college_id = @cid
+        AND p.status = 'success'
+        AND CAST(p.completed_at AS DATE) BETWEEN @from AND @to
+        ${courseFilter} ${yearFilter} ${typeFilter}
+    `);
+    const summary = summaryRes.recordset[0];
+
+    // ── Day-wise breakdown ────────────────────────────────────────────────────
+    const r2 = db.request()
+      .input('cid',   mssqlShared.Int,      collegeId)
+      .input('from',  mssqlShared.Date,     from)
+      .input('to',    mssqlShared.Date,     to);
+    if (course_id)     r2.input('cid2',  mssqlShared.Int,      parseInt(course_id));
+    if (year_of_study) r2.input('yr',    mssqlShared.TinyInt,  parseInt(year_of_study));
+    if (payment_type !== 'all') r2.input('ptype', mssqlShared.NVarChar, payment_type);
+
+    const dayRes = await r2.query(`
+      SELECT
+        CAST(p.completed_at AS DATE)   AS date,
+        COUNT(p.id)                    AS txn_count,
+        ISNULL(SUM(p.amount), 0)       AS total,
+        ISNULL(SUM(CASE WHEN p.gateway='cash' OR p.gateway_txnid LIKE 'CASH-%' THEN p.amount ELSE 0 END), 0) AS cash,
+        ISNULL(SUM(CASE WHEN p.gateway<>'cash' AND p.gateway_txnid NOT LIKE 'CASH-%' THEN p.amount ELSE 0 END), 0) AS online
+      FROM payments p
+      JOIN applications a ON a.id = p.application_id
+      WHERE a.college_id = @cid
+        AND p.status = 'success'
+        AND CAST(p.completed_at AS DATE) BETWEEN @from AND @to
+        ${courseFilter} ${yearFilter} ${typeFilter}
+      GROUP BY CAST(p.completed_at AS DATE)
+      ORDER BY CAST(p.completed_at AS DATE)
+    `);
+
+    // ── Course-wise breakdown ─────────────────────────────────────────────────
+    const r3 = db.request()
+      .input('cid',   mssqlShared.Int,      collegeId)
+      .input('from',  mssqlShared.Date,     from)
+      .input('to',    mssqlShared.Date,     to);
+    if (course_id)     r3.input('cid2',  mssqlShared.Int,      parseInt(course_id));
+    if (year_of_study) r3.input('yr',    mssqlShared.TinyInt,  parseInt(year_of_study));
+    if (payment_type !== 'all') r3.input('ptype', mssqlShared.NVarChar, payment_type);
+
+    const courseRes = await r3.query(`
+      SELECT
+        a.course_id,
+        COALESCE(fm.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
+        a.year_of_study,
+        COUNT(p.id)              AS txn_count,
+        ISNULL(SUM(p.amount), 0) AS total
+      FROM payments p
+      JOIN applications a ON a.id = p.application_id
+      LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+      WHERE a.college_id = @cid
+        AND p.status = 'success'
+        AND CAST(p.completed_at AS DATE) BETWEEN @from AND @to
+        ${courseFilter} ${yearFilter} ${typeFilter}
+      GROUP BY a.course_id, fm.degree_course_name, a.year_of_study
+      ORDER BY total DESC
+    `);
+
+    // ── Individual transactions ───────────────────────────────────────────────
+    const r4 = db.request()
+      .input('cid',   mssqlShared.Int,      collegeId)
+      .input('from',  mssqlShared.Date,     from)
+      .input('to',    mssqlShared.Date,     to);
+    if (course_id)     r4.input('cid2',  mssqlShared.Int,      parseInt(course_id));
+    if (year_of_study) r4.input('yr',    mssqlShared.TinyInt,  parseInt(year_of_study));
+    if (payment_type !== 'all') r4.input('ptype', mssqlShared.NVarChar, payment_type);
+
+    const txnRes = await r4.query(`
+      SELECT TOP 200
+        p.id, p.amount, p.payment_type, p.gateway, p.gateway_txnid, p.gateway_payment_id, p.completed_at,
+        a.id AS app_id, a.year_of_study, a.academic_year, a.app_division,
+        COALESCE(
+          NULLIF(LTRIM(RTRIM(ISNULL(a.app_surname,'')+' '+ISNULL(a.app_first_name,'')+' '+ISNULL(a.app_middle_name,''))), ''),
+          s.full_name
+        ) AS student_name,
+        a.registration_number,
+        COALESCE(fm.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name
+      FROM payments p
+      JOIN applications a ON a.id = p.application_id
+      JOIN students s ON s.id = a.student_id
+      LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+      WHERE a.college_id = @cid
+        AND p.status = 'success'
+        AND CAST(p.completed_at AS DATE) BETWEEN @from AND @to
+        ${courseFilter} ${yearFilter} ${typeFilter}
+      ORDER BY p.completed_at DESC
+    `);
+
+    return res.json({
+      success: true,
+      data: {
+        summary: {
+          total_collected: parseFloat(summary.total_collected) || 0,
+          txn_count:       summary.txn_count || 0,
+          student_count:   summary.student_count || 0,
+          cash_amount:     parseFloat(summary.cash_amount) || 0,
+          online_amount:   parseFloat(summary.online_amount) || 0,
+        },
+        by_day:    dayRes.recordset.map(r => ({ ...r, total: parseFloat(r.total), cash: parseFloat(r.cash), online: parseFloat(r.online) })),
+        by_course: courseRes.recordset.map(r => ({ ...r, total: parseFloat(r.total) })),
+        transactions: txnRes.recordset,
+        filters: { from, to, course_id: course_id || null, year_of_study: year_of_study || null, payment_type },
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, 'reports/fees-collection error');
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });

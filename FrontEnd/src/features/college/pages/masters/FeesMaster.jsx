@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
-import { getFeesList, createFees, updateFees, deleteFees, getBankLedgers, getFaculty, getClasswiseFees, saveClasswiseFees, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
+import { getFeesList, createFees, updateFees, deleteFees, getBankLedgers, getFaculty, getClasswiseFees, saveClasswiseFees, deleteClasswiseFee, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 import { useToast } from '../../../../context/ToastContext.jsx'
@@ -52,14 +52,18 @@ export default function FeesMaster({ collegeId }) {
     return sortDir === 'asc' ? cmp : -cmp
   }), [rows, sortCol, sortDir])
   // Classwise fees modal
-  const [cwModal, setCwModal]     = useState(false)
-  const [cwFaculty, setCwFaculty] = useState([])
-  const [cwSelFac, setCwSelFac]   = useState('')
-  const [cwSelYear, setCwSelYear] = useState('FY')
-  const [cwRows, setCwRows]       = useState([])
-  const [cwSaving, setCwSaving]   = useState(false)
-  const [cwError, setCwError]     = useState('')
-  const [cwSuccess, setCwSuccess] = useState('')
+  const [cwModal, setCwModal]         = useState(false)
+  const [cwFaculty, setCwFaculty]     = useState([])
+  const [cwSelFac, setCwSelFac]       = useState('')
+  const [cwSelYear, setCwSelYear]     = useState('FY')
+  const [cwSelType, setCwSelType]     = useState('Grand')
+  const [cwRows, setCwRows]           = useState([])
+  const [cwSaving, setCwSaving]       = useState(false)
+  const [cwError, setCwError]         = useState('')
+  const [cwSuccess, setCwSuccess]     = useState('')
+
+  const CW_STUDENT_TYPES = ['Grand', 'NonGrand', 'Outsider']
+  const CW_STUDENT_TYPE_LABEL = { Grand: 'Grant', NonGrand: 'Non-Grant', Outsider: 'Outsider' }
 
   function load(silent = false) {
     const wasMiss = !masterCacheHas(`fees:${collegeId}`) || !masterCacheHas(`bank:${collegeId}`)
@@ -119,20 +123,21 @@ export default function FeesMaster({ collegeId }) {
 
   useEffect(() => {
     if (!cwModal || !cwSelFac) return
-    getClasswiseFees(collegeId, cwSelFac, cwSelYear)
+    getClasswiseFees(collegeId, cwSelFac, cwSelYear, cwSelType)
       .then(cwRes => {
         const existing = cwRes.data.data || []
         const merged = rows.filter(r => r.is_active).map(r => {
           const ov = existing.find(e => e.fees_code === r.fees_code)
           return {
-            fees_code:  r.fees_code,
-            fees_head:  r.fees_head,
-            short_name: r.short_name,
-            fees_type:  r.fees_type,
-            base_cat1:  r.fees_cat1_amount,
-            base_cat2:  r.fees_cat2_amount,
-            base_cat3:  r.fees_cat3_amount,
-            base_cat4:  r.fees_cat4_amount,
+            fees_code:   r.fees_code,
+            fees_head:   r.fees_head,
+            short_name:  r.short_name,
+            fees_type:   r.fees_type,
+            base_cat1:   r.fees_cat1_amount,
+            base_cat2:   r.fees_cat2_amount,
+            base_cat3:   r.fees_cat3_amount,
+            base_cat4:   r.fees_cat4_amount,
+            selected:    !!ov,
             cat1_amount: ov?.cat1_amount ?? '',
             cat2_amount: ov?.cat2_amount ?? '',
             cat3_amount: ov?.cat3_amount ?? '',
@@ -141,7 +146,7 @@ export default function FeesMaster({ collegeId }) {
         })
         setCwRows(merged)
       }).catch(() => setCwError('Failed to load classwise fees.'))
-  }, [cwModal, cwSelFac, cwSelYear, rows])
+  }, [cwModal, cwSelFac, cwSelYear, cwSelType, rows])
 
   function updateCw(feesCode, field, val) {
     setCwRows(rs => rs.map(r => r.fees_code === feesCode ? { ...r, [field]: val } : r))
@@ -150,17 +155,35 @@ export default function FeesMaster({ collegeId }) {
   async function saveCw() {
     setCwSaving(true); setCwError(''); setCwSuccess('')
     try {
-      await saveClasswiseFees(collegeId, {
-        faculty_master_id: cwSelFac,
-        year_level: cwSelYear,
-        rows: cwRows.map(r => ({
-          fees_code:   r.fees_code,
-          cat1_amount: r.cat1_amount !== '' ? parseFloat(r.cat1_amount) : null,
-          cat2_amount: r.cat2_amount !== '' ? parseFloat(r.cat2_amount) : null,
-          cat3_amount: r.cat3_amount !== '' ? parseFloat(r.cat3_amount) : null,
-          cat4_amount: r.cat4_amount !== '' ? parseFloat(r.cat4_amount) : null,
-        })),
-      })
+      const selected = cwRows.filter(r => r.selected)
+      const deselected = cwRows.filter(r => !r.selected)
+
+      // Upsert selected rows
+      if (selected.length) {
+        await saveClasswiseFees(collegeId, {
+          faculty_master_id: cwSelFac,
+          year_level: cwSelYear,
+          student_type: cwSelType,
+          rows: selected.map(r => ({
+            fees_code:   r.fees_code,
+            cat1_amount: r.cat1_amount !== '' ? parseFloat(r.cat1_amount) : null,
+            cat2_amount: r.cat2_amount !== '' ? parseFloat(r.cat2_amount) : null,
+            cat3_amount: r.cat3_amount !== '' ? parseFloat(r.cat3_amount) : null,
+            cat4_amount: r.cat4_amount !== '' ? parseFloat(r.cat4_amount) : null,
+          })),
+        })
+      }
+
+      // Delete deselected rows that were previously saved
+      for (const r of deselected) {
+        await deleteClasswiseFee(collegeId, {
+          faculty_master_id: cwSelFac,
+          year_level: cwSelYear,
+          student_type: cwSelType,
+          fees_code: r.fees_code,
+        })
+      }
+
       setCwSuccess('Saved.')
     } catch (e) { setCwError(e?.response?.data?.message || 'Save failed.') }
     finally { setCwSaving(false) }
@@ -393,15 +416,35 @@ export default function FeesMaster({ collegeId }) {
                   ))}
                 </div>
               </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-slate-500">Student Type</label>
+                <div className="flex gap-1">
+                  {CW_STUDENT_TYPES.map(t => (
+                    <button key={t} onClick={() => setCwSelType(t)}
+                      className={`px-4 h-9 rounded-lg text-sm font-medium border transition ${cwSelType === t ? 'bg-indigo-700 text-white border-indigo-700' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}>
+                      {CW_STUDENT_TYPE_LABEL[t]}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
             <div className="overflow-auto flex-1 px-6 py-4">
               {cwError   && <p className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{cwError}</p>}
               {cwSuccess && <p className="mb-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{cwSuccess}</p>}
-              <p className="text-xs text-slate-400 mb-3">Leave blank to use the base Fees Master amount. Enter a value to override for this class-year.</p>
-              <div className="min-w-[600px]">
+              <p className="text-xs text-slate-400 mb-3">Check a fee head to include it for this class. Leave amounts blank to use the base Fees Master amount.</p>
+              <div className="min-w-[640px]">
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                     <tr>
+                      <th className="px-3 py-2 text-center w-10">
+                        <input
+                          type="checkbox"
+                          title="Select all"
+                          checked={cwRows.length > 0 && cwRows.every(r => r.selected)}
+                          onChange={e => setCwRows(rs => rs.map(r => ({ ...r, selected: e.target.checked })))}
+                          className="accent-slate-700"
+                        />
+                      </th>
                       <th className="px-3 py-2 text-left">Fee Head</th>
                       <th className="px-3 py-2 text-center">Cat-1 Base</th>
                       <th className="px-3 py-2 text-center">Cat-1 Override</th>
@@ -413,9 +456,17 @@ export default function FeesMaster({ collegeId }) {
                       <th className="px-3 py-2 text-center">Cat-4 Override</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-50">
+                  <tbody className="divide-y divide-slate-100">
                     {cwRows.map(r => (
-                      <tr key={r.fees_code} className="hover:bg-slate-50">
+                      <tr key={r.fees_code} className={`transition ${r.selected ? 'hover:bg-slate-50' : 'opacity-40'}`}>
+                        <td className="px-3 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={!!r.selected}
+                            onChange={e => updateCw(r.fees_code, 'selected', e.target.checked)}
+                            className="accent-slate-700"
+                          />
+                        </td>
                         <td className="px-3 py-2">
                           <p className="font-medium text-slate-800">{r.fees_head}</p>
                           <p className="text-slate-400">{r.short_name}</p>
@@ -431,7 +482,8 @@ export default function FeesMaster({ collegeId }) {
                                 value={r[`cat${n}_amount`]}
                                 onChange={e => updateCw(r.fees_code, `cat${n}_amount`, e.target.value)}
                                 placeholder="—"
-                                className="w-20 border border-slate-200 rounded px-2 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-slate-300"
+                                disabled={!r.selected}
+                                className="w-20 border border-slate-200 rounded px-2 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-slate-300 disabled:bg-slate-50 disabled:cursor-not-allowed"
                               />
                             </td>
                           </>
@@ -442,11 +494,16 @@ export default function FeesMaster({ collegeId }) {
                 </table>
               </div>
             </div>
-            <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-100 shrink-0">
-              <button onClick={() => setCwModal(false)} className="px-4 py-2 text-sm text-slate-600">Close</button>
-              <button onClick={saveCw} disabled={cwSaving} className="px-5 py-2 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700 disabled:opacity-50">
-                {cwSaving ? 'Saving…' : 'Save Overrides'}
-              </button>
+            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 shrink-0">
+              <span className="text-xs text-slate-400">
+                {cwRows.filter(r => r.selected).length} of {cwRows.length} fee heads selected
+              </span>
+              <div className="flex gap-3">
+                <button onClick={() => setCwModal(false)} className="px-4 py-2 text-sm text-slate-600">Close</button>
+                <button onClick={saveCw} disabled={cwSaving} className="px-5 py-2 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700 disabled:opacity-50">
+                  {cwSaving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

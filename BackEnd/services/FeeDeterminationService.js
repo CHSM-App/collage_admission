@@ -95,7 +95,9 @@ function determinePaymentMode(caste, specialStatus, fundingType) {
 
 /**
  * compute({ collegeId, facultyMasterId, yearLevel, divisionLetter,
- *            caste, specialStatus, pool })
+ *            caste, specialStatus, studentType, pool })
+ *
+ * studentType: 'Grand' | 'NonGrand' | 'Outsider' (defaults to 'Grand')
  *
  * Returns:
  * {
@@ -104,13 +106,14 @@ function determinePaymentMode(caste, specialStatus, fundingType) {
  *   paymentMode:        'Paying'|'Other'|'BCC',
  *   paymentModeReason:  string,
  *   fundingType:        'Granted'|'NonGranted'|'Both'|null,
+ *   studentType:        'Grand'|'NonGrand'|'Outsider',
  *   breakdown: [{ fees_code, fees_head, short_name, fees_type, is_refundable, amount }],
  *   totalFee:           number,
  *   reimbursableAmount: number,   // for BCC: sum of reimbursable heads
  *   studentPayable:     number,   // totalFee - reimbursableAmount
  * }
  */
-async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, caste, specialStatus, pool }) {
+async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, caste, specialStatus, studentType, pool }) {
   // pool may be a Promise (from db.js connect) — await it
   const resolvedPool = await Promise.resolve(pool)
 
@@ -130,16 +133,28 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
     if (divRes.recordset.length) fundingType = divRes.recordset[0].funding_type
   }
 
+  // Derive student_type from division's funding_type.
+  // funding_type 'Granted' → 'Grand', 'NonGranted' → 'NonGrand', 'Both' → use caller-supplied studentType.
+  // If no division selected, fall back to caller-supplied studentType (default 'Grand').
+  const VALID_STUDENT_TYPES = ['Grand', 'NonGrand', 'Outsider']
+  const FUNDING_TO_STUDENT_TYPE = { Granted: 'Grand', NonGranted: 'NonGrand' }
+  const resolvedStudentType = fundingType && FUNDING_TO_STUDENT_TYPE[fundingType]
+    ? FUNDING_TO_STUDENT_TYPE[fundingType]
+    : (VALID_STUDENT_TYPES.includes(studentType) ? studentType : 'Grand')
+
   // 2. Determine slab and payment mode
   const { slab, reason: slabReason }               = determineSlab(caste, specialStatus)
   const { mode: paymentMode, reason: paymentModeReason } = determinePaymentMode(caste, specialStatus, fundingType)
 
   // 3. Fetch applicable fee heads + amounts
+  // Only return heads that have a classwise_fees entry for this class+student_type (selected heads).
+  // If no division/student_type context, fall back to all active heads using base amounts.
   const slabCol = `fees_cat${slab}_amount`
   const feesRes = await resolvedPool.request()
     .input('cid', mssql.Int,      collegeId)
     .input('fid', mssql.Int,      facultyMasterId || null)
     .input('yl',  mssql.NVarChar, yearLevel || null)
+    .input('st',  mssql.NVarChar, resolvedStudentType)
     .query(`
       SELECT
         fm.fees_code, fm.fees_head, fm.short_name, fm.fees_type,
@@ -148,11 +163,12 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
         cf.cat1_amount AS cw_cat1, cf.cat2_amount AS cw_cat2,
         cf.cat3_amount AS cw_cat3, cf.cat4_amount AS cw_cat4
       FROM fees_master fm
-      LEFT JOIN classwise_fees cf
+      ${facultyMasterId && yearLevel ? 'INNER' : 'LEFT'} JOIN classwise_fees cf
         ON cf.fees_code = fm.fees_code
         AND cf.college_id = @cid
         AND cf.faculty_master_id = @fid
         AND cf.year_level = @yl
+        AND cf.student_type = @st
       WHERE fm.college_id = @cid AND fm.is_active = 1
       ORDER BY fm.sequence_auto_fees
     `)
@@ -186,6 +202,7 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
     paymentMode,
     paymentModeReason,
     fundingType,
+    studentType: resolvedStudentType,
     breakdown,
     totalFee,
     reimbursableAmount,
