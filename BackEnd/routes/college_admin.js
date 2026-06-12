@@ -882,7 +882,7 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
     const app = appRes.recordset[0];
-    if (!['confirmed', 'fees_paid'].includes(app.status)) {
+    if (!['confirmed', 'fees_paid', 'roll_assigned', 'enrolled'].includes(app.status)) {
       return res.status(400).json({ success: false, message: 'Application must be in confirmed or fees_paid status.' });
     }
 
@@ -951,7 +951,7 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
     const noteText = note ? ` — ${note}` : '';
     if (fullyPaid) {
       await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${newTotalPaid.toLocaleString('en-IN')} (full)${noteText}`);
-      getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
+      if (firstPaid) getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
     } else if (firstPaid) {
       await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${newTotalPaid.toLocaleString('en-IN')} paid, ₹${newRemaining.toLocaleString('en-IN')} remaining${noteText}`);
       getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));

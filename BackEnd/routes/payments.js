@@ -882,7 +882,7 @@ async function handlePayUReturn(req, res) {
       const { totalPaid, totalFee, firstPaid, fullyPaid } = result;
       if (firstPaid || fullyPaid) {
         await logActivity(appId, 'fees_paid', 'student', `₹${totalPaid?.toLocaleString('en-IN')} paid`);
-        getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
+        if (firstPaid) getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
       }
       return res.redirect(frontendUrl(`/payment-result?status=success&app_id=${appId}&payment_type=college_fee&fully_paid=${fullyPaid ? '1' : '0'}`));
     }
@@ -964,7 +964,7 @@ async function handlePayUWebhook(req, res) {
       await logActivity(appId, 'submitted', 'student', 'PayU webhook');
     } else if (result.firstPaid || result.fullyPaid) {
       await logActivity(appId, 'fees_paid', 'student', `PayU webhook: ₹${result.totalPaid?.toLocaleString('en-IN')} paid`);
-      getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
+      if (result.firstPaid) getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
     }
 
     logger.info({ txnid, appId, payType }, '[PayU] webhook: committed successfully');
