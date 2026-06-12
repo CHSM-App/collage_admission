@@ -80,7 +80,7 @@ export default function FeeReceipts({ collegeId }) {
 
   function handlePanelClose() {
     setSelected(null)
-    fetchReceipts()   // refresh totals after possible payment
+    fetchReceipts()
   }
 
   return (
@@ -266,6 +266,7 @@ function CollegeFeeModal({ row, collegeId, onClose }) {
       )}
     </div>
   )
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />

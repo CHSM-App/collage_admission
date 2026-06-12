@@ -324,8 +324,8 @@ GO
 GO
   CREATE TRIGGER trg_fees_master_arc_ins ON fees_master AFTER INSERT AS
   BEGIN SET NOCOUNT ON; BEGIN TRY
-    INSERT INTO [fees_master$Arc] (fees_code,college_id,fees_type,is_other_misc,fees_head,short_name,sequence_auto_fees,credit_to_bank_ledger,is_refundable,fees_cat1_amount,fees_cat2_amount,fees_cat3_amount,fees_cat4_amount,cat4_description,is_active,modified_on,created_by,updated_by,action_type,action_by,machine_mac_address,comments)
-    SELECT i.fees_code,i.college_id,i.fees_type,i.is_other_misc,i.fees_head,i.short_name,i.sequence_auto_fees,i.credit_to_bank_ledger,i.is_refundable,i.fees_cat1_amount,i.fees_cat2_amount,i.fees_cat3_amount,i.fees_cat4_amount,i.cat4_description,i.is_active,i.modified_on,i.created_by,i.updated_by,
+    INSERT INTO [fees_master$Arc] (fees_code,college_id,fees_type,is_other_misc,fees_head,short_name,sequence_auto_fees,credit_to_bank_ledger,is_refundable,fees_cat1_amount,fees_cat2_amount,fees_cat3_amount,fees_cat4_amount,cat4_description,is_active,modified_on,academic_year,created_by,updated_by,action_type,action_by,machine_mac_address,comments)
+    SELECT i.fees_code,i.college_id,i.fees_type,i.is_other_misc,i.fees_head,i.short_name,i.sequence_auto_fees,i.credit_to_bank_ledger,i.is_refundable,i.fees_cat1_amount,i.fees_cat2_amount,i.fees_cat3_amount,i.fees_cat4_amount,i.cat4_description,i.is_active,i.modified_on,i.academic_year,i.created_by,i.updated_by,
     'INSERT',CONVERT(NVARCHAR(150),COALESCE(i.created_by,SESSION_CONTEXT(N'app_user_id'))),CONVERT(NVARCHAR(50),SESSION_CONTEXT(N'app_machine_mac')),CONVERT(NVARCHAR(500),SESSION_CONTEXT(N'app_comments'))
     FROM inserted i;
   END TRY BEGIN CATCH END CATCH END
@@ -334,8 +334,8 @@ GO
 GO
   CREATE TRIGGER trg_fees_master_arc_upd ON fees_master AFTER UPDATE AS
   BEGIN SET NOCOUNT ON; BEGIN TRY
-    INSERT INTO [fees_master$Arc] (fees_code,college_id,fees_type,is_other_misc,fees_head,short_name,sequence_auto_fees,credit_to_bank_ledger,is_refundable,fees_cat1_amount,fees_cat2_amount,fees_cat3_amount,fees_cat4_amount,cat4_description,is_active,modified_on,created_by,updated_by,action_type,action_by,machine_mac_address,comments)
-    SELECT i.fees_code,i.college_id,i.fees_type,i.is_other_misc,i.fees_head,i.short_name,i.sequence_auto_fees,i.credit_to_bank_ledger,i.is_refundable,i.fees_cat1_amount,i.fees_cat2_amount,i.fees_cat3_amount,i.fees_cat4_amount,i.cat4_description,i.is_active,i.modified_on,i.created_by,i.updated_by,
+    INSERT INTO [fees_master$Arc] (fees_code,college_id,fees_type,is_other_misc,fees_head,short_name,sequence_auto_fees,credit_to_bank_ledger,is_refundable,fees_cat1_amount,fees_cat2_amount,fees_cat3_amount,fees_cat4_amount,cat4_description,is_active,modified_on,academic_year,created_by,updated_by,action_type,action_by,machine_mac_address,comments)
+    SELECT i.fees_code,i.college_id,i.fees_type,i.is_other_misc,i.fees_head,i.short_name,i.sequence_auto_fees,i.credit_to_bank_ledger,i.is_refundable,i.fees_cat1_amount,i.fees_cat2_amount,i.fees_cat3_amount,i.fees_cat4_amount,i.cat4_description,i.is_active,i.modified_on,i.academic_year,i.created_by,i.updated_by,
     'UPDATE',CONVERT(NVARCHAR(150),COALESCE(i.updated_by,SESSION_CONTEXT(N'app_user_id'))),CONVERT(NVARCHAR(50),SESSION_CONTEXT(N'app_machine_mac')),CONVERT(NVARCHAR(500),SESSION_CONTEXT(N'app_comments'))
     FROM inserted i;
   END TRY BEGIN CATCH END CATCH END
@@ -344,8 +344,8 @@ GO
 GO
   CREATE TRIGGER trg_fees_master_arc_del ON fees_master AFTER DELETE AS
   BEGIN SET NOCOUNT ON; BEGIN TRY
-    INSERT INTO [fees_master$Arc] (fees_code,college_id,fees_type,is_other_misc,fees_head,short_name,sequence_auto_fees,credit_to_bank_ledger,is_refundable,fees_cat1_amount,fees_cat2_amount,fees_cat3_amount,fees_cat4_amount,cat4_description,is_active,modified_on,created_by,updated_by,action_type,action_by,machine_mac_address,comments)
-    SELECT d.fees_code,d.college_id,d.fees_type,d.is_other_misc,d.fees_head,d.short_name,d.sequence_auto_fees,d.credit_to_bank_ledger,d.is_refundable,d.fees_cat1_amount,d.fees_cat2_amount,d.fees_cat3_amount,d.fees_cat4_amount,d.cat4_description,d.is_active,d.modified_on,d.created_by,d.updated_by,
+    INSERT INTO [fees_master$Arc] (fees_code,college_id,fees_type,is_other_misc,fees_head,short_name,sequence_auto_fees,credit_to_bank_ledger,is_refundable,fees_cat1_amount,fees_cat2_amount,fees_cat3_amount,fees_cat4_amount,cat4_description,is_active,modified_on,academic_year,created_by,updated_by,action_type,action_by,machine_mac_address,comments)
+    SELECT d.fees_code,d.college_id,d.fees_type,d.is_other_misc,d.fees_head,d.short_name,d.sequence_auto_fees,d.credit_to_bank_ledger,d.is_refundable,d.fees_cat1_amount,d.fees_cat2_amount,d.fees_cat3_amount,d.fees_cat4_amount,d.cat4_description,d.is_active,d.modified_on,d.academic_year,d.created_by,d.updated_by,
     'DELETE',CONVERT(NVARCHAR(150),COALESCE(d.updated_by,SESSION_CONTEXT(N'app_user_id'))),CONVERT(NVARCHAR(50),SESSION_CONTEXT(N'app_machine_mac')),CONVERT(NVARCHAR(500),SESSION_CONTEXT(N'app_comments'))
     FROM deleted d;
   END TRY BEGIN CATCH END CATCH END
@@ -358,8 +358,8 @@ GO
 GO
   CREATE TRIGGER trg_classwise_fees_arc_ins ON classwise_fees AFTER INSERT AS
   BEGIN SET NOCOUNT ON; BEGIN TRY
-    INSERT INTO [classwise_fees$Arc] (id,college_id,faculty_master_id,year_level,fees_code,cat1_amount,cat2_amount,cat3_amount,cat4_amount,created_by,updated_by,action_type,action_by,machine_mac_address,comments)
-    SELECT i.id,i.college_id,i.faculty_master_id,i.year_level,i.fees_code,i.cat1_amount,i.cat2_amount,i.cat3_amount,i.cat4_amount,i.created_by,i.updated_by,
+    INSERT INTO [classwise_fees$Arc] (id,college_id,faculty_master_id,year_level,fees_code,academic_year,cat1_amount,cat2_amount,cat3_amount,cat4_amount,created_by,updated_by,action_type,action_by,machine_mac_address,comments)
+    SELECT i.id,i.college_id,i.faculty_master_id,i.year_level,i.fees_code,i.academic_year,i.cat1_amount,i.cat2_amount,i.cat3_amount,i.cat4_amount,i.created_by,i.updated_by,
     'INSERT',CONVERT(NVARCHAR(150),COALESCE(i.created_by,SESSION_CONTEXT(N'app_user_id'))),CONVERT(NVARCHAR(50),SESSION_CONTEXT(N'app_machine_mac')),CONVERT(NVARCHAR(500),SESSION_CONTEXT(N'app_comments'))
     FROM inserted i;
   END TRY BEGIN CATCH END CATCH END
@@ -368,8 +368,8 @@ GO
 GO
   CREATE TRIGGER trg_classwise_fees_arc_upd ON classwise_fees AFTER UPDATE AS
   BEGIN SET NOCOUNT ON; BEGIN TRY
-    INSERT INTO [classwise_fees$Arc] (id,college_id,faculty_master_id,year_level,fees_code,cat1_amount,cat2_amount,cat3_amount,cat4_amount,created_by,updated_by,action_type,action_by,machine_mac_address,comments)
-    SELECT i.id,i.college_id,i.faculty_master_id,i.year_level,i.fees_code,i.cat1_amount,i.cat2_amount,i.cat3_amount,i.cat4_amount,i.created_by,i.updated_by,
+    INSERT INTO [classwise_fees$Arc] (id,college_id,faculty_master_id,year_level,fees_code,academic_year,cat1_amount,cat2_amount,cat3_amount,cat4_amount,created_by,updated_by,action_type,action_by,machine_mac_address,comments)
+    SELECT i.id,i.college_id,i.faculty_master_id,i.year_level,i.fees_code,i.academic_year,i.cat1_amount,i.cat2_amount,i.cat3_amount,i.cat4_amount,i.created_by,i.updated_by,
     'UPDATE',CONVERT(NVARCHAR(150),COALESCE(i.updated_by,SESSION_CONTEXT(N'app_user_id'))),CONVERT(NVARCHAR(50),SESSION_CONTEXT(N'app_machine_mac')),CONVERT(NVARCHAR(500),SESSION_CONTEXT(N'app_comments'))
     FROM inserted i;
   END TRY BEGIN CATCH END CATCH END
@@ -378,8 +378,8 @@ GO
 GO
   CREATE TRIGGER trg_classwise_fees_arc_del ON classwise_fees AFTER DELETE AS
   BEGIN SET NOCOUNT ON; BEGIN TRY
-    INSERT INTO [classwise_fees$Arc] (id,college_id,faculty_master_id,year_level,fees_code,cat1_amount,cat2_amount,cat3_amount,cat4_amount,created_by,updated_by,action_type,action_by,machine_mac_address,comments)
-    SELECT d.id,d.college_id,d.faculty_master_id,d.year_level,d.fees_code,d.cat1_amount,d.cat2_amount,d.cat3_amount,d.cat4_amount,d.created_by,d.updated_by,
+    INSERT INTO [classwise_fees$Arc] (id,college_id,faculty_master_id,year_level,fees_code,academic_year,cat1_amount,cat2_amount,cat3_amount,cat4_amount,created_by,updated_by,action_type,action_by,machine_mac_address,comments)
+    SELECT d.id,d.college_id,d.faculty_master_id,d.year_level,d.fees_code,d.academic_year,d.cat1_amount,d.cat2_amount,d.cat3_amount,d.cat4_amount,d.created_by,d.updated_by,
     'DELETE',CONVERT(NVARCHAR(150),COALESCE(d.updated_by,SESSION_CONTEXT(N'app_user_id'))),CONVERT(NVARCHAR(50),SESSION_CONTEXT(N'app_machine_mac')),CONVERT(NVARCHAR(500),SESSION_CONTEXT(N'app_comments'))
     FROM deleted d;
   END TRY BEGIN CATCH END CATCH END

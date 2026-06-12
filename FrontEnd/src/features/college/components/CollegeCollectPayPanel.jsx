@@ -131,7 +131,7 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
             </div>
 
             {/* ── Fee head breakdown with payment status ─ */}
-            {fs.breakdown?.length > 0 && (
+            {fs.breakdown?.filter(h => (h.fees_type || '').toLowerCase() !== 'platform').length > 0 && (
               <div className="rounded-lg border border-slate-200 overflow-hidden">
                 <table className="w-full text-xs">
                   <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
@@ -143,7 +143,7 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 bg-white">
-                    {fs.breakdown.map(h => (
+                    {fs.breakdown.filter(h => (h.fees_type || '').toLowerCase() !== 'platform').map(h => (
                       <tr key={h.fees_code} className={h.status === 'paid' ? 'bg-emerald-50/40' : ''}>
                         <td className="px-3 py-1.5 text-slate-700">
                           {h.fees_head}

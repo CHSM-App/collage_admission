@@ -205,29 +205,31 @@ export const deleteBankLedger = (collegeId, ledgerCode) =>
 
 // ─── Fees master ──────────────────────────────────────────────
 
-export const getFeesList = (collegeId, onBg) =>
-  cachedGet(
-    `fees:${collegeId}`,
-    () => api.get(`masters/${collegeId}/fees`),
+export const getFeesList = (collegeId, academicYear, onBg) => {
+  const ayParam = academicYear ? `?academic_year=${encodeURIComponent(academicYear)}` : ''
+  return cachedGet(
+    `fees:${collegeId}:${academicYear || ''}`,
+    () => api.get(`masters/${collegeId}/fees${ayParam}`),
     onBg,
   )
+}
 
 export const createFees = (collegeId, data) =>
   api.post(`masters/${collegeId}/fees`, data)
-    .then(r => { invalidate(`fees:${collegeId}`); return r })
+    .then(r => { invalidate(`fees:${collegeId}:`); return r })
 
 export const updateFees = (collegeId, feesCode, data) =>
   api.put(`masters/${collegeId}/fees/${feesCode}`, data)
-    .then(r => { invalidate(`fees:${collegeId}`); return r })
+    .then(r => { invalidate(`fees:${collegeId}:`); return r })
 
 export const deleteFees = (collegeId, feesCode) =>
   api.delete(`masters/${collegeId}/fees/${feesCode}`)
-    .then(r => { invalidate(`fees:${collegeId}`); return r })
+    .then(r => { invalidate(`fees:${collegeId}:`); return r })
 
-export const getClasswiseFees = (collegeId, facultyId, yearLevel, studentType = 'Grand', onBg) =>
+export const getClasswiseFees = (collegeId, facultyId, yearLevel, studentType = 'Grand', academicYear, onBg) =>
   cachedGet(
-    `classwiseFees:${collegeId}:${facultyId}:${yearLevel}:${studentType}`,
-    () => api.get(`masters/${collegeId}/fees/classwise?faculty_id=${facultyId}&year_level=${yearLevel}&student_type=${studentType}`),
+    `classwiseFees:${collegeId}:${facultyId}:${yearLevel}:${studentType}:${academicYear || ''}`,
+    () => api.get(`masters/${collegeId}/fees/classwise?faculty_id=${facultyId}&year_level=${yearLevel}&student_type=${studentType}${academicYear ? `&academic_year=${encodeURIComponent(academicYear)}` : ''}`),
     onBg,
   )
 
@@ -238,6 +240,11 @@ export const saveClasswiseFees = (collegeId, data) =>
 export const deleteClasswiseFee = (collegeId, data) =>
   api.delete(`masters/${collegeId}/fees/classwise`, { data })
     .then(r => { invalidate(`classwiseFees:${collegeId}:`); return r })
+
+// ─── Fees configured check (not cached — always live) ─────────
+
+export const checkFeesConfigured = (collegeId, facultyMasterId, yearLevel, academicYear) =>
+  api.get(`masters/${collegeId}/fees/configured?faculty_master_id=${facultyMasterId}&year_level=${encodeURIComponent(yearLevel)}&academic_year=${encodeURIComponent(academicYear)}`)
 
 // ─── Fees compute (not cached — always live) ──────────────────
 

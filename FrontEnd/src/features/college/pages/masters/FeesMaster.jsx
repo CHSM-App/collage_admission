@@ -4,42 +4,69 @@ import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 import { useToast } from '../../../../context/ToastContext.jsx'
 import { getErrorMessage } from '../../../../shared/hooks/useNetworkError.js'
+import {
+  DndContext, closestCenter, PointerSensor, useSensor, useSensors,
+} from '@dnd-kit/core'
+import {
+  SortableContext, verticalListSortingStrategy,
+  useSortable, arrayMove,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 const FEES_TYPES = ['Student','Misc','ExamFees']
 const ALL_YEAR_LEVELS = ['FY','SY','TY','4Y','5Y']
-// Year tabs are derived from the selected program's duration (matches
-// DivisionMaster.yearLevelsFor and FacultyMaster's exam_seat_code_year* layout).
+
 function yearLevelsFor(durationYears) {
   const n = Math.max(1, Math.min(5, parseInt(durationYears) || 3))
   return ALL_YEAR_LEVELS.slice(0, n)
 }
 
+// Generate 20 academic year options: 5 past + current + 14 future
+function academicYearOptions() {
+  const now = new Date()
+  const base = now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1
+  return Array.from({ length: 20 }, (_, i) => {
+    const y = base - 5 + i
+    return `${y}-${String(y + 1).slice(-2)}`
+  })
+}
+const AY_OPTIONS = academicYearOptions()
+const CURRENT_AY = AY_OPTIONS[5]
+
 const EMPTY_FEE = {
   fees_type: 'Student', is_other_misc: false,
-  fees_head: '', short_name: '', sequence_auto_fees: 0,
+  fees_head: '', short_name: '', sequence_auto_fees: 1,
   credit_to_bank_ledger: '', is_refundable: false,
   fees_cat1_amount: 0, fees_cat2_amount: 0,
   fees_cat3_amount: 0, fees_cat4_amount: 0,
   cat4_description: '', is_active: true,
+  academic_year: CURRENT_AY,
 }
 
 export default function FeesMaster({ collegeId }) {
   const { canWrite } = usePermissions()
   const rw = canWrite('masters')
   const toast = useToast()
-  const [rows, setRows]           = useState(() => masterCacheRead(`fees:${collegeId}`)?.data?.data ?? [])
+  const [allRows, setAllRows]     = useState(() => masterCacheRead(`fees:${collegeId}`)?.data?.data ?? [])
   const [banks, setBanks]         = useState(() => (masterCacheRead(`bank:${collegeId}`)?.data?.data ?? []).filter(b => b.is_active))
   const [loading, setLoading]     = useState(() => !masterCacheRead(`fees:${collegeId}`) || !masterCacheRead(`bank:${collegeId}`))
   const [modal, setModal]         = useState(null)
   const [form, setForm]           = useState(EMPTY_FEE)
   const [saving, setSaving]       = useState(false)
   const [error, setError]         = useState('')
+  // Academic year filter for heads table
+  const [selAY, setSelAY]         = useState(CURRENT_AY)
+
   const [sortCol, setSortCol] = useState('sequence_auto_fees')
   const [sortDir, setSortDir] = useState('asc')
   function toggleSortFM(col) {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortCol(col); setSortDir('asc') }
   }
+
+  // Filter rows by selected academic year
+  const rows = useMemo(() => allRows.filter(r => r.academic_year === selAY), [allRows, selAY])
+
   const sorted = useMemo(() => [...rows].sort((a, b) => {
     let av = a[sortCol], bv = b[sortCol]
     if (av == null) av = ''; if (bv == null) bv = ''
@@ -51,12 +78,14 @@ export default function FeesMaster({ collegeId }) {
         : String(av).localeCompare(String(bv))
     return sortDir === 'asc' ? cmp : -cmp
   }), [rows, sortCol, sortDir])
+
   // Classwise fees modal
   const [cwModal, setCwModal]         = useState(false)
   const [cwFaculty, setCwFaculty]     = useState([])
   const [cwSelFac, setCwSelFac]       = useState('')
   const [cwSelYear, setCwSelYear]     = useState('FY')
   const [cwSelType, setCwSelType]     = useState('Grand')
+  const [cwSelAY, setCwSelAY]         = useState(CURRENT_AY)
   const [cwRows, setCwRows]           = useState([])
   const [cwSaving, setCwSaving]       = useState(false)
   const [cwError, setCwError]         = useState('')
@@ -66,25 +95,26 @@ export default function FeesMaster({ collegeId }) {
   const CW_STUDENT_TYPE_LABEL = { Grand: 'Grant', NonGrand: 'Non-Grant', Outsider: 'Outsider' }
 
   function load(silent = false) {
-    const wasMiss = !masterCacheHas(`fees:${collegeId}`) || !masterCacheHas(`bank:${collegeId}`)
+    const wasMiss = !masterCacheHas(`fees:${collegeId}:`) || !masterCacheHas(`bank:${collegeId}`)
     if (!silent && wasMiss) setLoading(true)
     Promise.all([
-      getFeesList(collegeId,    r => setRows(r.data.data || [])),
-      getBankLedgers(collegeId, r => setBanks((r.data.data || []).filter(b => b.is_active))),
+      getFeesList(collegeId, null, r => setAllRows(r.data.data || [])),
+      getBankLedgers(collegeId,    r => setBanks((r.data.data || []).filter(b => b.is_active))),
     ]).then(([fRes, bRes]) => {
-      setRows(fRes.data.data || [])
+      setAllRows(fRes.data.data || [])
       setBanks((bRes.data.data || []).filter(b => b.is_active))
     }).catch(() => setError('Failed to load.')).finally(() => { if (!silent && wasMiss) setLoading(false) })
   }
   useEffect(() => { load() }, [collegeId])
 
-  function openNew()  { setForm({ ...EMPTY_FEE }); setModal('new'); setError('') }
+  function openNew()  { setForm({ ...EMPTY_FEE, academic_year: selAY }); setModal('new'); setError('') }
   function openEdit(r){ setForm({ ...r, credit_to_bank_ledger: r.credit_to_bank_ledger || '' }); setModal(r); setError('') }
   function set(k, v) { setForm(f => ({ ...f, [k]: v })) }
 
   async function save() {
     if (!form.fees_head.trim()) return setError('Fees Head is required.')
     if (!form.short_name.trim()) return setError('Short Name is required.')
+    if (!form.academic_year) return setError('Academic Year is required.')
     setSaving(true); setError('')
     try {
       if (modal === 'new') await createFees(collegeId, form)
@@ -100,9 +130,61 @@ export default function FeesMaster({ collegeId }) {
     catch { toast.error('Failed.') }
   }
 
+  const [dragRows, setDragRows] = useState([])
+  const [dragging, setDragging] = useState(false)
+  // Keep dragRows in sync when sorted changes (AY switch, reload)
+  useEffect(() => { setDragRows(sorted) }, [sorted])
+
+  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+
+  async function handleDragEnd(event) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    const oldIdx = dragRows.findIndex(r => r.fees_code === active.id)
+    const newIdx = dragRows.findIndex(r => r.fees_code === over.id)
+    const reordered = arrayMove(dragRows, oldIdx, newIdx)
+    // Assign new sequential sequence numbers
+    const updated = reordered.map((r, i) => ({ ...r, sequence_auto_fees: i + 1 }))
+    setDragRows(updated) // optimistic
+    setDragging(true)
+    // Build old seq map by fees_code to correctly detect changes
+    const oldSeqMap = Object.fromEntries(dragRows.map(r => [r.fees_code, r.sequence_auto_fees]))
+    try {
+      const changed = updated.filter(r => r.sequence_auto_fees !== oldSeqMap[r.fees_code])
+      await Promise.all(changed.map(r => updateFees(collegeId, r.fees_code, { ...r })))
+      load(true)
+    } catch { toast.error('Reorder failed.'); setDragRows(sorted) }
+    finally { setDragging(false) }
+  }
+
+  const [pulling, setPulling] = useState(false)
+  async function pullFromPrevYear() {
+    const idx = AY_OPTIONS.indexOf(selAY)
+    if (idx <= 0) return
+    const prevAY = AY_OPTIONS[idx - 1]
+    const prevRows = allRows.filter(r => r.academic_year === prevAY)
+    if (prevRows.length === 0) { toast.error(`No fee heads found for ${prevAY}.`); return }
+    const existing = new Set(rows.map(r => r.fees_head.trim().toLowerCase()))
+    const toCopy = prevRows.filter(r => !existing.has(r.fees_head.trim().toLowerCase()))
+    if (toCopy.length === 0) { toast.error(`All heads from ${prevAY} already exist in ${selAY}.`); return }
+    if (!confirm(`Copy ${toCopy.length} fee head(s) from ${prevAY} to ${selAY}?`)) return
+    setPulling(true)
+    try {
+      const maxSeq = rows.reduce((m, r) => Math.max(m, r.sequence_auto_fees || 0), 0)
+      for (let i = 0; i < toCopy.length; i++) {
+        const { fees_code, bank_name, ...rest } = toCopy[i]
+        await createFees(collegeId, { ...rest, academic_year: selAY, sequence_auto_fees: maxSeq + i + 1 })
+      }
+      load(true)
+      toast.success(`Copied ${toCopy.length} head(s) from ${prevAY} to ${selAY}.`)
+    } catch (e) { toast.error(getErrorMessage(e, 'Pull failed.')) }
+    finally { setPulling(false) }
+  }
+
   // ── Classwise Fees ──────────────────────────────────────────
   async function openCw() {
     setCwModal(true); setCwError(''); setCwSuccess('')
+    setCwSelAY(selAY) // sync to current head filter year
     const r = await getFaculty(collegeId, bg => {
       const active = (bg.data.data || []).filter(f => f.is_active)
       setCwFaculty(active)
@@ -115,18 +197,19 @@ export default function FeesMaster({ collegeId }) {
   const cwSelFacRow = cwFaculty.find(f => f.code_no == cwSelFac)
   const cwYearLevels = yearLevelsFor(cwSelFacRow?.duration_years)
 
-  // If the user switches to a shorter program, the currently selected year
-  // (e.g. 4Y) may no longer be valid — snap back to FY silently.
   useEffect(() => {
     if (cwSelFacRow && !cwYearLevels.includes(cwSelYear)) setCwSelYear('FY')
   }, [cwSelFacRow, cwYearLevels, cwSelYear])
 
+  // Heads for classwise fees: only those matching cwSelAY
+  const cwHeadRows = useMemo(() => allRows.filter(r => r.is_active && r.academic_year === cwSelAY), [allRows, cwSelAY])
+
   useEffect(() => {
     if (!cwModal || !cwSelFac) return
-    getClasswiseFees(collegeId, cwSelFac, cwSelYear, cwSelType)
+    getClasswiseFees(collegeId, cwSelFac, cwSelYear, cwSelType, cwSelAY)
       .then(cwRes => {
         const existing = cwRes.data.data || []
-        const merged = rows.filter(r => r.is_active).map(r => {
+        const merged = cwHeadRows.map(r => {
           const ov = existing.find(e => e.fees_code === r.fees_code)
           return {
             fees_code:   r.fees_code,
@@ -146,7 +229,7 @@ export default function FeesMaster({ collegeId }) {
         })
         setCwRows(merged)
       }).catch(() => setCwError('Failed to load classwise fees.'))
-  }, [cwModal, cwSelFac, cwSelYear, cwSelType, rows])
+  }, [cwModal, cwSelFac, cwSelYear, cwSelType, cwSelAY, cwHeadRows])
 
   function updateCw(feesCode, field, val) {
     setCwRows(rs => rs.map(r => r.fees_code === feesCode ? { ...r, [field]: val } : r))
@@ -155,15 +238,15 @@ export default function FeesMaster({ collegeId }) {
   async function saveCw() {
     setCwSaving(true); setCwError(''); setCwSuccess('')
     try {
-      const selected = cwRows.filter(r => r.selected)
+      const selected   = cwRows.filter(r => r.selected)
       const deselected = cwRows.filter(r => !r.selected)
 
-      // Upsert selected rows
       if (selected.length) {
         await saveClasswiseFees(collegeId, {
           faculty_master_id: cwSelFac,
-          year_level: cwSelYear,
-          student_type: cwSelType,
+          year_level:        cwSelYear,
+          student_type:      cwSelType,
+          academic_year:     cwSelAY,
           rows: selected.map(r => ({
             fees_code:   r.fees_code,
             cat1_amount: r.cat1_amount !== '' ? parseFloat(r.cat1_amount) : null,
@@ -174,13 +257,13 @@ export default function FeesMaster({ collegeId }) {
         })
       }
 
-      // Delete deselected rows that were previously saved
       for (const r of deselected) {
         await deleteClasswiseFee(collegeId, {
           faculty_master_id: cwSelFac,
-          year_level: cwSelYear,
-          student_type: cwSelType,
-          fees_code: r.fees_code,
+          year_level:        cwSelYear,
+          student_type:      cwSelType,
+          academic_year:     cwSelAY,
+          fees_code:         r.fees_code,
         })
       }
 
@@ -193,17 +276,30 @@ export default function FeesMaster({ collegeId }) {
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3">
         <h2 className="text-lg font-semibold text-slate-800">Fees Master</h2>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Academic Year filter pill */}
+          <div className="flex items-center gap-1.5 border border-slate-200 rounded-lg px-2 py-1 bg-white">
+            <span className="text-xs text-slate-500 font-medium">Year:</span>
+            <select value={selAY} onChange={e => setSelAY(e.target.value)}
+              className="text-sm font-semibold text-slate-800 bg-transparent outline-none cursor-pointer">
+              {AY_OPTIONS.map(ay => <option key={ay} value={ay}>{ay}</option>)}
+            </select>
+          </div>
           <button onClick={openCw} className="px-3 py-1.5 border border-slate-300 text-slate-700 text-sm rounded-lg hover:bg-slate-50">
             Classwise Fees
           </button>
+          {rw && AY_OPTIONS.indexOf(selAY) > 0 && (
+            <button onClick={pullFromPrevYear} disabled={pulling}
+              className="px-3 py-1.5 border border-slate-300 text-slate-700 text-sm rounded-lg hover:bg-slate-50 disabled:opacity-50">
+              {pulling ? 'Pulling…' : `↓ Pull from ${AY_OPTIONS[AY_OPTIONS.indexOf(selAY) - 1]}`}
+            </button>
+          )}
           {rw && <button onClick={openNew} className="px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700">+ New Fee Head</button>}
         </div>
       </div>
 
       {loading ? <SkeletonTable rows={4} cols={4} /> : (
         <>
-          {/* Desktop table — matches Program Master grid styling. */}
           <div className="hidden sm:block overflow-x-auto rounded-lg border-2 border-slate-400">
             <table className="w-full text-sm border-collapse">
               <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
@@ -218,49 +314,30 @@ export default function FeesMaster({ collegeId }) {
                   <FMTh col="fees_cat4_amount"    label="Cat-4"   align="right"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
                   <th className="px-3 py-2.5 text-center w-20">Refund.</th>
                   <FMTh col="is_active"           label="Status"  align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-16" />
+                  {rw && <th className="px-3 py-2.5 w-8" />}
                   <th className="px-3 py-2.5 w-20" />
                 </tr>
               </thead>
-              <tbody className="divide-y-2 divide-slate-300">
-                {sorted.length === 0 && <tr><td colSpan={11} className="px-4 py-8 text-center text-slate-500">No fee heads configured.</td></tr>}
-                {sorted.map(r => (
-                  <tr key={r.fees_code} className="hover:bg-blue-50 transition">
-                    <td className="px-3 py-2.5 text-slate-500 text-center">{r.sequence_auto_fees}</td>
-                    <td className="px-3 py-2.5">
-                      <p className="font-medium text-slate-900">{r.fees_head}</p>
-                      {r.bank_name && <p className="text-xs text-slate-400">{r.bank_name}</p>}
-                    </td>
-                    <td className="px-3 py-2.5 text-slate-700 text-xs">{r.short_name}</td>
-                    <td className="px-3 py-2.5 text-center">
-                      <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{r.fees_type}</span>
-                      {r.is_other_misc ? <span className="ml-1 text-xs text-amber-500">Misc</span> : null}
-                    </td>
-                    {['fees_cat1_amount','fees_cat2_amount','fees_cat3_amount','fees_cat4_amount'].map(k => (
-                      <td key={k} className="px-3 py-2.5 text-right font-mono text-slate-700">
-                        ₹{parseFloat(r[k] || 0).toLocaleString('en-IN')}
-                      </td>
+              <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                <SortableContext items={dragRows.map(r => r.fees_code)} strategy={verticalListSortingStrategy}>
+                  <tbody className="divide-y-2 divide-slate-300">
+                    {dragRows.length === 0 && (
+                      <tr><td colSpan={rw ? 12 : 11} className="px-4 py-8 text-center text-slate-500">
+                        No fee heads configured for {selAY}.
+                      </td></tr>
+                    )}
+                    {dragRows.map(r => (
+                      <SortableFMRow key={r.fees_code} row={r} rw={rw} onEdit={openEdit} onDelete={softDelete} dragging={dragging} />
                     ))}
-                    <td className="px-3 py-2.5 text-center">
-                      {r.is_refundable ? <span className="text-green-600 text-xs font-medium">Yes</span> : <span className="text-slate-300 text-xs">No</span>}
-                    </td>
-                    <td className="px-3 py-2.5 text-center">
-                      <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                        {r.is_active ? 'Active' : 'Off'}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2.5 text-right space-x-3 whitespace-nowrap">
-                      {rw && <button onClick={() => openEdit(r)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>}
-                      {rw && r.is_active && <button onClick={() => softDelete(r)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Off</button>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
+                  </tbody>
+                </SortableContext>
+              </DndContext>
             </table>
           </div>
 
           {/* Mobile card list */}
           <div className="sm:hidden space-y-2">
-            {rows.length === 0 && <p className="text-center text-slate-500 py-8 text-sm">No fee heads configured.</p>}
+            {rows.length === 0 && <p className="text-center text-slate-500 py-8 text-sm">No fee heads configured for {selAY}.</p>}
             {rows.map(r => (
               <div key={r.fees_code} className="border-2 border-slate-400 rounded-lg p-4 bg-white">
                 <div className="flex items-start justify-between gap-2">
@@ -297,7 +374,6 @@ export default function FeesMaster({ collegeId }) {
         <span>Cat-1: Open/General (Full)</span>
         <span>Cat-2: EBC/PTC/STC/Army</span>
         <span>Cat-3: SC/ST/OBC/BCC</span>
-        {/* TODO: confirm with stakeholder — official definition of Cat-4 */}
         <span>Cat-4: FF/PH/Widows/Govt.Wards (confirm)</span>
       </div>
 
@@ -311,6 +387,13 @@ export default function FeesMaster({ collegeId }) {
             </div>
             <div className="overflow-y-auto px-6 py-5 space-y-4">
               {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
+
+              {/* Academic Year */}
+              <F label="Academic Year *">
+                <select value={form.academic_year} onChange={e => set('academic_year', e.target.value)} className={inp}>
+                  {AY_OPTIONS.map(ay => <option key={ay} value={ay}>{ay}</option>)}
+                </select>
+              </F>
 
               {/* Fees Type radio */}
               <div>
@@ -398,6 +481,14 @@ export default function FeesMaster({ collegeId }) {
               <button onClick={() => setCwModal(false)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
             </div>
             <div className="px-6 py-4 shrink-0 flex flex-col sm:flex-row flex-wrap gap-3 border-b border-slate-100">
+              {/* Academic Year selector */}
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-semibold text-slate-500">Academic Year</label>
+                <select value={cwSelAY} onChange={e => { setCwSelAY(e.target.value); setCwSuccess('') }}
+                  className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300">
+                  {AY_OPTIONS.map(ay => <option key={ay} value={ay}>{ay}</option>)}
+                </select>
+              </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-semibold text-slate-500">Degree Course</label>
                 <select value={cwSelFac} onChange={e => setCwSelFac(e.target.value)}
@@ -431,76 +522,80 @@ export default function FeesMaster({ collegeId }) {
             <div className="overflow-auto flex-1 px-6 py-4">
               {cwError   && <p className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{cwError}</p>}
               {cwSuccess && <p className="mb-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{cwSuccess}</p>}
-              <p className="text-xs text-slate-400 mb-3">Check a fee head to include it for this class. Leave amounts blank to use the base Fees Master amount.</p>
-              <div className="min-w-[640px]">
-                <table className="w-full text-xs">
-                  <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                    <tr>
-                      <th className="px-3 py-2 text-center w-10">
-                        <input
-                          type="checkbox"
-                          title="Select all"
-                          checked={cwRows.length > 0 && cwRows.every(r => r.selected)}
-                          onChange={e => setCwRows(rs => rs.map(r => ({ ...r, selected: e.target.checked })))}
-                          className="accent-slate-700"
-                        />
-                      </th>
-                      <th className="px-3 py-2 text-left">Fee Head</th>
-                      <th className="px-3 py-2 text-center">Cat-1 Base</th>
-                      <th className="px-3 py-2 text-center">Cat-1 Override</th>
-                      <th className="px-3 py-2 text-center">Cat-2 Base</th>
-                      <th className="px-3 py-2 text-center">Cat-2 Override</th>
-                      <th className="px-3 py-2 text-center">Cat-3 Base</th>
-                      <th className="px-3 py-2 text-center">Cat-3 Override</th>
-                      <th className="px-3 py-2 text-center">Cat-4 Base</th>
-                      <th className="px-3 py-2 text-center">Cat-4 Override</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {cwRows.map(r => (
-                      <tr key={r.fees_code} className={`transition ${r.selected ? 'hover:bg-slate-50' : 'opacity-40'}`}>
-                        <td className="px-3 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            checked={!!r.selected}
-                            onChange={e => updateCw(r.fees_code, 'selected', e.target.checked)}
-                            className="accent-slate-700"
-                          />
-                        </td>
-                        <td className="px-3 py-2">
-                          <p className="font-medium text-slate-800">{r.fees_head}</p>
-                          <p className="text-slate-400">{r.short_name}</p>
-                        </td>
-                        {[1,2,3,4].map(n => (
-                          <>
-                            <td key={`b${n}`} className="px-3 py-2 text-center text-slate-400 font-mono">
-                              ₹{parseFloat(r[`base_cat${n}`] || 0).toLocaleString('en-IN')}
-                            </td>
-                            <td key={`o${n}`} className="px-3 py-2 text-center">
+              {cwHeadRows.length === 0
+                ? <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+                    No fee heads configured for <strong>{cwSelAY}</strong>. Add heads in the Fee Heads table first.
+                  </div>
+                : <>
+                    <p className="text-xs text-slate-400 mb-3">Check a fee head to include it for this class. Leave amounts blank to use the base Fees Master amount.</p>
+                    <div className="min-w-[640px]">
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                          <tr>
+                            <th className="px-3 py-2 text-center w-10">
                               <input
-                                type="number" step="0.01"
-                                value={r[`cat${n}_amount`]}
-                                onChange={e => updateCw(r.fees_code, `cat${n}_amount`, e.target.value)}
-                                placeholder="—"
-                                disabled={!r.selected}
-                                className="w-20 border border-slate-200 rounded px-2 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-slate-300 disabled:bg-slate-50 disabled:cursor-not-allowed"
+                                type="checkbox"
+                                title="Select all"
+                                checked={cwRows.length > 0 && cwRows.every(r => r.selected)}
+                                onChange={e => setCwRows(rs => rs.map(r => ({ ...r, selected: e.target.checked })))}
+                                className="accent-slate-700"
                               />
-                            </td>
-                          </>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                            </th>
+                            <th className="px-3 py-2 text-left">Fee Head</th>
+                            <th className="px-3 py-2 text-center">Cat-1 Base</th>
+                            <th className="px-3 py-2 text-center">Cat-1 Override</th>
+                            <th className="px-3 py-2 text-center">Cat-2 Base</th>
+                            <th className="px-3 py-2 text-center">Cat-2 Override</th>
+                            <th className="px-3 py-2 text-center">Cat-3 Base</th>
+                            <th className="px-3 py-2 text-center">Cat-3 Override</th>
+                            <th className="px-3 py-2 text-center">Cat-4 Base</th>
+                            <th className="px-3 py-2 text-center">Cat-4 Override</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {cwRows.map(r => (
+                            <tr key={r.fees_code} className={`transition ${r.selected ? 'hover:bg-slate-50' : 'opacity-40'}`}>
+                              <td className="px-3 py-2 text-center">
+                                <input type="checkbox" checked={!!r.selected}
+                                  onChange={e => updateCw(r.fees_code, 'selected', e.target.checked)}
+                                  className="accent-slate-700" />
+                              </td>
+                              <td className="px-3 py-2">
+                                <p className="font-medium text-slate-800">{r.fees_head}</p>
+                                <p className="text-slate-400">{r.short_name}</p>
+                              </td>
+                              {[1,2,3,4].map(n => (
+                                <>
+                                  <td key={`b${n}`} className="px-3 py-2 text-center text-slate-400 font-mono">
+                                    ₹{parseFloat(r[`base_cat${n}`] || 0).toLocaleString('en-IN')}
+                                  </td>
+                                  <td key={`o${n}`} className="px-3 py-2 text-center">
+                                    <input
+                                      type="number" step="0.01"
+                                      value={r[`cat${n}_amount`]}
+                                      onChange={e => updateCw(r.fees_code, `cat${n}_amount`, e.target.value)}
+                                      placeholder="—"
+                                      disabled={!r.selected}
+                                      className="w-20 border border-slate-200 rounded px-2 py-1 text-xs text-center focus:outline-none focus:ring-1 focus:ring-slate-300 disabled:bg-slate-50 disabled:cursor-not-allowed"
+                                    />
+                                  </td>
+                                </>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+              }
             </div>
             <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 shrink-0">
               <span className="text-xs text-slate-400">
-                {cwRows.filter(r => r.selected).length} of {cwRows.length} fee heads selected
+                {cwRows.filter(r => r.selected).length} of {cwRows.length} fee heads selected for {cwSelAY}
               </span>
               <div className="flex gap-3">
                 <button onClick={() => setCwModal(false)} className="px-4 py-2 text-sm text-slate-600">Close</button>
-                <button onClick={saveCw} disabled={cwSaving} className="px-5 py-2 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700 disabled:opacity-50">
+                <button onClick={saveCw} disabled={cwSaving || cwHeadRows.length === 0} className="px-5 py-2 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700 disabled:opacity-50">
                   {cwSaving ? 'Saving…' : 'Save'}
                 </button>
               </div>
@@ -509,6 +604,54 @@ export default function FeesMaster({ collegeId }) {
         </div>
       )}
     </div>
+  )
+}
+
+function SortableFMRow({ row: r, rw, onEdit, onDelete, dragging }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: r.fees_code })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    background: isDragging ? '#f1f5f9' : undefined,
+  }
+  return (
+    <tr ref={setNodeRef} style={style} className="hover:bg-blue-50 transition">
+      {rw && (
+        <td className="px-2 py-2.5 text-center w-8">
+          <span {...attributes} {...listeners}
+            className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 select-none text-lg leading-none"
+            title="Drag to reorder">⠿</span>
+        </td>
+      )}
+      <td className="px-3 py-2.5 text-slate-500 text-center">{r.sequence_auto_fees}</td>
+      <td className="px-3 py-2.5">
+        <p className="font-medium text-slate-900">{r.fees_head}</p>
+        {r.bank_name && <p className="text-xs text-slate-400">{r.bank_name}</p>}
+      </td>
+      <td className="px-3 py-2.5 text-slate-700 text-xs">{r.short_name}</td>
+      <td className="px-3 py-2.5 text-center">
+        <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{r.fees_type}</span>
+        {r.is_other_misc ? <span className="ml-1 text-xs text-amber-500">Misc</span> : null}
+      </td>
+      {['fees_cat1_amount','fees_cat2_amount','fees_cat3_amount','fees_cat4_amount'].map(k => (
+        <td key={k} className="px-3 py-2.5 text-right font-mono text-slate-700">
+          ₹{parseFloat(r[k] || 0).toLocaleString('en-IN')}
+        </td>
+      ))}
+      <td className="px-3 py-2.5 text-center">
+        {r.is_refundable ? <span className="text-green-600 text-xs font-medium">Yes</span> : <span className="text-slate-300 text-xs">No</span>}
+      </td>
+      <td className="px-3 py-2.5 text-center">
+        <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+          {r.is_active ? 'Active' : 'Off'}
+        </span>
+      </td>
+      <td className="px-3 py-2.5 text-right space-x-3 whitespace-nowrap">
+        {rw && <button onClick={() => onEdit(r)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>}
+        {rw && r.is_active && <button onClick={() => onDelete(r)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Off</button>}
+      </td>
+    </tr>
   )
 }
 

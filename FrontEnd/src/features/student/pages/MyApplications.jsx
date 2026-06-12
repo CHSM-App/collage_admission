@@ -203,11 +203,13 @@ export default function MyApplications() {
                         <td className="px-4 py-2.5">
                           <p className="font-semibold text-slate-900">{app.college_name}</p>
                           <p className="text-xs text-slate-500">{app.course_name}</p>
+                          {app.roll_number && (
+                            <p className="text-xs font-bold text-violet-700 mt-0.5">Roll No: {app.roll_number}</p>
+                          )}
                         </td>
                         <td className="px-4 py-2.5 text-slate-700">{YEAR_LABEL[app.year_of_study]} · {app.academic_year}</td>
                         <td className="px-4 py-2.5 font-mono text-xs text-slate-500">
                           {app.registration_number || '—'}
-                          {app.roll_number && <p className="text-violet-700 font-semibold font-sans">Roll: {app.roll_number}</p>}
                         </td>
                         <td className="px-4 py-2.5 text-xs text-slate-500">
                           {app.submitted_at ? new Date(app.submitted_at).toLocaleDateString('en-IN') : '—'}
@@ -367,36 +369,39 @@ function MobileCard({ app, expandedId, setExpandedId, navigate, setFeePayApp, se
   )
 }
 
+const btn = 'rounded-md border border-slate-300 bg-white px-4 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition'
+const btnPrimary = 'rounded-md bg-slate-800 px-4 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 transition'
+
 function AppDetail({ app, navigate, setFeePayApp, setSelectSubjectsApp, fetchApps }) {
   return (
     <div className="space-y-2">
       {app.status === 'correction_requested' && (
-        <div className="rounded-md bg-orange-50 border border-orange-200 px-3 py-3 space-y-2">
-          <p className="text-sm font-semibold text-orange-800">The college has requested corrections to your application.</p>
-          {app.correction_note && <p className="text-sm text-orange-700 whitespace-pre-wrap">{app.correction_note}</p>}
-          <button onClick={() => navigate(`/apply/${app.id}`)} className="rounded-md bg-orange-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-orange-700 transition">
+        <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-3 space-y-2">
+          <p className="text-sm font-semibold text-slate-800">The college has requested corrections to your application.</p>
+          {app.correction_note && <p className="text-sm text-slate-600 whitespace-pre-wrap">{app.correction_note}</p>}
+          <button onClick={() => navigate(`/apply/${app.id}`)} className={btnPrimary}>
             Edit &amp; Resubmit Application
           </button>
         </div>
       )}
 
       {(app.status === 'submitted' || app.status === 'under_review' || app.status === 'correction_done') && (
-        <div className="rounded-md bg-blue-50 border border-blue-100 px-3 py-2">
-          <p className="text-sm text-blue-800">Your application is under review by the college.</p>
+        <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-2">
+          <p className="text-sm text-slate-600">Your application is under review by the college.</p>
         </div>
       )}
 
       {app.status === 'doc_verified' && (
-        <div className="rounded-md bg-teal-50 border border-teal-200 px-3 py-3">
-          <p className="text-sm font-semibold text-teal-800">Your application has been approved!</p>
-          <p className="text-sm text-teal-700 mt-1">Please visit the college with all original documents for verification.</p>
+        <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-3">
+          <p className="text-sm font-semibold text-slate-800">Your application has been approved!</p>
+          <p className="text-sm text-slate-600 mt-1">Please visit the college with all original documents for verification.</p>
         </div>
       )}
 
       {app.status === 'confirmed' && (
-        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-3 space-y-2">
-          <p className="text-sm font-semibold text-amber-800">Documents verified! Please pay the college fee to confirm your admission.</p>
-          <button onClick={() => setFeePayApp(app)} className="rounded-md bg-amber-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-amber-700">Pay College Fee</button>
+        <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-3 space-y-2">
+          <p className="text-sm font-semibold text-slate-800">Documents verified! Please pay the college fee to confirm your admission.</p>
+          <button onClick={() => setFeePayApp(app)} className={btnPrimary}>Pay College Fee</button>
         </div>
       )}
 
@@ -407,37 +412,56 @@ function AppDetail({ app, navigate, setFeePayApp, setSelectSubjectsApp, fetchApp
         const remaining = total > 0 ? Math.max(0, total - paid) : 0
         const hasMore   = total > 0 && (total > payNow + 0.01 || remaining > 0.01)
         return (
-          <div className="rounded-md bg-emerald-50 border border-emerald-200 px-3 py-3 space-y-2">
-            <p className="text-sm font-semibold text-emerald-800">
+          <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-3 space-y-2">
+            <p className="text-sm font-semibold text-slate-800">
               Admission Confirmed!
               {hasMore && remaining > 0.01 && (
-                <span className="ml-2 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-0.5">
-                  ₹{remaining.toLocaleString('en-IN')} balance due
-                </span>
+                <span className="ml-2 text-xs font-normal text-slate-500">₹{remaining.toLocaleString('en-IN')} balance due</span>
               )}
             </p>
             {hasMore && <p className="text-xs text-slate-500">Paid ₹{paid.toLocaleString('en-IN')} of ₹{total.toLocaleString('en-IN')} total.</p>}
             <div className="flex gap-2 flex-wrap">
-              <button onClick={() => setFeePayApp(app)} className={`rounded-md px-4 py-1.5 text-sm font-semibold text-white transition ${hasMore && remaining > 0.01 ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+              <button onClick={() => setFeePayApp(app)} className={btnPrimary}>
                 {hasMore && remaining > 0.01 ? 'Pay Remaining Fee' : 'View Fee & Receipts'}
               </button>
-              <button onClick={() => setSelectSubjectsApp(app)} className="rounded-md bg-violet-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-violet-700 transition">Select Subjects</button>
+              <button onClick={() => setSelectSubjectsApp(app)} className={btn}>Select Subjects</button>
             </div>
           </div>
         )
       })()}
 
-      {app.status === 'roll_assigned' && (
-        <div className="rounded-md bg-violet-50 border border-violet-100 px-3 py-2">
-          <p className="text-sm text-violet-800 font-medium">Roll number assigned! Select your subjects to complete enrollment.</p>
-          <button onClick={() => setSelectSubjectsApp(app)} className="mt-2 rounded-md bg-violet-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-violet-700">Select Subjects</button>
-        </div>
-      )}
+      {app.status === 'roll_assigned' && (() => {
+        const total     = parseFloat(app.fee_total_amount)   || 0
+        const paid      = parseFloat(app.amount_paid)        || 0
+        const remaining = total > 0 ? Math.max(0, total - paid) : 0
+        return (
+          <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-3 space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-semibold text-slate-800">Roll Number Assigned!</p>
+              {remaining > 0.01 && (
+                <span className="text-xs text-slate-500">₹{remaining.toLocaleString('en-IN')} balance due</span>
+              )}
+            </div>
+            {app.roll_number && (
+              <p className="text-xl font-bold text-slate-900">Roll No: {app.roll_number}</p>
+            )}
+            {remaining > 0.01 && (
+              <p className="text-xs text-slate-500">Paid ₹{paid.toLocaleString('en-IN')} of ₹{total.toLocaleString('en-IN')} total.</p>
+            )}
+            <div className="flex gap-2 flex-wrap">
+              {remaining > 0.01 && (
+                <button onClick={() => setFeePayApp(app)} className={btnPrimary}>Pay Remaining Fee</button>
+              )}
+              <button onClick={() => setSelectSubjectsApp(app)} className={remaining > 0.01 ? btn : btnPrimary}>Select Subjects</button>
+            </div>
+          </div>
+        )
+      })()}
 
       {app.status === 'enrolled' && (
-        <div className="rounded-md bg-green-50 border border-green-100 px-3 py-3 space-y-2 text-sm text-green-800">
-          <p className="font-medium">Enrollment complete. Welcome to {app.college_name}!</p>
-          <button onClick={() => setSelectSubjectsApp(app)} className="rounded-md bg-green-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-green-700">View / Update Subjects</button>
+        <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-3 space-y-2 text-sm text-slate-700">
+          <p className="font-semibold">Enrollment complete. Welcome to {app.college_name}!</p>
+          <button onClick={() => setSelectSubjectsApp(app)} className={btn}>View / Update Subjects</button>
         </div>
       )}
 

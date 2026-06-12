@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
+import { useMyApplications } from '../hooks/useMyApplications.js'
 import BrowseColleges from './BrowseColleges.jsx'
 import MyApplications from './MyApplications.jsx'
 import StudentDocuments from './StudentDocuments.jsx'
@@ -28,14 +29,34 @@ export default function StudentDashboard() {
   return <Overview user={user} />
 }
 
+const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
+
 function Overview({ user }) {
   const navigate = useNavigate()
+  const { apps } = useMyApplications(user?.id)
+
+  const rollApps = apps.filter(a => a.roll_number)
 
   return (
     <section className="space-y-6">
       <div>
         <p className="text-sm font-semibold uppercase tracking-wide text-emerald-600">Student portal</p>
         <h1 className="mt-2 text-2xl sm:text-3xl font-bold text-slate-950">Welcome, {user?.name}</h1>
+        {rollApps.length > 0 && (
+          <div className="mt-2 flex flex-col gap-2">
+            {rollApps.map(a => (
+              <div key={a.id} className="inline-flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-700 w-fit">
+                <span className="font-bold">Roll No: {a.roll_number}</span>
+                <span className="text-slate-400">·</span>
+                <span>{a.course_name}</span>
+                <span className="text-slate-400">·</span>
+                <span>{YEAR_LABEL[a.year_of_study]}</span>
+                <span className="text-slate-400">·</span>
+                <span className="text-slate-500">{a.academic_year}</span>
+              </div>
+            ))}
+          </div>
+        )}
         <p className="mt-2 max-w-2xl text-slate-600">
           Apply to colleges, track your applications, and manage your documents — all in one place.
         </p>

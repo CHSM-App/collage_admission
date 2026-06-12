@@ -138,6 +138,7 @@ async function getCollegeFeTotal(app) {
         divisionLetter:  det.app_division || null,
         caste:           det.app_category || null,
         specialStatus:   null,
+        academicYear:    app.academic_year || null,
         pool:            db,
       });
 
@@ -364,7 +365,7 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
     const appRes = await db.request()
       .input('id', mssql.Int, appId)
       .query(`
-        SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study,
+        SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study, a.academic_year,
                a.admission_period_id, a.college_fee_paid,
                a.fee_total_amount, a.fee_pay_now_amount,
                a.app_division, a.app_caste, a.app_special_status,
@@ -395,6 +396,7 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
         divisionLetter:  app.app_division,
         caste:           app.app_caste,
         specialStatus:   app.app_special_status,
+        academicYear:    app.academic_year || null,
         pool:            db,
       });
       breakdown = feeResult?.breakdown || [];
@@ -413,10 +415,19 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
     const remaining   = Math.max(0, totalFee - totalPaid);
 
     // Compute head-level payment status: heads clear sequentially (first head first).
+    // Platform Fees heads are excluded from sequential clearance — they are shown but not
+    // counted in the deduction order.
     // For each head: paid_amount = how much of this head has been covered by totalPaid.
     // status: 'paid' | 'partial' | 'unpaid'
-    let runningPaid = totalPaid;
-    const breakdownWithStatus = breakdown.map(h => {
+    const nonPlatformBreakdown = breakdown.filter(h => (h.fees_type || '').toLowerCase() !== 'platform');
+    const platformBreakdown    = breakdown.filter(h => (h.fees_type || '').toLowerCase() === 'platform');
+    const platformTotal        = platformBreakdown.reduce((s, h) => s + (parseFloat(h.amount) || 0), 0);
+
+    // Subtract platform fee amounts from totalPaid before sequential clearance —
+    // platform fees are collected alongside college fees but don't participate in
+    // head-by-head deduction order.
+    let runningPaid = Math.max(0, totalPaid - platformTotal);
+    const clearedBreakdown = nonPlatformBreakdown.map(h => {
       const amt = parseFloat(h.amount) || 0;
       if (runningPaid >= amt - 0.01) {
         runningPaid -= amt;
@@ -428,6 +439,17 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
       } else {
         return { ...h, paid_amount: 0, status: 'unpaid' };
       }
+    });
+
+    // Platform Fees heads are always shown as-is (not part of sequential clearance)
+    const platformWithStatus = platformBreakdown.map(h => ({ ...h, paid_amount: 0, status: 'unpaid' }));
+
+    // Merge: preserve original order but replace entries with their computed status
+    const breakdownWithStatus = breakdown.map(h => {
+      if ((h.fees_type || '').toLowerCase() === 'platform') {
+        return platformWithStatus.find(p => p.fees_code === h.fees_code) || h;
+      }
+      return clearedBreakdown.find(c => c.fees_code === h.fees_code) || h;
     });
 
     // Fetch installment plan
@@ -511,7 +533,11 @@ router.get('/receipts/:applicationId', async (req, res) => {
           col.city        AS college_city,
           col.phone       AS college_phone,
           col.email       AS college_email,
+          NULL AS trust_name,
+          NULL AS college_affiliation,
           COALESCE(c.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
+          c.degree_course_code AS degree_course_code,
+          a.app_division,
           s.full_name     AS student_name,
           s.email         AS student_email,
           s.phone         AS student_phone,
@@ -550,7 +576,7 @@ router.get('/receipts/:applicationId', async (req, res) => {
       const appExtra = await db.request()
         .input('id2', mssql.Int, appId)
         .query(`
-          SELECT a.college_id, a.course_id, a.year_of_study, a.app_division, a.app_caste, a.app_special_status,
+          SELECT a.college_id, a.course_id, a.year_of_study, a.academic_year, a.app_division, a.app_caste, a.app_special_status,
                  fm.code_no AS faculty_master_id,
                  CASE a.year_of_study WHEN 1 THEN 'FY' WHEN 2 THEN 'SY' WHEN 3 THEN 'TY'
                                       WHEN 4 THEN '4Y' WHEN 5 THEN '5Y' ELSE NULL END AS year_level
@@ -567,6 +593,7 @@ router.get('/receipts/:applicationId', async (req, res) => {
           divisionLetter:  ae.app_division,
           caste:           ae.app_caste,
           specialStatus:   ae.app_special_status,
+          academicYear:    ae.academic_year || null,
           pool:            db,
         });
         feeBreakdown = feeResult?.breakdown || [];
@@ -575,17 +602,30 @@ router.get('/receipts/:applicationId', async (req, res) => {
 
     // For each college_fee payment, compute which heads it covered (partially or fully)
     // by tracking running cumulative paid before/after this payment.
+    // Platform Fees heads are excluded from sequential clearance order.
+    const clearableFeeBreakdown = feeBreakdown.filter(h => (h.fees_type || '').toLowerCase() !== 'platform');
+    const feeBreakdownPlatformTotal = feeBreakdown
+      .filter(h => (h.fees_type || '').toLowerCase() === 'platform')
+      .reduce((s, h) => s + (parseFloat(h.amount) || 0), 0);
+
+    // Track cumulative paid against non-platform heads only.
+    // Each payment covers the full fee (including platform fees), so we subtract
+    // the platform total once from the first payment(s) to get the non-platform portion.
+    let platformDebt = feeBreakdownPlatformTotal; // platform portion yet to be "consumed"
     let cumulativeBefore = 0;
     const paymentsWithHeads = payments.map(pmt => {
       if (pmt.payment_type !== 'college_fee' || feeBreakdown.length === 0) {
-        cumulativeBefore += parseFloat(pmt.amount);
         return pmt;
       }
       const pmtAmt = parseFloat(pmt.amount);
-      const cumulativeAfter = cumulativeBefore + pmtAmt;
-      // Walk heads and determine what this payment covered
+      // Subtract any remaining platform debt from this payment before crediting non-platform heads
+      const platformConsumed = Math.min(platformDebt, pmtAmt);
+      platformDebt -= platformConsumed;
+      const effectiveAmt = pmtAmt - platformConsumed;
+      const cumulativeAfter = cumulativeBefore + effectiveAmt;
+      // Walk only non-platform heads for sequential clearance
       let runningTotal = 0;
-      const headRows = feeBreakdown.map(h => {
+      const headRows = clearableFeeBreakdown.map(h => {
         const headAmt = parseFloat(h.amount) || 0;
         const headStart = runningTotal;
         const headEnd   = runningTotal + headAmt;
@@ -659,7 +699,7 @@ router.post('/initiate', initiateValidators, validate, async (req, res) => {
       description = 'ApplicationFee';
 
     } else if (payment_type === 'college_fee') {
-      if (!['confirmed', 'fees_paid'].includes(app.status)) {
+      if (!['confirmed', 'fees_paid', 'roll_assigned', 'enrolled'].includes(app.status)) {
         return res.status(400).json({ success: false, message: 'Application must be confirmed to pay college fee.' });
       }
       if ((!app.fee_total_amount || parseFloat(app.fee_total_amount) <= 0) &&

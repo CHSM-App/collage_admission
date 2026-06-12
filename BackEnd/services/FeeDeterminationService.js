@@ -113,7 +113,7 @@ function determinePaymentMode(caste, specialStatus, fundingType) {
  *   studentPayable:     number,   // totalFee - reimbursableAmount
  * }
  */
-async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, caste, specialStatus, studentType, pool }) {
+async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, caste, specialStatus, studentType, academicYear, pool }) {
   // pool may be a Promise (from db.js connect) — await it
   const resolvedPool = await Promise.resolve(pool)
 
@@ -147,14 +147,17 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
   const { mode: paymentMode, reason: paymentModeReason } = determinePaymentMode(caste, specialStatus, fundingType)
 
   // 3. Fetch applicable fee heads + amounts
-  // Only return heads that have a classwise_fees entry for this class+student_type (selected heads).
-  // If no division/student_type context, fall back to all active heads using base amounts.
+  // Fee heads are filtered by academic_year on fees_master.
+  // Classwise overrides are also filtered by academic_year.
+  // Only return heads that have a classwise_fees entry for this class+student_type (INNER JOIN).
+  // If no faculty/yearLevel context, fall back to all active heads for that academic year (LEFT JOIN).
   const slabCol = `fees_cat${slab}_amount`
   const feesRes = await resolvedPool.request()
     .input('cid', mssql.Int,      collegeId)
     .input('fid', mssql.Int,      facultyMasterId || null)
     .input('yl',  mssql.NVarChar, yearLevel || null)
     .input('st',  mssql.NVarChar, resolvedStudentType)
+    .input('ay',  mssql.NVarChar, academicYear || null)
     .query(`
       SELECT
         fm.fees_code, fm.fees_head, fm.short_name, fm.fees_type,
@@ -169,7 +172,10 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
         AND cf.faculty_master_id = @fid
         AND cf.year_level = @yl
         AND cf.student_type = @st
-      WHERE fm.college_id = @cid AND fm.is_active = 1
+        AND (@ay IS NULL OR cf.academic_year = @ay)
+      WHERE fm.college_id = @cid
+        AND fm.is_active = 1
+        AND (@ay IS NULL OR fm.academic_year = @ay)
       ORDER BY fm.sequence_auto_fees
     `)
 

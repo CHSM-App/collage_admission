@@ -811,16 +811,18 @@ router.delete('/:collegeId/division/:id', requirePerm('masters'), async (req, re
 // ═══════════════════════════════════════════════════════════════
 
 router.get('/:collegeId/fees', requireCollegeAccess, async (req, res) => {
+  const { academic_year } = req.query
   try {
-    const r = await db.request()
-      .input('cid', mssql.Int, cid(req))
-      .query(`
-        SELECT fm.*, bm.bank_name, bm.bank_account_number
-        FROM fees_master fm
-        LEFT JOIN bank_master bm ON bm.ledger_code = fm.credit_to_bank_ledger
-        WHERE fm.college_id = @cid
-        ORDER BY fm.sequence_auto_fees, fm.fees_code
-      `)
+    const req2 = db.request().input('cid', mssql.Int, cid(req))
+    let q = `
+      SELECT fm.*, bm.bank_name, bm.bank_account_number
+      FROM fees_master fm
+      LEFT JOIN bank_master bm ON bm.ledger_code = fm.credit_to_bank_ledger
+      WHERE fm.college_id = @cid
+    `
+    if (academic_year) { q += ' AND fm.academic_year=@ay'; req2.input('ay', mssql.NVarChar, academic_year) }
+    q += ' ORDER BY fm.sequence_auto_fees, fm.fees_code'
+    const r = await req2.query(q)
     res.json({ success: true, data: r.recordset })
   } catch (e) { logger.error({ err: e }, 'get fees master'); res.status(500).json({ success: false, message: e.message }) }
 })
@@ -832,11 +834,12 @@ router.post('/:collegeId/fees', requirePerm('masters'), async (req, res) => {
     is_refundable = false,
     fees_cat1_amount = 0, fees_cat2_amount = 0,
     fees_cat3_amount = 0, fees_cat4_amount = 0,
-    cat4_description, is_active = true,
+    cat4_description, is_active = true, academic_year,
   } = req.body
-  if (!fees_type)     return res.status(422).json({ success: false, message: 'fees_type required.' })
-  if (!fees_head?.trim()) return res.status(422).json({ success: false, message: 'fees_head required.' })
+  if (!fees_type)          return res.status(422).json({ success: false, message: 'fees_type required.' })
+  if (!fees_head?.trim())  return res.status(422).json({ success: false, message: 'fees_head required.' })
   if (!short_name?.trim()) return res.status(422).json({ success: false, message: 'short_name required.' })
+  if (!academic_year)      return res.status(422).json({ success: false, message: 'academic_year required.' })
   try {
     const r = await db.request()
       .input('cid',   mssql.Int,      cid(req))
@@ -853,13 +856,14 @@ router.post('/:collegeId/fees', requirePerm('masters'), async (req, res) => {
       .input('a4',    mssql.Decimal,  parseFloat(fees_cat4_amount) || 0)
       .input('c4',    mssql.NVarChar, cat4_description || null)
       .input('ia',    mssql.Bit,      is_active ? 1 : 0)
+      .input('ay',    mssql.NVarChar, academic_year)
       .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
         INSERT INTO fees_master
           (college_id,fees_type,is_other_misc,fees_head,short_name,sequence_auto_fees,
            credit_to_bank_ledger,is_refundable,fees_cat1_amount,fees_cat2_amount,
-           fees_cat3_amount,fees_cat4_amount,cat4_description,is_active,created_by)
-        VALUES (@cid,@ft,@iom,@fh,@sn,@seq,@ctb,@ir,@a1,@a2,@a3,@a4,@c4,@ia,@actor);
+           fees_cat3_amount,fees_cat4_amount,cat4_description,is_active,academic_year,created_by)
+        VALUES (@cid,@ft,@iom,@fh,@sn,@seq,@ctb,@ir,@a1,@a2,@a3,@a4,@c4,@ia,@ay,@actor);
         SELECT * FROM fees_master WHERE fees_code = SCOPE_IDENTITY();
       `)
     res.status(201).json({ success: true, data: r.recordset[0] })
@@ -917,9 +921,9 @@ router.delete('/:collegeId/fees/:id', requirePerm('masters'), async (req, res) =
 
 // ── Classwise Fees ───────────────────────────────────────────
 
-// GET /masters/:collegeId/fees/classwise?faculty_id=&year_level=&student_type=
+// GET /masters/:collegeId/fees/classwise?faculty_id=&year_level=&student_type=&academic_year=
 router.get('/:collegeId/fees/classwise', requireCollegeAccess, async (req, res) => {
-  const { faculty_id, year_level, student_type } = req.query
+  const { faculty_id, year_level, student_type, academic_year } = req.query
   try {
     let q = `
       SELECT cf.*, fm_row.fees_head, fm_row.short_name, fm_row.fees_type,
@@ -933,6 +937,7 @@ router.get('/:collegeId/fees/classwise', requireCollegeAccess, async (req, res) 
     if (faculty_id)    { q += ' AND cf.faculty_master_id=@fid'; req2.input('fid', mssql.Int,      parseInt(faculty_id)) }
     if (year_level)    { q += ' AND cf.year_level=@yl';         req2.input('yl',  mssql.NVarChar, year_level) }
     if (student_type)  { q += ' AND cf.student_type=@st';       req2.input('st',  mssql.NVarChar, student_type) }
+    if (academic_year) { q += ' AND cf.academic_year=@ay';      req2.input('ay',  mssql.NVarChar, academic_year) }
     q += ' ORDER BY fm_row.sequence_auto_fees'
     const r = await req2.query(q)
     res.json({ success: true, data: r.recordset })
@@ -941,9 +946,9 @@ router.get('/:collegeId/fees/classwise', requireCollegeAccess, async (req, res) 
 
 // DELETE /masters/:collegeId/fees/classwise — remove a specific classwise override row
 router.delete('/:collegeId/fees/classwise', requirePerm('masters'), async (req, res) => {
-  const { faculty_master_id, year_level, student_type, fees_code } = req.body
-  if (!faculty_master_id || !year_level || !student_type || !fees_code)
-    return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, student_type, fees_code required.' })
+  const { faculty_master_id, year_level, student_type, fees_code, academic_year } = req.body
+  if (!faculty_master_id || !year_level || !student_type || !fees_code || !academic_year)
+    return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, student_type, fees_code, academic_year required.' })
   try {
     await db.request()
       .input('cid', mssql.Int,      cid(req))
@@ -951,10 +956,11 @@ router.delete('/:collegeId/fees/classwise', requirePerm('masters'), async (req, 
       .input('yl',  mssql.NVarChar, year_level)
       .input('st',  mssql.NVarChar, student_type)
       .input('fc',  mssql.Int,      parseInt(fees_code))
+      .input('ay',  mssql.NVarChar, academic_year)
       .query(`
         DELETE FROM classwise_fees
         WHERE college_id=@cid AND faculty_master_id=@fid
-          AND year_level=@yl AND student_type=@st AND fees_code=@fc
+          AND year_level=@yl AND student_type=@st AND fees_code=@fc AND academic_year=@ay
       `)
     res.json({ success: true })
   } catch (e) { logger.error({ err: e }, 'delete classwise fee'); res.status(500).json({ success: false, message: e.message }) }
@@ -962,10 +968,10 @@ router.delete('/:collegeId/fees/classwise', requirePerm('masters'), async (req, 
 
 // POST /masters/:collegeId/fees/classwise/save — upsert classwise fees
 router.post('/:collegeId/fees/classwise/save', requirePerm('masters'), async (req, res) => {
-  const { faculty_master_id, year_level, student_type, rows } = req.body
+  const { faculty_master_id, year_level, student_type, academic_year, rows } = req.body
   const VALID_STUDENT_TYPES = ['Grand', 'NonGrand', 'Outsider']
-  if (!faculty_master_id || !year_level || !student_type || !Array.isArray(rows))
-    return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, student_type, rows[] required.' })
+  if (!faculty_master_id || !year_level || !student_type || !academic_year || !Array.isArray(rows))
+    return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, student_type, academic_year, rows[] required.' })
   if (!VALID_STUDENT_TYPES.includes(student_type))
     return res.status(422).json({ success: false, message: `student_type must be one of: ${VALID_STUDENT_TYPES.join(', ')}` })
   const actor = String(req.user.staff_id || req.user.id)
@@ -976,6 +982,7 @@ router.post('/:collegeId/fees/classwise/save', requirePerm('masters'), async (re
         .input('fid',   mssql.Int,      parseInt(faculty_master_id))
         .input('yl',    mssql.NVarChar, year_level)
         .input('st',    mssql.NVarChar, student_type)
+        .input('ay',    mssql.NVarChar, academic_year)
         .input('fc',    mssql.Int,      parseInt(row.fees_code))
         .input('a1',    mssql.Decimal,  row.cat1_amount != null ? parseFloat(row.cat1_amount) : null)
         .input('a2',    mssql.Decimal,  row.cat2_amount != null ? parseFloat(row.cat2_amount) : null)
@@ -985,14 +992,14 @@ router.post('/:collegeId/fees/classwise/save', requirePerm('masters'), async (re
         .query(`
           MERGE classwise_fees AS target
           USING (SELECT @cid AS college_id, @fid AS faculty_master_id, @yl AS year_level,
-                        @fc AS fees_code, @st AS student_type) AS src
+                        @fc AS fees_code, @st AS student_type, @ay AS academic_year) AS src
           ON target.college_id=src.college_id AND target.faculty_master_id=src.faculty_master_id
              AND target.year_level=src.year_level AND target.fees_code=src.fees_code
-             AND target.student_type=src.student_type
+             AND target.student_type=src.student_type AND target.academic_year=src.academic_year
           WHEN MATCHED THEN UPDATE SET cat1_amount=@a1,cat2_amount=@a2,cat3_amount=@a3,cat4_amount=@a4,updated_by=@actor
           WHEN NOT MATCHED THEN INSERT
-            (college_id,faculty_master_id,year_level,fees_code,student_type,cat1_amount,cat2_amount,cat3_amount,cat4_amount,created_by)
-          VALUES (@cid,@fid,@yl,@fc,@st,@a1,@a2,@a3,@a4,@actor);
+            (college_id,faculty_master_id,year_level,fees_code,student_type,academic_year,cat1_amount,cat2_amount,cat3_amount,cat4_amount,created_by)
+          VALUES (@cid,@fid,@yl,@fc,@st,@ay,@a1,@a2,@a3,@a4,@actor);
         `)
     }
     res.json({ success: true })
@@ -1009,7 +1016,7 @@ router.post('/:collegeId/fees/classwise/save', requirePerm('masters'), async (re
  * Returns full fee breakdown + payment mode + slab for the given student context.
  */
 router.post('/:collegeId/fees/compute', async (req, res) => {
-  const { faculty_master_id, year_level, division_letter, caste, special_status, student_type } = req.body
+  const { faculty_master_id, year_level, division_letter, caste, special_status, student_type, academic_year } = req.body
   try {
     const result = await feeSvc.compute({
       collegeId:       cid(req),
@@ -1019,11 +1026,57 @@ router.post('/:collegeId/fees/compute', async (req, res) => {
       caste:           caste || null,
       specialStatus:   special_status || null,
       studentType:     student_type || 'Grand',
+      academicYear:    academic_year || null,
       pool:            db,
     })
     res.json({ success: true, data: result })
   } catch (e) {
     logger.error({ err: e }, 'compute fees')
+    res.status(500).json({ success: false, message: e.message })
+  }
+})
+
+// GET /masters/:collegeId/fees/configured?faculty_master_id=&year_level=&academic_year=
+// Returns whether fee heads are configured for a specific program+year+academic_year.
+// Used by AdmissionPeriods to block opening admission if fees are not set up.
+router.get('/:collegeId/fees/configured', requireCollegeAccess, async (req, res) => {
+  const { faculty_master_id, year_level, academic_year } = req.query
+  if (!faculty_master_id || !year_level || !academic_year)
+    return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, academic_year required.' })
+  try {
+    // Fees are "configured" if there is at least one active fee head for this academic_year
+    // AND at least one classwise_fees row for this program+year_level+academic_year
+    const headsRes = await db.request()
+      .input('cid', mssql.Int,      cid(req))
+      .input('ay',  mssql.NVarChar, academic_year)
+      .query(`
+        SELECT COUNT(*) AS head_count
+        FROM fees_master
+        WHERE college_id=@cid AND is_active=1 AND academic_year=@ay
+      `)
+    const cwRes = await db.request()
+      .input('cid', mssql.Int,      cid(req))
+      .input('fid', mssql.Int,      parseInt(faculty_master_id))
+      .input('yl',  mssql.NVarChar, year_level)
+      .input('ay',  mssql.NVarChar, academic_year)
+      .query(`
+        SELECT COUNT(*) AS cw_count
+        FROM classwise_fees
+        WHERE college_id=@cid AND faculty_master_id=@fid
+          AND year_level=@yl AND academic_year=@ay
+      `)
+    const headCount = headsRes.recordset[0].head_count
+    const cwCount   = cwRes.recordset[0].cw_count
+    res.json({
+      success: true,
+      data: {
+        configured:  headCount > 0 && cwCount > 0,
+        head_count:  headCount,
+        cw_count:    cwCount,
+      }
+    })
+  } catch (e) {
+    logger.error({ err: e }, 'fees configured check')
     res.status(500).json({ success: false, message: e.message })
   }
 })

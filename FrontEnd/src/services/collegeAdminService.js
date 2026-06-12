@@ -49,3 +49,6 @@ export const exportApplications = (collegeId, params) =>
 
 export const getFeesCollectionReport = (collegeId, params) =>
   api.get(`college-admin/${collegeId}/reports/fees-collection?${params}`)
+
+export const getFeesByHeadReport = (collegeId, params) =>
+  api.get(`college-admin/${collegeId}/reports/fees-by-head?${params}`)

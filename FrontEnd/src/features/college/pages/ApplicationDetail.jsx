@@ -62,6 +62,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
   const [correctionNote, setCorrectionNote] = useState('')
   const [feeTotal,        setFeeTotal]        = useState(null)
   const [feeBreakdown,    setFeeBreakdown]    = useState([])
+  const [feeStudentType,  setFeeStudentType]  = useState(null)
   const [feeTotalLoading, setFeeTotalLoading] = useState(false)
   const [installments,    setInstallments]    = useState([{ amount: '', due_date: '' }, { amount: '', due_date: '' }, { amount: '', due_date: '' }, { amount: '', due_date: '' }])
   const [feeError,        setFeeError]        = useState('')
@@ -82,7 +83,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
     if (!app) return
     setDivision(app.app_division || '')
     if (app.course_id && app.year_of_study) {
-      const yearMap = { 1: 'FY', 2: 'SY', 3: 'TY' }
+      const yearMap = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
       getDivisions(collegeId, app.course_id, yearMap[app.year_of_study])
         .then(r => setDivisions((r.data.data || []).filter(d => d.is_active)))
         .catch(() => {})
@@ -98,8 +99,13 @@ export default function ApplicationDetail({ collegeId, appId }) {
     }
     setFeeTotalLoading(true); setInstallments([{ amount: '', due_date: '' }, { amount: '', due_date: '' }, { amount: '', due_date: '' }, { amount: '', due_date: '' }])
     getComputedFee(collegeId, appId, division || undefined)
-      .then(r => { setFeeTotal(r.data.data?.totalFee ?? null); setFeeBreakdown(r.data.data?.breakdown || []) })
-      .catch(() => { setFeeTotal(null); setFeeBreakdown([]) })
+      .then(r => {
+        const data = r.data.data
+        setFeeTotal(data?.totalFee ?? null)
+        setFeeBreakdown(data?.breakdown || [])
+        setFeeStudentType(data?.studentType || null)
+      })
+      .catch(() => { setFeeTotal(null); setFeeBreakdown([]); setFeeStudentType(null) })
       .finally(() => setFeeTotalLoading(false))
   }, [showConfirm, division, divisions.length])
 
@@ -335,20 +341,32 @@ export default function ApplicationDetail({ collegeId, appId }) {
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-2">Division</label>
                   <div className="flex flex-wrap gap-2">
-                    {divisions.map(dv => (
-                      <button
-                        key={dv.division_letter}
-                        type="button"
-                        onClick={() => setDivision(d => d === dv.division_letter ? '' : dv.division_letter)}
-                        className={`px-3 py-1.5 rounded-lg border text-sm font-semibold transition ${
-                          division === dv.division_letter
-                            ? 'bg-slate-900 text-white border-slate-900'
-                            : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
-                        }`}
-                      >
-                        Div {dv.division_letter}
-                      </button>
-                    ))}
+                    {divisions.map(dv => {
+                      const isSelected = division === dv.division_letter
+                      const fundingLabel = dv.funding_type === 'Granted' ? 'Grant'
+                        : dv.funding_type === 'NonGranted' ? 'Non-Grant'
+                        : dv.funding_type === 'Both' ? 'Grant+Non-Grant'
+                        : null
+                      return (
+                        <button
+                          key={dv.division_letter}
+                          type="button"
+                          onClick={() => setDivision(d => d === dv.division_letter ? '' : dv.division_letter)}
+                          className={`px-3 py-1.5 rounded-lg border text-sm font-semibold transition flex flex-col items-center leading-tight ${
+                            isSelected
+                              ? 'bg-slate-900 text-white border-slate-900'
+                              : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400'
+                          }`}
+                        >
+                          <span>Div {dv.division_letter}</span>
+                          {fundingLabel && (
+                            <span className={`text-[10px] font-normal mt-0.5 ${isSelected ? 'text-slate-300' : 'text-slate-400'}`}>
+                              {fundingLabel}
+                            </span>
+                          )}
+                        </button>
+                      )
+                    })}
                     {division && (
                       <button type="button" onClick={() => setDivision('')}
                         className="text-xs text-slate-400 hover:text-red-500 self-center">✕ clear</button>
@@ -360,7 +378,16 @@ export default function ApplicationDetail({ collegeId, appId }) {
               {/* Fee breakdown table */}
               {divisions.length > 0 && !division ? (
                 <p className="text-xs text-slate-500 italic">← Select a division above to see the fee breakdown.</p>
-              ) : feeTotalLoading ? (
+              ) : !feeTotalLoading && feeStudentType && (
+                <p className="text-xs text-slate-500">
+                  Showing fees for <span className="font-semibold text-slate-700">{feeStudentType === 'Grand' ? 'Grant' : feeStudentType === 'NonGrand' ? 'Non-Grant' : feeStudentType}</span> student type
+                  {division && (() => {
+                    const dv = divisions.find(d => d.division_letter === division)
+                    return dv ? ` — Div ${dv.division_letter} (${dv.funding_type === 'Granted' ? 'Granted' : dv.funding_type === 'NonGranted' ? 'Non-Granted' : dv.funding_type})` : ''
+                  })()}
+                </p>
+              )}
+              {divisions.length > 0 && !division ? null : feeTotalLoading ? (
                 <p className="text-xs text-slate-400">Computing fee…</p>
               ) : feeBreakdown.length > 0 ? (
                 <div className="rounded-lg border border-emerald-200 overflow-hidden">

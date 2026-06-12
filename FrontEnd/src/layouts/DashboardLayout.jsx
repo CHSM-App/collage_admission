@@ -59,7 +59,10 @@ export default function DashboardLayout() {
   const [hasPayments, setHasPayments] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [collapsedGroups, setCollapsedGroups] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('sidebar_collapsed') || '{}') } catch { return {} }
+    try {
+      const saved = localStorage.getItem('sidebar_collapsed')
+      return saved ? JSON.parse(saved) : { masters: true, certificates: true }
+    } catch { return { masters: true, certificates: true } }
   })
   function toggleGroup(group) {
     setCollapsedGroups(prev => {

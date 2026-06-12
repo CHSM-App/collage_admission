@@ -588,7 +588,7 @@ async function computeFeeForApp(appId, collegeId, divisionOverride) {
     .input('id',  mssqlShared.Int, appId)
     .input('col', mssqlShared.Int, collegeId)
     .query(`
-      SELECT course_id, year_of_study, app_division, app_caste,
+      SELECT course_id, year_of_study, academic_year, app_division, app_caste,
              app_special_status, fees_category
       FROM applications WHERE id=@id AND college_id=@col
     `);
@@ -602,6 +602,7 @@ async function computeFeeForApp(appId, collegeId, divisionOverride) {
     divisionLetter:  divisionOverride || a.app_division || null,
     caste:           a.app_caste || null,
     specialStatus:   a.app_special_status || null,
+    academicYear:    a.academic_year || null,
     pool:            db,
   });
 }
@@ -973,35 +974,40 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
 
 // ── Generate roll numbers (batch) ───────────────────────────
 router.post('/:collegeId/roll-numbers/generate', requirePerm('assign_subjects'), async (req, res) => {
-  const { course_id } = req.body;
+  const { course_id, year_of_study } = req.body;
 
   if (!course_id) {
     return res.status(400).json({ success: false, message: 'course_id is required.' });
   }
+  if (!year_of_study) {
+    return res.status(400).json({ success: false, message: 'year_of_study is required.' });
+  }
 
   try {
-    // Find highest existing roll number for this college + course (across all years/batches)
+    // Find highest existing roll number for this college + course + year_of_study
     const maxRes = await db.request()
       .input('col', parseInt(req.params.collegeId))
       .input('crs', parseInt(course_id))
+      .input('yr',  parseInt(year_of_study))
       .query(`
         SELECT MAX(CAST(roll_number AS INT)) AS max_roll
         FROM applications
-        WHERE college_id = @col AND course_id = @crs
+        WHERE college_id = @col AND course_id = @crs AND year_of_study = @yr
           AND roll_number IS NOT NULL
           AND ISNUMERIC(roll_number) = 1
       `);
 
     let nextRoll = (maxRes.recordset[0].max_roll || 0) + 1;
 
-    // Get ALL fees_paid applications without a roll number for this college + course,
-    // ordered by when fee was paid (first-come first-served, across all years/batches)
+    // Get fees_paid applications without a roll number for this college + course + year_of_study,
+    // ordered by when fee was paid (first-come first-served)
     const pending = await db.request()
       .input('col', parseInt(req.params.collegeId))
       .input('crs', parseInt(course_id))
+      .input('yr',  parseInt(year_of_study))
       .query(`
         SELECT id FROM applications
-        WHERE college_id = @col AND course_id = @crs
+        WHERE college_id = @col AND course_id = @crs AND year_of_study = @yr
           AND status = 'fees_paid'
           AND roll_number IS NULL
         ORDER BY status_updated_at ASC
@@ -1039,7 +1045,7 @@ router.post('/:collegeId/roll-numbers/generate', requirePerm('assign_subjects'),
 
     // Fire WhatsApp notifications after commit (non-blocking)
     for (const { id, roll } of assignedRolls) {
-      getStudentForNotification(id).then(s => s && whatsapp.notifyRollAssigned(s, roll));
+      getStudentForNotification(id).then(s => s && whatsapp.notifyRollAssigned(s, roll, id));
     }
 
     return res.json({
@@ -1144,12 +1150,13 @@ router.get('/:collegeId/fee-receipts', requirePerm('collect_fees'), async (req, 
 
 // ── GET /:collegeId/reports/fees-collection ───────────────────────────────────
 // Query params:
-//   date_from   YYYY-MM-DD  (default: today)
-//   date_to     YYYY-MM-DD  (default: today)
-//   course_id   number      (optional)
-//   year_of_study 1-5       (optional)
-//   payment_type college_fee|application_fee|all (default: college_fee)
-//   group_by    day|course|year  (default: day)
+//   date_from     YYYY-MM-DD  (default: today)
+//   date_to       YYYY-MM-DD  (default: today)
+//   course_id     number      (optional)
+//   year_of_study 1-5         (optional)
+//   payment_type  college_fee|application_fee|all (default: college_fee)
+//   academic_year YYYY-YY     (optional)
+//   pay_mode      cash|online (optional)
 router.get('/:collegeId/reports/fees-collection', requirePerm('collect_fees'), async (req, res) => {
   const collegeId = parseInt(req.params.collegeId);
   const {
@@ -1158,7 +1165,9 @@ router.get('/:collegeId/reports/fees-collection', requirePerm('collect_fees'), a
     course_id,
     year_of_study,
     payment_type = 'college_fee',
-    group_by = 'day',
+    academic_year,
+    pay_mode,
+    grant_type,   // 'Granted' | 'NonGranted'
   } = req.query;
 
   // Default to today
@@ -1176,9 +1185,32 @@ router.get('/:collegeId/reports/fees-collection', requirePerm('collect_fees'), a
     const courseFilter = course_id    ? `AND a.course_id = @cid2`       : '';
     const yearFilter   = year_of_study ? `AND a.year_of_study = @yr`    : '';
     const typeFilter   = payment_type !== 'all' ? `AND p.payment_type = @ptype` : '';
+    const ayFilter     = academic_year ? `AND a.academic_year = @ay`    : '';
+    const modeFilter   = pay_mode === 'cash'
+      ? `AND (p.gateway = 'cash' OR p.gateway_txnid LIKE 'CASH-%' OR p.gateway IS NULL)`
+      : pay_mode === 'online'
+      ? `AND (p.gateway <> 'cash' AND p.gateway_txnid NOT LIKE 'CASH-%' AND p.gateway IS NOT NULL)`
+      : '';
+    // grant_type filter requires joining division_master
+    const grantJoin   = grant_type ? `LEFT JOIN division_master dm ON dm.college_id = a.college_id AND dm.faculty_master_id = a.course_id AND dm.division_letter = a.app_division` : '';
+    const grantFilter = grant_type ? `AND dm.funding_type = @gtype` : '';
+
     if (course_id)     r.input('cid2',  mssqlShared.Int,      parseInt(course_id));
     if (year_of_study) r.input('yr',    mssqlShared.TinyInt,  parseInt(year_of_study));
     if (payment_type !== 'all') r.input('ptype', mssqlShared.NVarChar, payment_type);
+    if (academic_year) r.input('ay',    mssqlShared.NVarChar, academic_year);
+    if (grant_type)    r.input('gtype', mssqlShared.NVarChar, grant_type);
+
+    const allFilters = `${courseFilter} ${yearFilter} ${typeFilter} ${ayFilter} ${modeFilter} ${grantFilter}`
+
+    function addOptionalInputs(req) {
+      if (course_id)     req.input('cid2',  mssqlShared.Int,      parseInt(course_id));
+      if (year_of_study) req.input('yr',    mssqlShared.TinyInt,  parseInt(year_of_study));
+      if (payment_type !== 'all') req.input('ptype', mssqlShared.NVarChar, payment_type);
+      if (academic_year) req.input('ay',    mssqlShared.NVarChar, academic_year);
+      if (grant_type)    req.input('gtype', mssqlShared.NVarChar, grant_type);
+      return req;
+    }
 
     // ── Summary totals ────────────────────────────────────────────────────────
     const summaryRes = await r.query(`
@@ -1190,21 +1222,19 @@ router.get('/:collegeId/reports/fees-collection', requirePerm('collect_fees'), a
         ISNULL(SUM(CASE WHEN p.gateway IS NOT NULL AND p.gateway<>'cash' AND p.gateway_txnid NOT LIKE 'CASH-%' THEN p.amount ELSE 0 END), 0) AS online_amount
       FROM payments p
       JOIN applications a ON a.id = p.application_id
+      ${grantJoin}
       WHERE a.college_id = @cid
         AND p.status = 'success'
         AND CAST(p.completed_at AS DATE) BETWEEN @from AND @to
-        ${courseFilter} ${yearFilter} ${typeFilter}
+        ${allFilters}
     `);
     const summary = summaryRes.recordset[0];
 
     // ── Day-wise breakdown ────────────────────────────────────────────────────
-    const r2 = db.request()
-      .input('cid',   mssqlShared.Int,      collegeId)
-      .input('from',  mssqlShared.Date,     from)
-      .input('to',    mssqlShared.Date,     to);
-    if (course_id)     r2.input('cid2',  mssqlShared.Int,      parseInt(course_id));
-    if (year_of_study) r2.input('yr',    mssqlShared.TinyInt,  parseInt(year_of_study));
-    if (payment_type !== 'all') r2.input('ptype', mssqlShared.NVarChar, payment_type);
+    const r2 = addOptionalInputs(db.request()
+      .input('cid',  mssqlShared.Int,  collegeId)
+      .input('from', mssqlShared.Date, from)
+      .input('to',   mssqlShared.Date, to));
 
     const dayRes = await r2.query(`
       SELECT
@@ -1215,22 +1245,20 @@ router.get('/:collegeId/reports/fees-collection', requirePerm('collect_fees'), a
         ISNULL(SUM(CASE WHEN p.gateway<>'cash' AND p.gateway_txnid NOT LIKE 'CASH-%' THEN p.amount ELSE 0 END), 0) AS online
       FROM payments p
       JOIN applications a ON a.id = p.application_id
+      ${grantJoin}
       WHERE a.college_id = @cid
         AND p.status = 'success'
         AND CAST(p.completed_at AS DATE) BETWEEN @from AND @to
-        ${courseFilter} ${yearFilter} ${typeFilter}
+        ${allFilters}
       GROUP BY CAST(p.completed_at AS DATE)
       ORDER BY CAST(p.completed_at AS DATE)
     `);
 
     // ── Course-wise breakdown ─────────────────────────────────────────────────
-    const r3 = db.request()
-      .input('cid',   mssqlShared.Int,      collegeId)
-      .input('from',  mssqlShared.Date,     from)
-      .input('to',    mssqlShared.Date,     to);
-    if (course_id)     r3.input('cid2',  mssqlShared.Int,      parseInt(course_id));
-    if (year_of_study) r3.input('yr',    mssqlShared.TinyInt,  parseInt(year_of_study));
-    if (payment_type !== 'all') r3.input('ptype', mssqlShared.NVarChar, payment_type);
+    const r3 = addOptionalInputs(db.request()
+      .input('cid',  mssqlShared.Int,  collegeId)
+      .input('from', mssqlShared.Date, from)
+      .input('to',   mssqlShared.Date, to));
 
     const courseRes = await r3.query(`
       SELECT
@@ -1242,22 +1270,20 @@ router.get('/:collegeId/reports/fees-collection', requirePerm('collect_fees'), a
       FROM payments p
       JOIN applications a ON a.id = p.application_id
       LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+      ${grantJoin}
       WHERE a.college_id = @cid
         AND p.status = 'success'
         AND CAST(p.completed_at AS DATE) BETWEEN @from AND @to
-        ${courseFilter} ${yearFilter} ${typeFilter}
+        ${allFilters}
       GROUP BY a.course_id, fm.degree_course_name, a.year_of_study
       ORDER BY total DESC
     `);
 
     // ── Individual transactions ───────────────────────────────────────────────
-    const r4 = db.request()
-      .input('cid',   mssqlShared.Int,      collegeId)
-      .input('from',  mssqlShared.Date,     from)
-      .input('to',    mssqlShared.Date,     to);
-    if (course_id)     r4.input('cid2',  mssqlShared.Int,      parseInt(course_id));
-    if (year_of_study) r4.input('yr',    mssqlShared.TinyInt,  parseInt(year_of_study));
-    if (payment_type !== 'all') r4.input('ptype', mssqlShared.NVarChar, payment_type);
+    const r4 = addOptionalInputs(db.request()
+      .input('cid',  mssqlShared.Int,  collegeId)
+      .input('from', mssqlShared.Date, from)
+      .input('to',   mssqlShared.Date, to));
 
     const txnRes = await r4.query(`
       SELECT TOP 200
@@ -1273,16 +1299,24 @@ router.get('/:collegeId/reports/fees-collection', requirePerm('collect_fees'), a
       JOIN applications a ON a.id = p.application_id
       JOIN students s ON s.id = a.student_id
       LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+      ${grantJoin}
       WHERE a.college_id = @cid
         AND p.status = 'success'
         AND CAST(p.completed_at AS DATE) BETWEEN @from AND @to
-        ${courseFilter} ${yearFilter} ${typeFilter}
+        ${allFilters}
       ORDER BY p.completed_at DESC
     `);
+
+    const colRes = await db.request()
+      .input('cid', mssqlShared.Int, collegeId)
+      .query(`SELECT name, address FROM colleges WHERE id = @cid`);
+    const college = colRes.recordset[0] || {};
 
     return res.json({
       success: true,
       data: {
+        college_name:    college.name || '',
+        college_address: college.address || '',
         summary: {
           total_collected: parseFloat(summary.total_collected) || 0,
           txn_count:       summary.txn_count || 0,
@@ -1293,11 +1327,317 @@ router.get('/:collegeId/reports/fees-collection', requirePerm('collect_fees'), a
         by_day:    dayRes.recordset.map(r => ({ ...r, total: parseFloat(r.total), cash: parseFloat(r.cash), online: parseFloat(r.online) })),
         by_course: courseRes.recordset.map(r => ({ ...r, total: parseFloat(r.total) })),
         transactions: txnRes.recordset,
-        filters: { from, to, course_id: course_id || null, year_of_study: year_of_study || null, payment_type },
+        filters: { from, to, course_id: course_id || null, year_of_study: year_of_study || null, payment_type, academic_year: academic_year || null, pay_mode: pay_mode || null, grant_type: grant_type || null },
       },
     });
   } catch (err) {
     logger.error({ err }, 'reports/fees-collection error');
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── GET /:collegeId/reports/fees-by-head ──────────────────────────────────────
+// Returns fee-head-level totals for the given period/filters.
+// Used for: Total Fees Collection, Bankwise Statement, Daily Fees Register.
+// Query params: same as fees-collection endpoint.
+router.get('/:collegeId/reports/fees-by-head', requirePerm('collect_fees'), async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId);
+  const {
+    date_from,
+    date_to,
+    course_id,
+    year_of_study,
+    payment_type = 'college_fee',
+    academic_year,
+    pay_mode,
+    grant_type,
+  } = req.query;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const from  = date_from || today;
+  const to    = date_to   || today;
+
+  try {
+    // ── Build filters ─────────────────────────────────────────────────────────
+    const courseFilter = course_id     ? `AND a.course_id = @cid2`           : '';
+    const yearFilter   = year_of_study ? `AND a.year_of_study = @yr`         : '';
+    const typeFilter   = payment_type !== 'all' ? `AND p.payment_type = @ptype` : '';
+    const ayFilter     = academic_year ? `AND a.academic_year = @ay`         : '';
+    const modeFilter   = pay_mode === 'cash'
+      ? `AND (p.gateway = 'cash' OR p.gateway_txnid LIKE 'CASH-%' OR p.gateway IS NULL)`
+      : pay_mode === 'online'
+      ? `AND (p.gateway <> 'cash' AND p.gateway_txnid NOT LIKE 'CASH-%' AND p.gateway IS NOT NULL)`
+      : '';
+    const grantJoin   = grant_type ? `LEFT JOIN division_master dm ON dm.college_id = a.college_id AND dm.faculty_master_id = a.course_id AND dm.division_letter = a.app_division` : '';
+    const grantFilter = grant_type ? `AND dm.funding_type = @gtype` : '';
+    const allFilters  = `${courseFilter} ${yearFilter} ${typeFilter} ${ayFilter} ${modeFilter} ${grantFilter}`;
+
+    const rPay = db.request()
+      .input('cid',  mssqlShared.Int,  collegeId)
+      .input('from', mssqlShared.Date, from)
+      .input('to',   mssqlShared.Date, to);
+    if (course_id)     rPay.input('cid2',  mssqlShared.Int,      parseInt(course_id));
+    if (year_of_study) rPay.input('yr',    mssqlShared.TinyInt,  parseInt(year_of_study));
+    if (payment_type !== 'all') rPay.input('ptype', mssqlShared.NVarChar, payment_type);
+    if (academic_year) rPay.input('ay',    mssqlShared.NVarChar, academic_year);
+    if (grant_type)    rPay.input('gtype', mssqlShared.NVarChar, grant_type);
+
+    // Fetch all matching payments with app context
+    const payRes = await rPay.query(`
+      SELECT
+        p.id AS payment_id,
+        p.amount,
+        p.payment_type,
+        p.gateway,
+        p.gateway_txnid,
+        p.completed_at,
+        a.id AS app_id,
+        a.course_id,
+        a.year_of_study,
+        a.academic_year AS app_academic_year,
+        a.app_division,
+        a.app_caste,
+        a.app_special_status,
+        a.registration_number,
+        COALESCE(
+          NULLIF(LTRIM(RTRIM(ISNULL(a.app_surname,'')+' '+ISNULL(a.app_first_name,'')+' '+ISNULL(a.app_middle_name,''))), ''),
+          s.full_name
+        ) AS student_name,
+        fm.code_no AS faculty_master_id,
+        CASE a.year_of_study
+          WHEN 1 THEN 'FY' WHEN 2 THEN 'SY' WHEN 3 THEN 'TY'
+          WHEN 4 THEN '4Y' WHEN 5 THEN '5Y' ELSE NULL
+        END AS year_level,
+        COALESCE(fm.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
+        fm.degree_course_code
+      FROM payments p
+      JOIN applications a ON a.id = p.application_id
+      JOIN students s ON s.id = a.student_id
+      LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+      ${grantJoin}
+      WHERE a.college_id = @cid
+        AND p.status = 'success'
+        AND CAST(p.completed_at AS DATE) BETWEEN @from AND @to
+        ${allFilters}
+      ORDER BY CAST(p.completed_at AS DATE), a.course_id, a.year_of_study, student_name
+    `);
+
+    const payments = payRes.recordset;
+
+    // ── For each unique application, compute fee breakdown ───────────────────
+    // Cache by app_id to avoid redundant computation
+    const breakdownCache = new Map(); // app_id → { breakdown, platformTotal }
+
+    async function getBreakdown(pmt) {
+      if (breakdownCache.has(pmt.app_id)) return breakdownCache.get(pmt.app_id);
+      try {
+        const feeResult = await feeSvc.compute({
+          collegeId,
+          facultyMasterId: pmt.faculty_master_id,
+          yearLevel:       pmt.year_level,
+          divisionLetter:  pmt.app_division,
+          caste:           pmt.app_caste,
+          specialStatus:   pmt.app_special_status,
+          academicYear:    pmt.app_academic_year || null,
+          pool:            db,
+        });
+        let breakdown = feeResult?.breakdown || [];
+
+        // Fallback: if classwise INNER JOIN returned nothing, fetch fees_master heads
+        // directly for this AY (proportional split using master amounts).
+        if (breakdown.length === 0 && pmt.app_academic_year) {
+          const fbRes = await db.request()
+            .input('cid', mssqlShared.Int, collegeId)
+            .input('ay',  mssqlShared.NVarChar, pmt.app_academic_year)
+            .query(`
+              SELECT fees_code, fees_head, short_name, fees_type, is_refundable,
+                     fees_cat1_amount AS amount
+              FROM fees_master
+              WHERE college_id = @cid AND academic_year = @ay AND is_active = 1
+              ORDER BY sequence_auto_fees
+            `);
+          breakdown = fbRes.recordset.map(r => ({
+            fees_code:    r.fees_code,
+            fees_head:    r.fees_head,
+            short_name:   r.short_name,
+            fees_type:    r.fees_type,
+            is_refundable: !!r.is_refundable,
+            amount:       parseFloat(r.amount) || 0,
+          }));
+        }
+
+        const clearable = breakdown.filter(h => (h.fees_type || '').toLowerCase() !== 'platform');
+        const platformTotal = breakdown
+          .filter(h => (h.fees_type || '').toLowerCase() === 'platform')
+          .reduce((s, h) => s + (parseFloat(h.amount) || 0), 0);
+        const result = { clearable, platformTotal };
+        breakdownCache.set(pmt.app_id, result);
+        return result;
+      } catch (_) {
+        breakdownCache.set(pmt.app_id, { clearable: [], platformTotal: 0 });
+        return { clearable: [], platformTotal: 0 };
+      }
+    }
+
+    // ── Distribute each payment across fee heads ─────────────────────────────
+    // Track cumulative paid per app across all payments (ordered by date)
+    const appCumulative = new Map();  // app_id → { cumBefore, platformDebt }
+
+    // fee-head totals: fees_code → { fees_code, fees_head, short_name, fees_type, total_collected }
+    const headTotals = new Map();
+
+    // bank-grouped totals: will need fees_master bank info — fetch separately
+    // Per-student register rows
+    const studentRows = [];
+
+    for (const pmt of payments) {
+      const { clearable, platformTotal } = await getBreakdown(pmt);
+      const pmtAmt = parseFloat(pmt.amount);
+
+      if (clearable.length === 0) {
+        // Still no breakdown after fallback — skip head distribution, record row with no head amounts
+        studentRows.push({
+          payment_id:        pmt.payment_id,
+          app_id:            pmt.app_id,
+          student_name:      pmt.student_name,
+          registration_number: pmt.registration_number,
+          course_name:       pmt.course_name,
+          degree_course_code: pmt.degree_course_code,
+          year_of_study:     pmt.year_of_study,
+          app_division:      pmt.app_division,
+          completed_at:      pmt.completed_at,
+          payment_type:      pmt.payment_type,
+          gateway:           pmt.gateway,
+          gateway_txnid:     pmt.gateway_txnid,
+          amount:            pmtAmt,
+          head_amounts:      {},
+        });
+        continue;
+      }
+
+      if (!appCumulative.has(pmt.app_id)) {
+        appCumulative.set(pmt.app_id, { cumBefore: 0, platformDebt: platformTotal });
+      }
+      const appState = appCumulative.get(pmt.app_id);
+
+      const platformConsumed = Math.min(appState.platformDebt, pmtAmt);
+      appState.platformDebt -= platformConsumed;
+      const effectiveAmt = pmtAmt - platformConsumed;
+      const cumAfter = appState.cumBefore + effectiveAmt;
+
+      let running = 0;
+      const headAmounts = {};
+      for (const h of clearable) {
+        const headAmt   = parseFloat(h.amount) || 0;
+        const headStart = running;
+        const headEnd   = running + headAmt;
+        running = headEnd;
+        const overlapStart = Math.max(appState.cumBefore, headStart);
+        const overlapEnd   = Math.min(cumAfter, headEnd);
+        const paid = Math.max(0, overlapEnd - overlapStart);
+        if (paid > 0.005) {
+          headAmounts[h.fees_code] = (headAmounts[h.fees_code] || 0) + paid;
+          if (!headTotals.has(h.fees_code)) {
+            headTotals.set(h.fees_code, {
+              fees_code:       h.fees_code,
+              fees_head:       h.fees_head,
+              short_name:      h.short_name,
+              fees_type:       h.fees_type,
+              total_collected: 0,
+            });
+          }
+          headTotals.get(h.fees_code).total_collected += paid;
+        }
+      }
+      appState.cumBefore = cumAfter;
+
+      studentRows.push({
+        payment_id:        pmt.payment_id,
+        app_id:            pmt.app_id,
+        student_name:      pmt.student_name,
+        registration_number: pmt.registration_number,
+        course_name:       pmt.course_name,
+        degree_course_code: pmt.degree_course_code,
+        year_of_study:     pmt.year_of_study,
+        app_division:      pmt.app_division,
+        completed_at:      pmt.completed_at,
+        payment_type:      pmt.payment_type,
+        gateway:           pmt.gateway,
+        gateway_txnid:     pmt.gateway_txnid,
+        amount:            pmtAmt,
+        head_amounts:      headAmounts,
+      });
+    }
+
+    // ── Fetch fees_master with bank info for the relevant heads ──────────────
+    const headCodes = [...headTotals.keys()];
+    let feesWithBank = [];
+    if (headCodes.length > 0) {
+      const codesParam = headCodes.join(',');
+      const bankRes = await db.request()
+        .input('cid', mssqlShared.Int, collegeId)
+        .query(`
+          SELECT fm.fees_code, fm.fees_head, fm.short_name, fm.fees_type,
+                 fm.sequence_auto_fees, fm.credit_to_bank_ledger, fm.academic_year,
+                 bm.bank_name, bm.bank_account_number, bm.branch
+          FROM fees_master fm
+          LEFT JOIN bank_master bm ON bm.ledger_code = fm.credit_to_bank_ledger AND bm.college_id = @cid
+          WHERE fm.college_id = @cid
+            AND fm.fees_code IN (${codesParam})
+          ORDER BY fm.sequence_auto_fees
+        `);
+      feesWithBank = bankRes.recordset;
+    }
+
+    // Merge bank info into headTotals
+    const headList = feesWithBank.map(f => ({
+      ...headTotals.get(f.fees_code),
+      sequence_auto_fees:    f.sequence_auto_fees,
+      credit_to_bank_ledger: f.credit_to_bank_ledger,
+      academic_year:         f.academic_year,
+      bank_name:             f.bank_name,
+      bank_account_number:   f.bank_account_number,
+      branch:                f.branch,
+    })).filter(Boolean);
+
+
+    // ── Build bankwise grouping ───────────────────────────────────────────────
+    const bankGroups = new Map(); // ledger_code → { bank_name, bank_account_number, branch, heads[], total }
+    for (const h of headList) {
+      const key = h.credit_to_bank_ledger ?? 'unassigned';
+      if (!bankGroups.has(key)) {
+        bankGroups.set(key, {
+          ledger_code:        key,
+          bank_name:          h.bank_name || 'Unassigned',
+          bank_account_number: h.bank_account_number || '',
+          branch:             h.branch || '',
+          heads:              [],
+          total:              0,
+        });
+      }
+      const bg = bankGroups.get(key);
+      bg.heads.push({ fees_code: h.fees_code, fees_head: h.fees_head, short_name: h.short_name, academic_year: h.academic_year, total_collected: h.total_collected });
+      bg.total += h.total_collected;
+    }
+
+    // ── Collect info ─────────────────────────────────────────────────────────
+    const colRes = await db.request()
+      .input('cid', mssqlShared.Int, collegeId)
+      .query(`SELECT name, address, phone FROM colleges WHERE id = @cid`);
+    const college = colRes.recordset[0] || {};
+
+    return res.json({
+      success: true,
+      data: {
+        college,
+        head_totals: headList,
+        bank_groups: [...bankGroups.values()],
+        student_rows: studentRows,
+        filters: { from, to, course_id: course_id || null, year_of_study: year_of_study || null, payment_type, academic_year: academic_year || null, pay_mode: pay_mode || null, grant_type: grant_type || null },
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, 'reports/fees-by-head error');
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });

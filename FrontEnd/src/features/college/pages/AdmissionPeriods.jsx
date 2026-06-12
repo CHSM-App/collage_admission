@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getCollegeAdminAdmissionPeriods, createAdmissionPeriod, updateAdmissionPeriod } from '../../../services/collegeAdminService.js'
-import { getFaculty } from '../../../services/masterService.js'
+import { getFaculty, checkFeesConfigured } from '../../../services/masterService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
@@ -13,6 +13,17 @@ const YEAR_LONG  = {
   4: '4Y (Fourth Year)', 5: '5Y (Fifth Year)',
 }
 
+function buildAYOptions() {
+  const now = new Date()
+  const base = now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1
+  return Array.from({ length: 20 }, (_, i) => {
+    const y = base - 5 + i
+    return `${y}-${String(y + 1).slice(-2)}`
+  })
+}
+const AY_OPTIONS = buildAYOptions()
+const CURRENT_AY = (() => { const now = new Date(); const b = now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1; return `${b}-${String(b+1).slice(-2)}` })()
+
 export default function AdmissionPeriods({ collegeId }) {
   const { canWrite } = usePermissions()
   const rw = canWrite('manage_admission_periods')
@@ -24,7 +35,7 @@ export default function AdmissionPeriods({ collegeId }) {
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState('')
   const [form, setForm]             = useState({
-    course_id: '', year_of_study: '1', academic_year: '2026-27',
+    course_id: '', year_of_study: '1', academic_year: CURRENT_AY,
     start_date: '', end_date: '', total_seats: '',
   })
 
@@ -98,11 +109,35 @@ export default function AdmissionPeriods({ collegeId }) {
       setError(`An open admission period already exists for ${conflict.course_name} — ${YEAR_LABEL[form.year_of_study]}. Close it before creating a new one.`)
       return
     }
+    // Check fees are configured for this course + year + academic_year before opening
     setSaving(true)
+    if (form.course_id && form.year_of_study && form.academic_year) {
+      try {
+        const yearLevel = YEAR_LABEL[form.year_of_study] // convert 1→'FY', 2→'SY', etc.
+        const chk = await checkFeesConfigured(collegeId, form.course_id, yearLevel, form.academic_year)
+        const { configured, head_count } = chk.data?.data || {}
+        if (!configured) {
+          const courseName = selectedCourse
+            ? `${selectedCourse.degree_course_code} — ${selectedCourse.degree_course_name}`
+            : `Course #${form.course_id}`
+          const missing = head_count === 0
+            ? 'No fee heads have been added for this year.'
+            : 'Classwise fee amounts have not been set for this class.'
+          setError(`Fees not configured for ${courseName} · ${YEAR_LABEL[form.year_of_study]} · ${form.academic_year}. ${missing} Please go to Masters → Fees Master and set up fees before opening admissions.`)
+          setSaving(false)
+          return
+        }
+      } catch {
+        // If check fails (network error etc.), warn but don't block
+        setError('Could not verify fees configuration. Please check your connection and try again.')
+        setSaving(false)
+        return
+      }
+    }
     try {
       await createAdmissionPeriod(collegeId, form)
       setShowForm(false)
-      setForm({ course_id: '', year_of_study: '1', academic_year: '2026-27', start_date: '', end_date: '', total_seats: '' })
+      setForm({ course_id: '', year_of_study: '1', academic_year: CURRENT_AY, start_date: '', end_date: '', total_seats: '' })
       fetchData()
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to create period.'))
@@ -223,8 +258,10 @@ export default function AdmissionPeriods({ collegeId }) {
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Academic Year</label>
-              <input required value={form.academic_year} onChange={e => setForm(f => ({ ...f, academic_year: e.target.value }))}
-                placeholder="2026-27" className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" />
+              <select required value={form.academic_year} onChange={e => setForm(f => ({ ...f, academic_year: e.target.value }))}
+                className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm">
+                {AY_OPTIONS.map(ay => <option key={ay} value={ay}>{ay}</option>)}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">Total Seats</label>
