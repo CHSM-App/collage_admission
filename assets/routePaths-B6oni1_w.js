@@ -1,0 +1,1 @@
+var e={student:`/login/student`,college:`/login/college`,admin:`/login/vtadmin`},t={student:`/student/dashboard`,college:`/college/dashboard`,admin:`/admin/dashboard`},n={student:`/register/student`},r=`/forgot-password`,i=n=>t[n]||e.student,a=t=>e[t]||e.student;export{i as a,n as i,r as n,a as o,e as r,t};
