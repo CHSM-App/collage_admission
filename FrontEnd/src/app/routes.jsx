@@ -9,6 +9,7 @@ import { useAuthContext } from '../context/AuthContext.jsx'
 // ── Lazy-loaded page components ───────────────────────────────
 // Each entry becomes its own JS chunk — only loaded when the route is visited.
 const PaymentResult       = lazy(() => import('../features/student/pages/PaymentResult.jsx'))
+const PayViaLink          = lazy(() => import('../features/student/pages/PayViaLink.jsx'))
 const AdminLogin          = lazy(() => import('../features/auth/pages/AdminLogin.jsx'))
 const CollegeLogin        = lazy(() => import('../features/auth/pages/CollegeLogin.jsx'))
 const StudentLogin        = lazy(() => import('../features/auth/pages/StudentLogin.jsx'))
@@ -52,6 +53,7 @@ export default function AppRoutes() {
         <Route path="/register/student"    element={<StudentRegister />} />
         <Route path="/forgot-password"     element={<ForgotPassword />} />
         <Route path="/payment-result"      element={<PaymentResult />} />
+        <Route path="/pay/:token"          element={<PayViaLink />} />
 
         {/* Multi-step application wizard — full-screen, no sidebar */}
         <Route element={<ProtectedRoute allowedRoles={['student']} />}>

@@ -45,6 +45,10 @@ function validate(req, res, next) {
 router.post('/payu-webhook', express.urlencoded({ extended: false }), handlePayUWebhook);
 router.post('/payu-return',  express.urlencoded({ extended: false }), handlePayUReturn);
 
+// ── Public payment link route — NO auth middleware ────────────
+// Student opens a /pay/:token link from WhatsApp — no login required.
+router.get('/pay/:token', handlePayViaToken);
+
 // All remaining routes require authentication
 router.use(authenticate);
 router.use(auditLog);
@@ -240,6 +244,11 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
           `);
 
         await tx.commit();
+
+        // Mark payment link token used (if payment originated from a link)
+        await db.request()
+          .input('txnid', mssql.NVarChar, txnid)
+          .query(`UPDATE payment_link_tokens SET used=1 WHERE gateway_txnid=@txnid AND used=0`);
       }
     } catch (e) {
       await tx.rollback();
@@ -328,6 +337,13 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
       }
 
       await tx.commit();
+
+      if (!alreadyProcessed) {
+        // Mark payment link token used (if payment originated from a link)
+        await db.request()
+          .input('txnid', mssql.NVarChar, txnid)
+          .query(`UPDATE payment_link_tokens SET used=1 WHERE gateway_txnid=@txnid AND used=0`);
+      }
     }
   } catch (e) {
     await tx.rollback();
@@ -1027,5 +1043,215 @@ router.post('/cash/:collegeId/applications/:appId', async (req, res) => {
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
+
+// ── POST /payments/generate-link ─────────────────────────────
+// Creates a single-use token for a payment link (auth required).
+// body: { application_id, payment_type }
+router.post('/generate-link', authenticate, async (req, res) => {
+  const { application_id, payment_type = 'application_fee' } = req.body;
+  const appId = parseInt(application_id);
+  if (!appId || !['application_fee','college_fee'].includes(payment_type)) {
+    return res.status(400).json({ success: false, message: 'Invalid parameters.' });
+  }
+
+  try {
+    const appRes = await db.request()
+      .input('id', mssql.Int, appId)
+      .query(`
+        SELECT a.id, a.status, a.fee_total_amount, COALESCE(c.application_fee,0) AS application_fee,
+               c.name AS college_name, a.registration_number
+        FROM applications a
+        JOIN colleges c ON c.id = a.college_id
+        WHERE a.id = @id
+      `);
+    if (!appRes.recordset.length)
+      return res.status(404).json({ success: false, message: 'Application not found.' });
+
+    const app = appRes.recordset[0];
+    let amount = 0;
+    if (payment_type === 'application_fee') {
+      amount = parseFloat(app.application_fee) || 0;
+    } else {
+      const paidRes = await db.request().input('id', mssql.Int, appId)
+        .query(`SELECT ISNULL(SUM(amount),0) AS paid FROM payments WHERE application_id=@id AND payment_type='college_fee' AND status='success'`);
+      amount = Math.max(0, (parseFloat(app.fee_total_amount) || 0) - (parseFloat(paidRes.recordset[0].paid) || 0));
+    }
+    if (amount <= 0)
+      return res.status(400).json({ success: false, message: 'No outstanding amount to pay.' });
+
+    const token     = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+    await db.request()
+      .input('token',   mssql.NVarChar, token)
+      .input('appId',   mssql.Int,      appId)
+      .input('ptype',   mssql.NVarChar, payment_type)
+      .input('amount',  mssql.Decimal,  amount)
+      .input('creator', mssql.NVarChar, req.user?.email || req.user?.name || null)
+      .input('exp',     mssql.DateTime2, expiresAt)
+      .query(`
+        INSERT INTO payment_link_tokens (token, application_id, payment_type, amount, created_by, expires_at)
+        VALUES (@token, @appId, @ptype, @amount, @creator, @exp)
+      `);
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const link = `${frontendUrl}/pay/${token}`;
+
+    return res.json({
+      success: true,
+      link,
+      amount,
+      college_name:        app.college_name,
+      registration_number: app.registration_number,
+    });
+  } catch (err) {
+    logger.error({ err }, 'generate-link error');
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── POST /payments/send-payment-link ─────────────────────────
+// Generates a link and sends it via WhatsApp template 590.
+// body: { application_id, payment_type, phone }
+router.post('/send-payment-link', authenticate, async (req, res) => {
+  const { application_id, payment_type = 'application_fee', phone } = req.body;
+  if (!phone) return res.status(400).json({ success: false, message: 'Phone number is required.' });
+
+  try {
+    // Re-use generate-link logic by calling internally
+    const appId = parseInt(application_id);
+    const appRes = await db.request()
+      .input('id', mssql.Int, appId)
+      .query(`
+        SELECT a.id, a.status, a.fee_total_amount, a.registration_number,
+               COALESCE(c.application_fee,0) AS application_fee,
+               c.name AS college_name
+        FROM applications a
+        JOIN colleges c ON c.id = a.college_id
+        WHERE a.id = @id
+      `);
+    if (!appRes.recordset.length)
+      return res.status(404).json({ success: false, message: 'Application not found.' });
+
+    const app = appRes.recordset[0];
+    let amount = 0;
+    if (payment_type === 'application_fee') {
+      amount = parseFloat(app.application_fee) || 0;
+    } else {
+      const paidRes = await db.request().input('id', mssql.Int, appId)
+        .query(`SELECT ISNULL(SUM(amount),0) AS paid FROM payments WHERE application_id=@id AND payment_type='college_fee' AND status='success'`);
+      amount = Math.max(0, (parseFloat(app.fee_total_amount) || 0) - (parseFloat(paidRes.recordset[0].paid) || 0));
+    }
+    if (amount <= 0)
+      return res.status(400).json({ success: false, message: 'No outstanding amount to pay.' });
+
+    const token     = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    await db.request()
+      .input('token',   mssql.NVarChar,  token)
+      .input('appId',   mssql.Int,       appId)
+      .input('ptype',   mssql.NVarChar,  payment_type)
+      .input('amount',  mssql.Decimal,   amount)
+      .input('creator', mssql.NVarChar,  req.user?.email || req.user?.name || null)
+      .input('exp',     mssql.DateTime2, expiresAt)
+      .query(`
+        INSERT INTO payment_link_tokens (token, application_id, payment_type, amount, created_by, expires_at)
+        VALUES (@token, @appId, @ptype, @amount, @creator, @exp)
+      `);
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const link = `${frontendUrl}/pay/${token}`;
+
+    // Template 590: shop_name, bill_no, bill_url
+    const normPhone = whatsapp.normalisePhone(phone);
+    const sample    = `${app.college_name},${app.registration_number || appId},${link}`;
+    await whatsapp.sendTemplateMessage(normPhone, '590', sample, 'payment_link', appId);
+
+    return res.json({ success: true, message: 'Payment link sent via WhatsApp.', link });
+  } catch (err) {
+    logger.error({ err }, 'send-payment-link error');
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── GET /payments/pay/:token ──────────────────────────────────
+// No auth — returns PayU form fields for the payment link token.
+// NOTE: this route is also registered BEFORE authenticate middleware above.
+async function handlePayViaToken(req, res) {
+  const { token } = req.params;
+  try {
+    const tokRes = await db.request()
+      .input('token', mssql.NVarChar, token)
+      .query(`
+        SELECT t.id, t.application_id, t.payment_type, t.amount, t.expires_at, t.used, t.gateway_txnid,
+               a.app_division,
+               s.full_name AS student_name, s.email AS student_email, s.phone AS student_phone,
+               c.name AS college_name
+        FROM payment_link_tokens t
+        JOIN applications a ON a.id = t.application_id
+        JOIN students s ON s.id = a.student_id
+        JOIN colleges c ON c.id = a.college_id
+        WHERE t.token = @token
+      `);
+
+    if (!tokRes.recordset.length)
+      return res.status(404).json({ success: false, message: 'Payment link not found.' });
+
+    const tok = tokRes.recordset[0];
+
+    if (tok.used)
+      return res.status(410).json({ success: false, message: 'This payment link has already been used.' });
+    if (new Date() > new Date(tok.expires_at))
+      return res.status(410).json({ success: false, message: 'This payment link has expired.' });
+
+    const amount      = parseFloat(tok.amount);
+    const productinfo = tok.payment_type === 'application_fee' ? 'ApplicationFee' : 'CollegeFee';
+    const firstname   = (tok.student_name || 'Student').split(' ')[0].replace(/[^a-zA-Z0-9 ]/g, '').trim() || 'Student';
+    const email       = tok.student_email || 'student@college.edu';
+    const phone       = (tok.student_phone || '').replace(/\D/g, '').slice(-10).padStart(10, '0');
+    const apiBase     = process.env.API_BASE_URL || 'http://localhost:5000';
+
+    // Reuse the same txnid if this token was already seen (page reload).
+    // Generate a new one only on the first visit, then persist it on the token row.
+    let txnid = tok.gateway_txnid;
+    if (!txnid) {
+      txnid = payU.generateTxnId(tok.application_id, tok.payment_type);
+
+      // Persist txnid on the token so reloads reuse it
+      await db.request()
+        .input('txnid', mssql.NVarChar, txnid)
+        .input('token', mssql.NVarChar, token)
+        .query(`UPDATE payment_link_tokens SET gateway_txnid = @txnid WHERE token = @token`);
+
+      // Insert a single pending payment row (idempotent — only on first visit)
+      await db.request()
+        .input('appId',  mssql.Int,      tok.application_id)
+        .input('ptype',  mssql.NVarChar, tok.payment_type)
+        .input('amount', mssql.Decimal,  amount)
+        .input('txnid',  mssql.NVarChar, txnid)
+        .query(`
+          INSERT INTO payments (application_id, payment_type, amount, status, gateway, gateway_txnid, paid_by)
+          VALUES (@appId, @ptype, @amount, 'pending', 'payu', @txnid, 'student')
+        `);
+    }
+
+    // Token is NOT marked used here — payu-return/webhook marks it used after payment succeeds.
+
+    const { endpoint, fields } = payU.buildPaymentFields({
+      txnid, amount, productinfo, firstname, email, phone,
+      surl: `${apiBase}/payments/payu-return`,
+      furl: `${apiBase}/payments/payu-return`,
+      udf1: String(tok.application_id),
+      udf2: tok.payment_type,
+      udf3: tok.app_division || '',
+    });
+
+    return res.json({ success: true, endpoint, fields, college_name: tok.college_name, student_name: tok.student_name, amount });
+  } catch (err) {
+    logger.error({ err }, 'pay/:token error');
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+}
 
 module.exports = router;

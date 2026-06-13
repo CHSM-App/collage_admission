@@ -266,6 +266,7 @@ async function notifyRollAssigned(student, rollNumber, applicationId) {
 
 module.exports = {
   sendOtp,
+  sendTemplateMessage,
   normalisePhone,
   notifyCorrectionRequested,
   notifyApplicationAccepted,

@@ -73,7 +73,15 @@ const db = {
     },
 
     request() {
-        if (!pool) throw new Error('[DB] Pool is not available — reconnect in progress.');
+        if (!pool) {
+            // Return a fake request object whose .input() chains back to itself
+            // and whose .query() rejects — so async route handlers catch it via
+            // try/catch and Express returns a 503 instead of crashing the process.
+            const err = new Error('[DB] Pool is not available — reconnect in progress.');
+            err.statusCode = 503;
+            const fake = { input: () => fake, query: () => Promise.reject(err) };
+            return fake;
+        }
         return pool.request();
     },
 

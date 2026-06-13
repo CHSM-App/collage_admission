@@ -67,6 +67,13 @@ function shutdown(signal) {
 process.on('SIGINT',  () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 
+// Log unhandled promise rejections instead of crashing the process.
+// Express async route handlers should catch their own errors, but this
+// is a last-resort safety net for anything that slips through.
+process.on('unhandledRejection', (reason) => {
+  logger.error({ err: reason }, 'Unhandled promise rejection — keeping process alive');
+});
+
 /**
  * Normalize a port into a number, string, or false.
  */

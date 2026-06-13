@@ -24,6 +24,9 @@ export const setApplicationFee = (collegeId, appId, data) =>
 export const recordCashPayment = (collegeId, appId, data) =>
   api.post(`college-admin/${collegeId}/applications/${appId}/record-cash-payment`, data)
 
+export const recordApplicationFee = (collegeId, appId) =>
+  api.post(`college-admin/${collegeId}/applications/${appId}/record-application-fee`)
+
 export const getCollegeAdminAdmissionPeriods = (collegeId, active) => {
   const qs = active !== undefined ? `?active=${active}` : ''
   return api.get(`college-admin/${collegeId}/admission-periods${qs}`)
@@ -52,3 +55,9 @@ export const getFeesCollectionReport = (collegeId, params) =>
 
 export const getFeesByHeadReport = (collegeId, params) =>
   api.get(`college-admin/${collegeId}/reports/fees-by-head?${params}`)
+
+export const sendPaymentLink = (data) =>
+  api.post('payments/send-payment-link', data)
+
+export const getPaymentLinkData = (token) =>
+  api.get(`payments/pay/${token}`)

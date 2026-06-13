@@ -17,6 +17,8 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 import { initApplicationByCollege, getApplicationForm, updateApplicationStep, acceptDeclaration, submitApplication, getRequiredDocuments, getStudentAutofill } from '../../../services/applicationService.js'
 import { getStudentDocuments } from '../../../services/documentService.js'
+import { recordApplicationFee, sendPaymentLink } from '../../../services/collegeAdminService.js'
+import { initiatePayment } from '../../../services/paymentService.js'
 import StepIndicator from '../../../shared/components/StepIndicator.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import { SkeletonForm } from '../../../shared/components/Skeleton.jsx'
@@ -93,6 +95,14 @@ export default function CollegeApplyWizard() {
   const [state, dispatch] = useReducer(reducer, initialState)
   const [registrationNumber, setRegistrationNumber] = useState(null)
   const [submitError, setSubmitError]               = useState('')
+  const [feeCollected, setFeeCollected]             = useState(false)
+  const [feeCollecting, setFeeCollecting]           = useState(false)
+  const [feeError, setFeeError]                     = useState('')
+  const [feeMode, setFeeMode]                       = useState('')      // 'cash'|'online'|'link'
+  const [onlinePaying, setOnlinePaying]             = useState(false)
+  const [linkPhone, setLinkPhone]                   = useState('')
+  const [linkSent, setLinkSent]                     = useState(false)
+  const [linkSending, setLinkSending]               = useState(false)
 
   // ── Init ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -227,8 +237,16 @@ export default function CollegeApplyWizard() {
     dispatch({ type: 'SET_SAVING', value: true })
     try {
       await acceptDeclaration(state.applicationId, { accepted: true })
-      const submitRes = await submitApplication(state.applicationId)
-      setRegistrationNumber(submitRes.data.data?.registration_number || '')
+      const appFee = parseFloat(state.data.application_fee) || 0
+      if (appFee > 0) {
+        // Don't submit yet — show fee collection screen first.
+        // Submission (status→submitted + reg number) happens after fee is paid.
+        setRegistrationNumber('')
+      } else {
+        // No application fee — submit immediately (inserts a ₹0 payment record + submits)
+        const submitRes = await submitApplication(state.applicationId)
+        setRegistrationNumber(submitRes.data.data?.registration_number || '')
+      }
     } catch (err) {
       const resp = err?.response?.data
       setSubmitError(resp?.message || 'Submission failed. Please try again.')
@@ -262,6 +280,61 @@ export default function CollegeApplyWizard() {
 
   // Success screen
   if (registrationNumber !== null) {
+    const appFee    = parseFloat(state.data.application_fee) || 0
+    const collegeId = user?.id
+
+    async function handleCollectCash() {
+      setFeeError('')
+      setFeeCollecting(true)
+      try {
+        const res = await recordApplicationFee(collegeId, state.applicationId)
+        setFeeCollected(true)
+        if (res.data?.registration_number) setRegistrationNumber(res.data.registration_number)
+      } catch (err) {
+        setFeeError(err?.response?.data?.message || 'Failed to collect fee.')
+      } finally {
+        setFeeCollecting(false)
+      }
+    }
+
+    async function handleSendLink() {
+      setFeeError('')
+      const phone = linkPhone.trim().replace(/\D/g, '')
+      if (phone.length < 10) { setFeeError('Enter a valid 10-digit mobile number.'); return }
+      setLinkSending(true)
+      try {
+        await sendPaymentLink({ application_id: state.applicationId, payment_type: 'application_fee', phone })
+        setLinkSent(true)
+      } catch (err) {
+        setFeeError(err?.response?.data?.message || 'Failed to send link.')
+      } finally {
+        setLinkSending(false)
+      }
+    }
+
+    async function handlePayOnline() {
+      setFeeError('')
+      setOnlinePaying(true)
+      try {
+        const res = await initiatePayment({ application_id: state.applicationId, payment_type: 'application_fee' })
+        const { endpoint, fields } = res.data
+        // Build and auto-submit a hidden PayU form
+        const form = document.createElement('form')
+        form.method = 'POST'
+        form.action = endpoint
+        Object.entries(fields).forEach(([k, v]) => {
+          const inp = document.createElement('input')
+          inp.type = 'hidden'; inp.name = k; inp.value = v
+          form.appendChild(inp)
+        })
+        document.body.appendChild(form)
+        form.submit()
+      } catch (err) {
+        setFeeError(err?.response?.data?.message || 'Failed to initiate online payment.')
+        setOnlinePaying(false)
+      }
+    }
+
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
         <div className="rounded-xl border border-slate-200 bg-white p-8 text-center max-w-sm space-y-4 shadow-sm">
@@ -273,11 +346,101 @@ export default function CollegeApplyWizard() {
           <h2 className="text-xl font-bold text-slate-950">Application Submitted!</h2>
           {registrationNumber && (
             <p className="text-slate-600">
-              Registration number:{' '}
+              Registration No:{' '}
               <span className="font-mono font-bold text-slate-950">{registrationNumber}</span>
             </p>
           )}
-          <p className="text-sm text-slate-500">The application has been submitted and is now under review.</p>
+
+          {/* Application fee collection */}
+          {appFee > 0 && !feeCollected && !linkSent && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-left space-y-3">
+              <p className="text-sm font-semibold text-amber-800">
+                Application Fee: ₹{appFee.toLocaleString('en-IN')}
+              </p>
+
+              {/* Mode picker */}
+              {!feeMode && (
+                <div className="flex flex-col gap-2">
+                  <button onClick={() => setFeeMode('cash')}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 text-left">
+                    💵 Collect Cash Now
+                  </button>
+                  <button onClick={() => setFeeMode('online')}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 text-left">
+                    💳 Pay Online (PayU)
+                  </button>
+                  <button onClick={() => setFeeMode('link')}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 text-left">
+                    📲 Send Payment Link on WhatsApp
+                  </button>
+                </div>
+              )}
+
+              {/* Cash mode */}
+              {feeMode === 'cash' && (
+                <div className="space-y-2">
+                  {feeError && <p className="text-xs text-red-600">{feeError}</p>}
+                  <div className="flex gap-2">
+                    <Button onClick={handleCollectCash} loading={feeCollecting}>
+                      ✓ Mark as Collected
+                    </Button>
+                    <button onClick={() => { setFeeMode(''); setFeeError('') }}
+                      className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Online PayU mode */}
+              {feeMode === 'online' && (
+                <div className="space-y-2">
+                  <p className="text-xs text-slate-600">Pay ₹{appFee.toLocaleString('en-IN')} now via PayU payment gateway.</p>
+                  {feeError && <p className="text-xs text-red-600">{feeError}</p>}
+                  <div className="flex gap-2">
+                    <Button onClick={handlePayOnline} loading={onlinePaying}>
+                      Proceed to Payment
+                    </Button>
+                    <button onClick={() => { setFeeMode(''); setFeeError('') }}
+                      className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
+                  </div>
+                </div>
+              )}
+
+              {/* Send link mode */}
+              {feeMode === 'link' && (
+                <div className="space-y-2">
+                  <label className="block text-xs font-semibold text-slate-600">Mobile Number</label>
+                  <input
+                    type="tel" maxLength={10} inputMode="numeric"
+                    value={linkPhone}
+                    onChange={e => setLinkPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                    placeholder="10-digit mobile"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  {feeError && <p className="text-xs text-red-600">{feeError}</p>}
+                  <div className="flex gap-2">
+                    <Button onClick={handleSendLink} loading={linkSending}>
+                      Send via WhatsApp
+                    </Button>
+                    <button onClick={() => { setFeeMode(''); setFeeError('') }}
+                      className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Confirmed states */}
+          {feeCollected && (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700 font-semibold">
+              ✓ Application fee of ₹{appFee.toLocaleString('en-IN')} collected.
+            </div>
+          )}
+          {linkSent && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700 font-semibold">
+              ✓ Payment link sent on WhatsApp to {linkPhone}.
+            </div>
+          )}
+
           <Button onClick={() => navigate('/college/dashboard?section=inbox')}>
             Go to Inbox →
           </Button>

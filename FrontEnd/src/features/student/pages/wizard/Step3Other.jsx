@@ -107,7 +107,7 @@ export default function Step3Other({ data, errors, globalError, saving, onChange
               hint={data.year_of_study === 1 ? 'Optional — can be added later once issued' : 'Mandatory for SY and TY'}
             />
             <FormField
-              label={`PRN (Permanent Registration Number)${data.year_of_study > 1 ? ' *' : ''}`}
+              label={`PRN/ERN${data.year_of_study > 1 ? ' *' : ''}`}
               name="prn" value={data.prn} onChange={onChange} error={e.prn}
               placeholder={data.year_of_study > 1 ? 'Required for SY/TY' : 'Leave blank for FY'}
               hint={data.year_of_study === 1 ? 'Assigned after FY enrollment — leave blank' : 'Mandatory for SY and TY'}

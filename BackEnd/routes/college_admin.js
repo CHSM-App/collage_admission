@@ -854,6 +854,94 @@ router.post('/:collegeId/applications/:appId/cancel', requireWrite('review_appli
   }
 });
 
+// ── Record application fee cash payment ──────────────────────
+// POST /:collegeId/applications/:appId/record-application-fee
+router.post('/:collegeId/applications/:appId/record-application-fee', requirePerm('collect_fees'), async (req, res) => {
+  const appId     = parseInt(req.params.appId);
+  const collegeId = parseInt(req.params.collegeId);
+  const actor     = req.user?.email || req.user?.name || 'college';
+  const userId    = req.user?.id;
+
+  try {
+    const appRes = await db.request()
+      .input('id',  mssqlShared.Int, appId)
+      .input('cid', mssqlShared.Int, collegeId)
+      .query(`
+        SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study, a.academic_year,
+               COALESCE(c.application_fee, 0) AS application_fee
+        FROM applications a
+        JOIN colleges c ON c.id = a.college_id
+        WHERE a.id = @id AND a.college_id = @cid
+      `);
+
+    if (!appRes.recordset.length)
+      return res.status(404).json({ success: false, message: 'Application not found.' });
+
+    const app = appRes.recordset[0];
+    const fee = parseFloat(app.application_fee) || 0;
+    if (fee <= 0)
+      return res.status(400).json({ success: false, message: 'No application fee configured for this college.' });
+
+    // Check not already paid
+    const paidRes = await db.request()
+      .input('appId', mssqlShared.Int, appId)
+      .query(`SELECT COUNT(*) AS cnt FROM payments WHERE application_id=@appId AND payment_type='application_fee' AND status='success'`);
+    if (paidRes.recordset[0].cnt > 0)
+      return res.status(400).json({ success: false, message: 'Application fee already collected.' });
+
+    // Generate registration number (same logic as payments.js)
+    const ayClean  = (app.academic_year || '').replace('-', '');
+    const prefix   = `${ayClean}-${String(app.course_id).padStart(2, '0')}-${app.year_of_study}`;
+    const cntRes   = await db.request()
+      .input('regPrefix', mssqlShared.NVarChar, `${prefix}-%`)
+      .query(`SELECT COUNT(*) AS cnt FROM applications WHERE registration_number LIKE @regPrefix AND registration_number IS NOT NULL`);
+    const seq    = (cntRes.recordset[0].cnt || 0) + 1;
+    const regNum = `${prefix}-${String(seq).padStart(4, '0')}`;
+
+    const pool = await db;
+    const tx   = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input('appId',  mssqlShared.Int,      appId)
+        .input('amount', mssqlShared.Decimal,   fee)
+        .input('userId', mssqlShared.Int,       userId || null)
+        .input('actor',  mssqlShared.NVarChar,  actor)
+        .query(`
+          INSERT INTO payments (application_id, payment_type, amount, status, gateway, gateway_txnid, completed_at, paid_by, paid_by_user_id, created_by)
+          VALUES (@appId, 'application_fee', @amount, 'success', 'cash',
+            CONCAT('CASH-', FORMAT(GETDATE(),'yyyyMMddHHmmss')),
+            GETDATE(), 'college', @userId, @actor)
+        `);
+
+      await tx.request()
+        .input('id',     mssqlShared.Int,      appId)
+        .input('regNum', mssqlShared.NVarChar,  regNum)
+        .input('actor',  mssqlShared.NVarChar,  actor)
+        .query(`
+          UPDATE applications
+          SET status = 'submitted', registration_number = @regNum,
+              application_fee_paid = 1, submitted_at = GETDATE(),
+              updated_at = GETDATE(), status_updated_at = GETDATE(),
+              updated_by = @actor
+          WHERE id = @id AND status = 'draft'
+        `);
+
+      await tx.commit();
+    } catch (e) {
+      await tx.rollback();
+      throw e;
+    }
+
+    await logActivity(appId, 'submitted', 'college', `Cash application fee: ₹${fee.toLocaleString('en-IN')}`);
+
+    return res.json({ success: true, message: `Application fee collected and application submitted.`, amount: fee, registration_number: regNum });
+  } catch (err) {
+    logger.error({ err }, 'record-application-fee error');
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
 // ── Record offline (cash) college fee payment ────────────────
 // POST /:collegeId/applications/:appId/record-cash-payment
 // body: { amount, note? }

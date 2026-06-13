@@ -3,6 +3,7 @@
  * Filters: date range (daily default), course, year of study, payment type.
  * Shows: summary cards, day-wise table, course-wise table, transaction list.
  */
+
 import { useEffect, useState, useCallback } from 'react'
 import { getFeesCollectionReport, getFeesByHeadReport } from '../../../services/collegeAdminService.js'
 import { getFaculty } from '../../../services/masterService.js'
@@ -34,6 +35,7 @@ function buildAYOptions() {
     return `${y}-${String(y + 1).slice(-2)}`
   })
 }
+
 const AY_OPTIONS = buildAYOptions()
 const CURRENT_AY = (() => { const now = new Date(); const b = now.getMonth() >= 5 ? now.getFullYear() : now.getFullYear() - 1; return `${b}-${String(b+1).slice(-2)}` })()
 
