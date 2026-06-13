@@ -278,175 +278,59 @@ export default function CollegeApplyWizard() {
     )
   }
 
-  // Success screen
-  if (registrationNumber !== null) {
-    const appFee    = parseFloat(state.data.application_fee) || 0
-    const collegeId = user?.id
+  // Fee handlers — used inside CollegeReviewStep after submission
+  const appFee    = parseFloat(state.data.application_fee) || 0
+  const collegeId = user?.id
 
-    async function handleCollectCash() {
-      setFeeError('')
-      setFeeCollecting(true)
-      try {
-        const res = await recordApplicationFee(collegeId, state.applicationId)
-        setFeeCollected(true)
-        if (res.data?.registration_number) setRegistrationNumber(res.data.registration_number)
-      } catch (err) {
-        setFeeError(err?.response?.data?.message || 'Failed to collect fee.')
-      } finally {
-        setFeeCollecting(false)
-      }
+  async function handleCollectCash() {
+    setFeeError('')
+    setFeeCollecting(true)
+    try {
+      const res = await recordApplicationFee(collegeId, state.applicationId)
+      setFeeCollected(true)
+      if (res.data?.registration_number) setRegistrationNumber(res.data.registration_number)
+    } catch (err) {
+      setFeeError(err?.response?.data?.message || 'Failed to collect fee.')
+    } finally {
+      setFeeCollecting(false)
     }
+  }
 
-    async function handleSendLink() {
-      setFeeError('')
-      const phone = linkPhone.trim().replace(/\D/g, '')
-      if (phone.length < 10) { setFeeError('Enter a valid 10-digit mobile number.'); return }
-      setLinkSending(true)
-      try {
-        await sendPaymentLink({ application_id: state.applicationId, payment_type: 'application_fee', phone })
-        setLinkSent(true)
-      } catch (err) {
-        setFeeError(err?.response?.data?.message || 'Failed to send link.')
-      } finally {
-        setLinkSending(false)
-      }
+  async function handleSendLink() {
+    setFeeError('')
+    const phone = linkPhone.trim().replace(/\D/g, '')
+    if (phone.length < 10) { setFeeError('Enter a valid 10-digit mobile number.'); return }
+    setLinkSending(true)
+    try {
+      await sendPaymentLink({ application_id: state.applicationId, payment_type: 'application_fee', phone })
+      setLinkSent(true)
+    } catch (err) {
+      setFeeError(err?.response?.data?.message || 'Failed to send link.')
+    } finally {
+      setLinkSending(false)
     }
+  }
 
-    async function handlePayOnline() {
-      setFeeError('')
-      setOnlinePaying(true)
-      try {
-        const res = await initiatePayment({ application_id: state.applicationId, payment_type: 'application_fee' })
-        const { endpoint, fields } = res.data
-        // Build and auto-submit a hidden PayU form
-        const form = document.createElement('form')
-        form.method = 'POST'
-        form.action = endpoint
-        Object.entries(fields).forEach(([k, v]) => {
-          const inp = document.createElement('input')
-          inp.type = 'hidden'; inp.name = k; inp.value = v
-          form.appendChild(inp)
-        })
-        document.body.appendChild(form)
-        form.submit()
-      } catch (err) {
-        setFeeError(err?.response?.data?.message || 'Failed to initiate online payment.')
-        setOnlinePaying(false)
-      }
+  async function handlePayOnline() {
+    setFeeError('')
+    setOnlinePaying(true)
+    try {
+      const res = await initiatePayment({ application_id: state.applicationId, payment_type: 'application_fee' })
+      const { endpoint, fields } = res.data
+      const form = document.createElement('form')
+      form.method = 'POST'
+      form.action = endpoint
+      Object.entries(fields).forEach(([k, v]) => {
+        const inp = document.createElement('input')
+        inp.type = 'hidden'; inp.name = k; inp.value = v
+        form.appendChild(inp)
+      })
+      document.body.appendChild(form)
+      form.submit()
+    } catch (err) {
+      setFeeError(err?.response?.data?.message || 'Failed to initiate online payment.')
+      setOnlinePaying(false)
     }
-
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-8 text-center max-w-sm space-y-4 shadow-sm">
-          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100">
-            <svg className="h-7 w-7 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <h2 className="text-xl font-bold text-slate-950">Application Submitted!</h2>
-          {registrationNumber && (
-            <p className="text-slate-600">
-              Registration No:{' '}
-              <span className="font-mono font-bold text-slate-950">{registrationNumber}</span>
-            </p>
-          )}
-
-          {/* Application fee collection */}
-          {appFee > 0 && !feeCollected && !linkSent && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-left space-y-3">
-              <p className="text-sm font-semibold text-amber-800">
-                Application Fee: ₹{appFee.toLocaleString('en-IN')}
-              </p>
-
-              {/* Mode picker */}
-              {!feeMode && (
-                <div className="flex flex-col gap-2">
-                  <button onClick={() => setFeeMode('cash')}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 text-left">
-                    💵 Collect Cash Now
-                  </button>
-                  <button onClick={() => setFeeMode('online')}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 text-left">
-                    💳 Pay Online (PayU)
-                  </button>
-                  <button onClick={() => setFeeMode('link')}
-                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 text-left">
-                    📲 Send Payment Link on WhatsApp
-                  </button>
-                </div>
-              )}
-
-              {/* Cash mode */}
-              {feeMode === 'cash' && (
-                <div className="space-y-2">
-                  {feeError && <p className="text-xs text-red-600">{feeError}</p>}
-                  <div className="flex gap-2">
-                    <Button onClick={handleCollectCash} loading={feeCollecting}>
-                      ✓ Mark as Collected
-                    </Button>
-                    <button onClick={() => { setFeeMode(''); setFeeError('') }}
-                      className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
-                  </div>
-                </div>
-              )}
-
-              {/* Online PayU mode */}
-              {feeMode === 'online' && (
-                <div className="space-y-2">
-                  <p className="text-xs text-slate-600">Pay ₹{appFee.toLocaleString('en-IN')} now via PayU payment gateway.</p>
-                  {feeError && <p className="text-xs text-red-600">{feeError}</p>}
-                  <div className="flex gap-2">
-                    <Button onClick={handlePayOnline} loading={onlinePaying}>
-                      Proceed to Payment
-                    </Button>
-                    <button onClick={() => { setFeeMode(''); setFeeError('') }}
-                      className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
-                  </div>
-                </div>
-              )}
-
-              {/* Send link mode */}
-              {feeMode === 'link' && (
-                <div className="space-y-2">
-                  <label className="block text-xs font-semibold text-slate-600">Mobile Number</label>
-                  <input
-                    type="tel" maxLength={10} inputMode="numeric"
-                    value={linkPhone}
-                    onChange={e => setLinkPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                    placeholder="10-digit mobile"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                  />
-                  {feeError && <p className="text-xs text-red-600">{feeError}</p>}
-                  <div className="flex gap-2">
-                    <Button onClick={handleSendLink} loading={linkSending}>
-                      Send via WhatsApp
-                    </Button>
-                    <button onClick={() => { setFeeMode(''); setFeeError('') }}
-                      className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Confirmed states */}
-          {feeCollected && (
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm text-emerald-700 font-semibold">
-              ✓ Application fee of ₹{appFee.toLocaleString('en-IN')} collected.
-            </div>
-          )}
-          {linkSent && (
-            <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700 font-semibold">
-              ✓ Payment link sent on WhatsApp to {linkPhone}.
-            </div>
-          )}
-
-          <Button onClick={() => navigate('/college/dashboard?section=inbox')}>
-            Go to Inbox →
-          </Button>
-        </div>
-      </div>
-    )
   }
 
   const stepProps = { data, errors, globalError, saving, onChange: handleChange, setField }
@@ -542,6 +426,24 @@ export default function CollegeApplyWizard() {
               onEditStep={goStep}
               onSubmit={handleFinalSubmit}
               onSaveAndReturn={() => navigate(`/college/dashboard?section=app&app_id=${applicationId}`)}
+              onGoToInbox={() => navigate('/college/dashboard?section=inbox')}
+              submitted={registrationNumber !== null}
+              registrationNumber={registrationNumber}
+              appFee={appFee}
+              feeCollected={feeCollected}
+              linkSent={linkSent}
+              feeMode={feeMode}
+              setFeeMode={setFeeMode}
+              feeError={feeError}
+              setFeeError={setFeeError}
+              feeCollecting={feeCollecting}
+              onlinePaying={onlinePaying}
+              linkSending={linkSending}
+              linkPhone={linkPhone}
+              setLinkPhone={setLinkPhone}
+              onCollectCash={handleCollectCash}
+              onPayOnline={handlePayOnline}
+              onSendLink={handleSendLink}
             />
           )}
         </div>
@@ -565,7 +467,13 @@ function SkipButton({ onClick, saving }) {
 }
 
 // ── Review step (college-specific — shows fee info, checks required docs) ──
-function CollegeReviewStep({ data, saving, submitError, isEditMode, onBack, onEditStep, onSubmit, onSaveAndReturn }) {
+function CollegeReviewStep({
+  data, saving, submitError, isEditMode, onBack, onEditStep, onSubmit, onSaveAndReturn, onGoToInbox,
+  submitted, registrationNumber, appFee,
+  feeCollected, linkSent, feeMode, setFeeMode, feeError, setFeeError,
+  feeCollecting, onlinePaying, linkSending, linkPhone, setLinkPhone,
+  onCollectCash, onPayOnline, onSendLink,
+}) {
   const d = data
 
   const linkedMap = Object.fromEntries((d.linked_documents || []).map(doc => [doc.document_type_id, doc]))
@@ -715,27 +623,130 @@ function CollegeReviewStep({ data, saving, submitError, isEditMode, onBack, onEd
           </div>
         )}
 
-        <div className="flex flex-col-reverse sm:flex-row gap-3 pt-2">
-          <Button variant="secondary" onClick={onBack} disabled={saving}>← Back</Button>
-          {isEditMode ? (
-            <Button onClick={onSaveAndReturn} className="sm:ml-auto">
-              Save &amp; Return to Application →
-            </Button>
-          ) : (
-            <Button
-              onClick={onSubmit}
-              loading={saving}
-              disabled={!canSubmit || saving}
-              className={`sm:ml-auto ${!canSubmit ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              Submit Application →
-            </Button>
-          )}
-        </div>
-        {!isEditMode && !canSubmit && (
-          <p className="text-xs text-center text-red-500">
-            Upload all required documents before submitting.
-          </p>
+        {/* ── After submission: fee collection panel ── */}
+        {submitted && (
+          <div className="space-y-3 pt-1">
+            {/* Status banner */}
+            <div className={`rounded-lg border px-4 py-3 ${feeCollected || !appFee ? 'border-emerald-200 bg-emerald-50' : linkSent ? 'border-blue-200 bg-blue-50' : 'border-amber-200 bg-amber-50'}`}>
+              <div className="text-sm">
+                {(feeCollected || !appFee) ? (
+                  <>
+                    <p className="font-bold text-emerald-800">Application Submitted</p>
+                    {registrationNumber && <p className="text-emerald-700 mt-0.5">Reg. No: <span className="font-mono font-bold">{registrationNumber}</span></p>}
+                    {feeCollected && <p className="text-emerald-700 mt-0.5">Application fee of ₹{appFee.toLocaleString('en-IN')} collected (cash).</p>}
+                  </>
+                ) : linkSent ? (
+                  <>
+                    <p className="font-bold text-blue-800">Payment Link Sent</p>
+                    <p className="text-blue-700 mt-0.5">Application will be submitted once the student pays via the link sent to {linkPhone}.</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-bold text-amber-800">Payment Pending</p>
+                    <p className="text-amber-700 mt-0.5">Collect the application fee of ₹{appFee.toLocaleString('en-IN')} to complete submission.</p>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Fee collection options — shown only when fee is pending */}
+            {appFee > 0 && !feeCollected && !linkSent && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 overflow-hidden">
+                <style>{`
+                  @keyframes fee-slide-in  { from { opacity:0; transform:translateX(32px) } to { opacity:1; transform:translateX(0) } }
+                  @keyframes fee-slide-out { from { opacity:0; transform:translateX(-32px) } to { opacity:1; transform:translateX(0) } }
+                  .fee-slide-in  { animation: fee-slide-in  200ms ease both }
+                  .fee-slide-out { animation: fee-slide-out 200ms ease both }
+                `}</style>
+
+                {!feeMode && (
+                  <div key="picker" className="fee-slide-out flex flex-col gap-2">
+                    <button onClick={() => setFeeMode('cash')}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 text-left">
+                      Collect Cash Now
+                    </button>
+                    <button onClick={() => setFeeMode('online')}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 text-left">
+                      Pay Online (PayU)
+                    </button>
+                    <button onClick={() => setFeeMode('link')}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 text-left">
+                      Send Payment Link on WhatsApp
+                    </button>
+                  </div>
+                )}
+
+                {feeMode === 'cash' && (
+                  <div key="cash" className="fee-slide-in space-y-2">
+                    {feeError && <p className="text-xs text-red-600">{feeError}</p>}
+                    <div className="flex gap-2">
+                      <Button onClick={onCollectCash} loading={feeCollecting}>✓ Mark as Collected</Button>
+                      <button onClick={() => { setFeeMode(''); setFeeError('') }} className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
+                    </div>
+                  </div>
+                )}
+
+                {feeMode === 'online' && (
+                  <div key="online" className="fee-slide-in space-y-2">
+                    <p className="text-xs text-slate-600">Pay ₹{appFee.toLocaleString('en-IN')} now via PayU payment gateway.</p>
+                    {feeError && <p className="text-xs text-red-600">{feeError}</p>}
+                    <div className="flex gap-2">
+                      <Button onClick={onPayOnline} loading={onlinePaying}>Proceed to Payment</Button>
+                      <button onClick={() => { setFeeMode(''); setFeeError('') }} className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
+                    </div>
+                  </div>
+                )}
+
+                {feeMode === 'link' && (
+                  <div key="link" className="fee-slide-in space-y-2">
+                    <label className="block text-xs font-semibold text-slate-600">Mobile Number</label>
+                    <input
+                      type="tel" maxLength={10} inputMode="numeric"
+                      value={linkPhone}
+                      onChange={e => setLinkPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                      placeholder="10-digit mobile"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    {feeError && <p className="text-xs text-red-600">{feeError}</p>}
+                    <div className="flex gap-2">
+                      <Button onClick={onSendLink} loading={linkSending}>Send via WhatsApp</Button>
+                      <button onClick={() => { setFeeMode(''); setFeeError('') }} className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <Button onClick={onGoToInbox} className="w-full">Go to Inbox →</Button>
+          </div>
+        )}
+
+        {/* Submit / back buttons — hidden once submitted */}
+        {!submitted && (
+          <>
+            <div className="flex flex-col-reverse sm:flex-row gap-3 pt-2">
+              <Button variant="secondary" onClick={onBack} disabled={saving}>← Back</Button>
+              {isEditMode ? (
+                <Button onClick={onSaveAndReturn} className="sm:ml-auto">
+                  Save &amp; Return to Application →
+                </Button>
+              ) : (
+                <Button
+                  onClick={onSubmit}
+                  loading={saving}
+                  disabled={!canSubmit || saving}
+                  className={`sm:ml-auto ${!canSubmit ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  Submit Application →
+                </Button>
+              )}
+            </div>
+            {!isEditMode && !canSubmit && (
+              <p className="text-xs text-center text-red-500">
+                Upload all required documents before submitting.
+              </p>
+            )}
+          </>
         )}
       </div>
     </div>

@@ -13,7 +13,7 @@ import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 
 const EMPTY_REG = {
-  full_name: '', email: '', password: '', phone: '',
+  full_name: '', email: '', phone: '',
 }
 
 export default function AddApplicationStart() {
@@ -93,20 +93,17 @@ export default function AddApplicationStart() {
   // ── Register new student ────────────────────────────────────
   async function handleRegister() {
     setRegError('')
-    const { full_name, email, password, phone } = regForm
+    const { full_name, email, phone } = regForm
     if (!full_name.trim()) { setRegError('Full name is required.'); return }
     if (!email.trim())     { setRegError('Email is required.'); return }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setRegError('Enter a valid email address.'); return }
     if (phone.trim() && !/^[6-9]\d{9}$/.test(phone.trim())) { setRegError('Mobile number must be 10 digits starting with 6–9.'); return }
-    if (!password)         { setRegError('Password is required.'); return }
-    if (password.length < 6) { setRegError('Password must be at least 6 characters.'); return }
 
     setRegistering(true)
     try {
       const res = await registerStudentByCollege({
         full_name: full_name.trim(),
         email:     email.trim().toLowerCase(),
-        password,
         phone:     phone.trim() || undefined,
       })
       const newStudent = res.data.user
@@ -254,12 +251,6 @@ export default function AddApplicationStart() {
               maxLength={10}
               inputMode="numeric"
             />
-            <RegField
-              label="Password" required type="password"
-              value={regForm.password}
-              onChange={v => setRegForm(f => ({ ...f, password: v }))}
-              placeholder="Min 6 characters"
-            />
           </div>
 
           {regError && (
@@ -276,7 +267,7 @@ export default function AddApplicationStart() {
           </div>
 
           <p className="text-xs text-slate-400">
-            The student can log in with this email and password to track their application.
+            The student can use <strong>Forgot Password</strong> on the login page to set their password and track their application.
           </p>
         </div>
       )}

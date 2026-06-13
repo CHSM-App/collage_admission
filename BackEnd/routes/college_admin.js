@@ -35,21 +35,21 @@ router.use(authenticate);
 router.param('collegeId', (req, res, next) => requireCollegeAccess(req, res, next));
 
 // ── Activity log helper ─────────────────────────────────────
-async function logActivity(appId, action, actorRole, note = null) {
-  try {
-    await db.request()
-      .input('appId',     mssqlShared.Int,      parseInt(appId))
-      .input('action',    mssqlShared.NVarChar,  action)
-      .input('actorRole', mssqlShared.NVarChar,  actorRole)
-      .input('note',      mssqlShared.NVarChar,  note || null)
-      .query(`
-        INSERT INTO application_activity_log (application_id, action, actor_role, note)
-        VALUES (@appId, @action, @actorRole, @note)
-      `);
-  } catch (e) {
-    logger.warn({ err: e }, 'logActivity failed');
-  }
-}
+// async function logActivity(appId, action, actorRole, note = null) {
+//   try {
+//     await db.request()
+//       .input('appId',     mssqlShared.Int,      parseInt(appId))
+//       .input('action',    mssqlShared.NVarChar,  action)
+//       .input('actorRole', mssqlShared.NVarChar,  actorRole)
+//       .input('note',      mssqlShared.NVarChar,  note || null)
+//       .query(`
+//         INSERT INTO application_activity_log (application_id, action, actor_role, note)
+//         VALUES (@appId, @action, @actorRole, @note)
+//       `);
+//   } catch (e) {
+//     logger.warn({ err: e }, 'logActivity failed');
+//   }
+// }
 
 // ── WhatsApp student info helper ────────────────────────────
 async function getStudentForNotification(appId) {
@@ -232,14 +232,17 @@ router.get('/:collegeId/students/search', async (req, res) => {
 // ── Application Inbox ───────────────────────────────────────
 
 router.get('/:collegeId/applications', requirePerm('review_application'), async (req, res) => {
-  const { status, course_id, year_of_study } = req.query;
+  const { status, course_id, year_of_study, pending_link } = req.query;
   const { page, limit, offset } = parsePage(req.query);
 
   try {
     const pool = await db;
     const collegeId = parseInt(req.params.collegeId);
 
-    let where = `WHERE a.college_id = @col AND a.status <> 'draft'`;
+    // When filtering by pending link, include draft applications too (link may have been sent before submission)
+    let where = pending_link === '1'
+      ? `WHERE a.college_id = @col`
+      : `WHERE a.college_id = @col AND a.status <> 'draft'`;
 
     // Build shared inputs map to apply to both requests independently
     const extraInputs = [];
@@ -262,6 +265,13 @@ router.get('/:collegeId/applications', requirePerm('review_application'), async 
       where += ' AND a.year_of_study = @yr';
       extraInputs.push(r => r.input('yr', parseInt(year_of_study)));
     }
+    // Filter: only applications that have an active (unused, unexpired) payment link
+    if (pending_link === '1') {
+      where += ` AND EXISTS (
+        SELECT 1 FROM payment_link_tokens plt
+        WHERE plt.application_id = a.id AND plt.used = 0 AND plt.expires_at > GETDATE()
+      )`;
+    }
 
     function makeRequest() {
       const r = pool.request().input('col', collegeId);
@@ -283,7 +293,11 @@ router.get('/:collegeId/applications', requirePerm('review_application'), async 
           a.id, a.registration_number, a.year_of_study, a.academic_year,
           a.status, a.submitted_at, a.roll_number, a.course_id,
           s.full_name AS student_name, s.email AS student_email, s.phone,
-          COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name
+          COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM payment_link_tokens plt
+            WHERE plt.application_id = a.id AND plt.used = 0 AND plt.expires_at > GETDATE()
+          ) THEN 1 ELSE 0 END AS has_pending_link
         ${joins} ${where}
         ORDER BY a.submitted_at DESC
         ${paginateQuery(offset, limit)}
@@ -385,7 +399,11 @@ router.get('/:collegeId/applications/:appId', requirePerm('review_application'),
           s.full_name, s.email AS student_email, s.phone,
           s.dob, s.gender, s.address, s.city, s.category,
           COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name,
-          col.name AS college_name
+          col.name AS college_name,
+          CASE WHEN EXISTS (
+            SELECT 1 FROM payment_link_tokens plt
+            WHERE plt.application_id = a.id AND plt.used = 0 AND plt.expires_at > GETDATE()
+          ) THEN 1 ELSE 0 END AS has_pending_link
         FROM applications a
         JOIN students       s   ON s.id      = a.student_id
         LEFT JOIN faculty_master fm  ON fm.code_no = a.course_id AND fm.college_id = a.college_id
@@ -484,7 +502,7 @@ router.post('/:collegeId/applications/:appId/request-correction', requireWrite('
         WHERE id = @id
       `);
 
-    await logActivity(req.params.appId, 'correction_requested', 'college', note.trim());
+    // await logActivity(req.params.appId, 'correction_requested', 'college', note.trim());
     getStudentForNotification(req.params.appId).then(s => s && whatsapp.notifyCorrectionRequested(s));
 
     return res.json({ success: true, message: 'Correction requested. Student has been notified.' });
@@ -534,7 +552,7 @@ router.post('/:collegeId/applications/:appId/approve', requireWrite('review_appl
       throw txErr;
     }
 
-    await logActivity(req.params.appId, 'accepted', 'college', null);
+    // await logActivity(req.params.appId, 'accepted', 'college', null);
     getStudentForNotification(req.params.appId).then(s => s && whatsapp.notifyApplicationAccepted(s));
 
     return res.json({ success: true, message: 'Application accepted. Student has been notified to visit the college.' });
@@ -571,7 +589,7 @@ router.post('/:collegeId/applications/:appId/reject', requireWrite('review_appli
         WHERE id = @id
       `);
 
-    await logActivity(req.params.appId, 'rejected', 'college', reason || null);
+    // await logActivity(req.params.appId, 'rejected', 'college', reason || null);
     getStudentForNotification(req.params.appId).then(s => s && whatsapp.notifyApplicationRejected(s));
 
     return res.json({ success: true, message: 'Application rejected.' });
@@ -736,7 +754,7 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
     await saveInstallments(parseInt(req.params.appId), validInstallments, actor, null);
 
     const instSummary = validInstallments.map(i => `Inst-${i.installment_no}: ₹${i.amount}`).join(', ');
-    await logActivity(req.params.appId, 'confirmed', 'college', `Total fee: ₹${total}. Installments: ${instSummary}`);
+    // await logActivity(req.params.appId, 'confirmed', 'college', `Total fee: ₹${total}. Installments: ${instSummary}`);
 
     return res.json({ success: true, message: 'Admission confirmed. Student can now pay the college fee.' });
   } catch (err) {
@@ -845,7 +863,7 @@ router.post('/:collegeId/applications/:appId/cancel', requireWrite('review_appli
       throw txErr;
     }
 
-    await logActivity(req.params.appId, 'cancelled', 'college', reason || null);
+    // await logActivity(req.params.appId, 'cancelled', 'college', reason || null);
 
     return res.json({ success: true, message: 'Application cancelled and seat freed.' });
   } catch (err) {
@@ -933,7 +951,7 @@ router.post('/:collegeId/applications/:appId/record-application-fee', requirePer
       throw e;
     }
 
-    await logActivity(appId, 'submitted', 'college', `Cash application fee: ₹${fee.toLocaleString('en-IN')}`);
+    // await logActivity(appId, 'submitted', 'college', `Cash application fee: ₹${fee.toLocaleString('en-IN')}`);
 
     return res.json({ success: true, message: `Application fee collected and application submitted.`, amount: fee, registration_number: regNum });
   } catch (err) {
@@ -1038,13 +1056,13 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
 
     const noteText = note ? ` — ${note}` : '';
     if (fullyPaid) {
-      await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${newTotalPaid.toLocaleString('en-IN')} (full)${noteText}`);
+      // await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${newTotalPaid.toLocaleString('en-IN')} (full)${noteText}`);
       if (firstPaid) getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
     } else if (firstPaid) {
-      await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${newTotalPaid.toLocaleString('en-IN')} paid, ₹${newRemaining.toLocaleString('en-IN')} remaining${noteText}`);
+      //  await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${newTotalPaid.toLocaleString('en-IN')} paid, ₹${newRemaining.toLocaleString('en-IN')} remaining${noteText}`);
       getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
     } else {
-      await logActivity(appId, 'fee_instalment_paid', 'college', `Cash: ₹${amt.toLocaleString('en-IN')}, ₹${newRemaining.toLocaleString('en-IN')} remaining${noteText}`);
+      // await logActivity(appId, 'fee_instalment_paid', 'college', `Cash: ₹${amt.toLocaleString('en-IN')}, ₹${newRemaining.toLocaleString('en-IN')} remaining${noteText}`);
     }
 
     return res.json({
@@ -1121,7 +1139,7 @@ router.post('/:collegeId/roll-numbers/generate', requirePerm('assign_subjects'),
             SET roll_number = @roll, status = 'roll_assigned', updated_at = GETDATE(), updated_by = @actor
             WHERE id = @id
           `);
-        await logActivity(app.id, 'roll_assigned', 'college', `Roll number: ${nextRoll}`);
+        // await logActivity(app.id, 'roll_assigned', 'college', `Roll number: ${nextRoll}`);
         assignedRolls.push({ id: app.id, roll: String(nextRoll) });
         nextRoll++;
       }
@@ -1280,7 +1298,7 @@ router.get('/:collegeId/reports/fees-collection', requirePerm('collect_fees'), a
       ? `AND (p.gateway <> 'cash' AND p.gateway_txnid NOT LIKE 'CASH-%' AND p.gateway IS NOT NULL)`
       : '';
     // grant_type filter requires joining division_master
-    const grantJoin   = grant_type ? `LEFT JOIN division_master dm ON dm.college_id = a.college_id AND dm.faculty_master_id = a.course_id AND dm.division_letter = a.app_division` : '';
+    const grantJoin   = grant_type ? `LEFT JOIN division_master dm ON dm.college_id = a.college_id AND dm.faculty_master_id = a.course_id AND dm.division_letter = a.app_division AND dm.year_level = CASE a.year_of_study WHEN 1 THEN 'FY' WHEN 2 THEN 'SY' WHEN 3 THEN 'TY' WHEN 4 THEN '4Y' WHEN 5 THEN '5Y' END` : '';
     const grantFilter = grant_type ? `AND dm.funding_type = @gtype` : '';
 
     if (course_id)     r.input('cid2',  mssqlShared.Int,      parseInt(course_id));
@@ -1382,11 +1400,13 @@ router.get('/:collegeId/reports/fees-collection', requirePerm('collect_fees'), a
           s.full_name
         ) AS student_name,
         a.registration_number,
-        COALESCE(fm.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name
+        COALESCE(fm.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
+        CASE WHEN plt.id IS NOT NULL THEN 1 ELSE 0 END AS via_payment_link
       FROM payments p
       JOIN applications a ON a.id = p.application_id
       JOIN students s ON s.id = a.student_id
       LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+      LEFT JOIN payment_link_tokens plt ON plt.gateway_txnid = p.gateway_txnid AND plt.gateway_txnid IS NOT NULL
       ${grantJoin}
       WHERE a.college_id = @cid
         AND p.status = 'success'
@@ -1456,7 +1476,7 @@ router.get('/:collegeId/reports/fees-by-head', requirePerm('collect_fees'), asyn
       : pay_mode === 'online'
       ? `AND (p.gateway <> 'cash' AND p.gateway_txnid NOT LIKE 'CASH-%' AND p.gateway IS NOT NULL)`
       : '';
-    const grantJoin   = grant_type ? `LEFT JOIN division_master dm ON dm.college_id = a.college_id AND dm.faculty_master_id = a.course_id AND dm.division_letter = a.app_division` : '';
+    const grantJoin   = grant_type ? `LEFT JOIN division_master dm ON dm.college_id = a.college_id AND dm.faculty_master_id = a.course_id AND dm.division_letter = a.app_division AND dm.year_level = CASE a.year_of_study WHEN 1 THEN 'FY' WHEN 2 THEN 'SY' WHEN 3 THEN 'TY' WHEN 4 THEN '4Y' WHEN 5 THEN '5Y' END` : '';
     const grantFilter = grant_type ? `AND dm.funding_type = @gtype` : '';
     const allFilters  = `${courseFilter} ${yearFilter} ${typeFilter} ${ayFilter} ${modeFilter} ${grantFilter}`;
 

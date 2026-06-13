@@ -104,19 +104,14 @@ function ReceiptSheet({ app, pmt, showOrderId = false }) {
   const sheetRef    = useRef(null)
 
   function buildReceiptBlock(copyLabel) {
-    const receiptDate = fmtDate(pmt.completed_at)
-    // Format as DD/MM/YY
     const d = parseLocalDate(pmt.completed_at)
     const shortDate = d
       ? `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getFullYear()).slice(-2)}`
-      : receiptDate
-    const yearLabel = { 1:'FY', 2:'SY', 3:'TY', 4:'4Y', 5:'5Y' }
-    const yrShort = yearLabel[app.year_of_study] || ''
-    const courseShort = app.degree_course_code || ''
-    const divShort = app.app_division ? ` - ${app.app_division}` : ''
-    const classLabel = `${yrShort}${courseShort}${divShort}`
-    const heads = (pmt.fee_heads || [])
-    const rows = heads.length
+      : fmtDate(pmt.completed_at)
+    const yrShort = { 1:'FY', 2:'SY', 3:'TY', 4:'4Y', 5:'5Y' }[app.year_of_study] || ''
+    const classLabel = `${yrShort}${app.degree_course_code || ''}${app.app_division ? ' - ' + app.app_division : ''}`
+    const heads = pmt.fee_heads || []
+    const dataRows = heads.length
       ? heads.map((h, i) => `
           <tr>
             <td style="border:1px solid #000;padding:3px 6px;text-align:center;font-size:11px;">${i+1}</td>
@@ -129,54 +124,61 @@ function ReceiptSheet({ app, pmt, showOrderId = false }) {
           <td style="border:1px solid #000;padding:3px 8px;text-align:right;font-size:11px;">${Number(pmt.amount).toFixed(2)}</td>
         </tr>`
 
+    // Single-cell spacer spanning all columns — stretches to fill remaining height.
+    // colspan=3 means no vertical column dividers in the empty space.
+    const fillerRows = `
+          <tr style="height:100%;">
+            <td colspan="3" style="border:1px solid #000;border-top:none;"></td>
+          </tr>`
+
     const totalAmt = Number(pmt.amount).toFixed(2)
 
+    // Each block is a flex column. The table wrapper has flex:1 so it stretches
+    // to fill whatever height the taller sibling block takes — both copies are always equal height.
     return `
-    <div style="width:48%;font-family:'Times New Roman',Times,serif;font-size:12px;color:#000;border:1px solid #000;padding:10px 12px;box-sizing:border-box;position:relative;">
-      <div style="text-align:right;font-size:10px;font-style:italic;margin-bottom:2px;">${copyLabel}</div>
-      ${app.trust_name ? `<div style="text-align:center;font-size:11px;">${app.trust_name}</div>` : ''}
-      <div style="text-align:center;font-size:13px;font-weight:bold;">${app.college_name || ''}</div>
-      ${app.college_address ? `<div style="text-align:center;font-size:10.5px;">${app.college_address}${app.college_city ? ', ' + app.college_city : ''}</div>` : ''}
-      ${app.college_affiliation ? `<div style="text-align:center;font-size:10px;">(${app.college_affiliation})</div>` : ''}
+    <div style="width:48%;font-family:'Times New Roman',Times,serif;font-size:12px;color:#000;border:2px solid #000;padding:10px 12px;box-sizing:border-box;display:flex;flex-direction:column;">
+      <div>
+        <div style="text-align:right;font-size:10px;font-style:italic;margin-bottom:2px;">${copyLabel}</div>
+        ${app.trust_name ? `<div style="text-align:center;font-size:11px;">${app.trust_name}</div>` : ''}
+        <div style="text-align:center;font-size:13px;font-weight:bold;">${app.college_name || ''}</div>
+        ${app.college_address ? `<div style="text-align:center;font-size:10.5px;">${app.college_address}${app.college_city ? ', ' + app.college_city : ''}</div>` : ''}
+        ${app.college_affiliation ? `<div style="text-align:center;font-size:10px;">(${app.college_affiliation})</div>` : ''}
 
-      <div style="margin-top:8px;display:flex;justify-content:space-between;font-size:11px;">
-        <span>Receipt No.- <strong>${receiptNo}</strong></span>
-        <span>Date &nbsp;- &nbsp;${shortDate}</span>
-        <span>Class &nbsp;- &nbsp;${classLabel}</span>
+        <div style="margin-top:8px;display:flex;justify-content:space-between;font-size:11px;">
+          <span>Receipt No.- <strong>${receiptNo}</strong></span>
+          <span>Date &nbsp;- &nbsp;${shortDate}</span>
+          <span>Class &nbsp;- &nbsp;${classLabel}</span>
+        </div>
+        <div style="margin-top:4px;font-size:11px;">
+          Received from &nbsp;<strong>${studentName}</strong>
+        </div>
       </div>
 
-      <div style="margin-top:4px;font-size:11px;">
-        <span>Received from &nbsp;<strong>${studentName}</strong></span>
+      <div style="flex:1;display:flex;flex-direction:column;margin-top:8px;">
+        <table style="width:100%;height:100%;border-collapse:collapse;">
+          <thead>
+            <tr>
+              <th style="border:1px solid #000;padding:3px 6px;font-size:11px;text-align:center;width:40px;">Sr. No.</th>
+              <th style="border:1px solid #000;padding:3px 8px;font-size:11px;text-align:center;">Particular</th>
+              <th style="border:1px solid #000;padding:3px 8px;font-size:11px;text-align:center;width:70px;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${dataRows}
+            ${fillerRows}
+          </tbody>
+        </table>
       </div>
 
-      <table style="width:100%;border-collapse:collapse;margin-top:8px;">
-        <thead>
-          <tr>
-            <th style="border:1px solid #000;padding:3px 6px;font-size:11px;text-align:center;width:40px;">Sr. No.</th>
-            <th style="border:1px solid #000;padding:3px 8px;font-size:11px;text-align:center;">Particular</th>
-            <th style="border:1px solid #000;padding:3px 8px;font-size:11px;text-align:center;width:70px;">Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${rows}
-          <!-- empty filler rows -->
-          ${Array.from({length:Math.max(0, 8-Math.max(heads.length,1))}, (_,i)=>`
-          <tr>
-            <td style="border:1px solid #000;padding:3px 6px;font-size:11px;">&nbsp;</td>
-            <td style="border:1px solid #000;padding:3px 8px;font-size:11px;">&nbsp;</td>
-            <td style="border:1px solid #000;padding:3px 8px;font-size:11px;">&nbsp;</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>
-
-      <div style="margin-top:10px;display:flex;justify-content:space-between;font-size:11px;">
-        <span>Total : <strong>₹ ${totalAmt}</strong></span>
-        <span style="font-style:italic;font-size:10px;">${numberToWords(Number(pmt.amount))} Only</span>
-      </div>
-
-      <div style="margin-top:20px;display:flex;justify-content:space-between;font-size:11px;">
-        <span>Student Signature</span>
-        <span>Cashier / Accountant</span>
+      <div>
+        <div style="margin-top:10px;display:flex;justify-content:space-between;font-size:11px;">
+          <span>Total : <strong>₹ ${totalAmt}</strong></span>
+          <span style="font-style:italic;font-size:10px;">${numberToWords(Number(pmt.amount))} Only</span>
+        </div>
+        <div style="margin-top:20px;display:flex;justify-content:space-between;font-size:11px;">
+          <span>Student Signature</span>
+          <span>Cashier / Accountant</span>
+        </div>
       </div>
     </div>`
   }
@@ -192,7 +194,7 @@ function ReceiptSheet({ app, pmt, showOrderId = false }) {
     body{font-family:'Times New Roman',Times,serif;background:#fff;color:#000;padding:20px}
     @media print{
       body{padding:0;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-      .no-print{display:none}
+      .no-print{display:none!important}
       @page{size:A4 landscape;margin:10mm 12mm}
     }
   </style>
@@ -201,7 +203,9 @@ function ReceiptSheet({ app, pmt, showOrderId = false }) {
   <div class="no-print" style="text-align:center;margin-bottom:12px;">
     <button onclick="window.print()" style="padding:8px 24px;font-size:14px;cursor:pointer;background:#1e293b;color:#fff;border:none;border-radius:6px;">Print / Save PDF</button>
   </div>
-  <div style="display:flex;gap:2%;justify-content:center;align-items:flex-start;">
+  <!-- align-items:stretch: both copies always same height.
+       min-height fills the landscape page; excess rows overflow to page 2. -->
+  <div style="display:flex;gap:4%;align-items:stretch;min-height:calc(210mm - 20mm);">
     ${buildReceiptBlock('Office Copy')}
     ${buildReceiptBlock("Student's Copy")}
   </div>
@@ -227,7 +231,7 @@ function ReceiptSheet({ app, pmt, showOrderId = false }) {
   const displayRows = heads.length
     ? heads
     : [{ fees_head: fullLabel, paid: pmt.amount, amount: pmt.amount }]
-  const fillerCount = Math.max(0, 8 - displayRows.length)
+  const fillerCount = 0 // spacer handled by a single stretchy row inside ReceiptCopy
 
   return (
     <div className="border-t border-slate-100">
@@ -275,7 +279,7 @@ function ReceiptCopy({ copyLabel, app, receiptNo, shortDate, classLabel, student
         Received from &nbsp;<strong>{studentName}</strong>
       </div>
 
-      <table className="w-full border-collapse mt-2">
+      <table className="w-full border-collapse mt-2" style={{ height: '100%' }}>
         <thead>
           <tr>
             <th className={`${td} text-center w-10`}>Sr. No.</th>
@@ -291,13 +295,10 @@ function ReceiptCopy({ copyLabel, app, receiptNo, shortDate, classLabel, student
               <td className={`${td} text-right`}>{Number(h.paid ?? h.amount).toFixed(2)}</td>
             </tr>
           ))}
-          {Array.from({ length: fillerCount }).map((_, i) => (
-            <tr key={`f${i}`}>
-              <td className={td}>&nbsp;</td>
-              <td className={td}>&nbsp;</td>
-              <td className={td}>&nbsp;</td>
-            </tr>
-          ))}
+          {/* Single-cell spacer spanning all columns — no column dividers in empty space */}
+          <tr style={{ height: '100%' }}>
+            <td colSpan={3} className="border border-black border-t-0" />
+          </tr>
         </tbody>
       </table>
 

@@ -65,16 +65,16 @@ router.use('/initiate', paymentLimiter);
 
 // ── Shared helpers ────────────────────────────────────────────
 
-async function logActivity(appId, action, actorRole, note = null) {
-  try {
-    await db.request()
-      .input('appId',     mssql.Int,      parseInt(appId))
-      .input('action',    mssql.NVarChar, action)
-      .input('actorRole', mssql.NVarChar, actorRole)
-      .input('note',      mssql.NVarChar, note || null)
-      .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
-  } catch (e) { logger.warn({ err: e }, 'logActivity failed'); }
-}
+// async function logActivity(appId, action, actorRole, note = null) {
+//   try {
+//     await db.request()
+//       .input('appId',     mssql.Int,      parseInt(appId))
+//       .input('action',    mssql.NVarChar, action)
+//       .input('actorRole', mssql.NVarChar, actorRole)
+//       .input('note',      mssql.NVarChar, note || null)
+//       .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
+//   } catch (e) { logger.warn({ err: e }, 'logActivity failed'); }
+// }
 
 async function getStudentForNotification(appId) {
   try {
@@ -421,10 +421,12 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
     const paidRes = await db.request()
       .input('appId', mssql.Int, appId)
       .query(`
-        SELECT id, payment_type, amount, gateway, gateway_txnid, gateway_payment_id, completed_at
-        FROM payments
-        WHERE application_id = @appId AND payment_type = 'college_fee' AND status = 'success'
-        ORDER BY completed_at
+        SELECT p.id, p.payment_type, p.amount, p.gateway, p.gateway_txnid, p.gateway_payment_id, p.completed_at,
+               CASE WHEN plt.id IS NOT NULL THEN 1 ELSE 0 END AS via_payment_link
+        FROM payments p
+        LEFT JOIN payment_link_tokens plt ON plt.gateway_txnid = p.gateway_txnid AND plt.gateway_txnid IS NOT NULL
+        WHERE p.application_id = @appId AND p.payment_type = 'college_fee' AND p.status = 'success'
+        ORDER BY p.completed_at
       `);
     const paidRecords = paidRes.recordset;
     const totalPaid   = paidRecords.reduce((s, p) => s + parseFloat(p.amount), 0);
@@ -491,19 +493,34 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
       // If all installments satisfied, currentDue = remaining (free payment)
     }
 
+    // If no fee is configured but there's an active pending payment link, use the link amount as total_fee
+    let effectiveTotalFee = feeInfo?.total_fee || 0;
+    let pendingLinkAmount = null;
+    if (effectiveTotalFee === 0) {
+      const linkRes = await db.request()
+        .input('appId', mssql.Int, appId)
+        .query(`SELECT TOP 1 amount FROM payment_link_tokens WHERE application_id=@appId AND used=0 AND expires_at > GETDATE() ORDER BY created_at DESC`);
+      if (linkRes.recordset.length) {
+        pendingLinkAmount = parseFloat(linkRes.recordset[0].amount);
+        effectiveTotalFee = pendingLinkAmount;
+      }
+    }
+    const effectiveRemaining = Math.max(0, effectiveTotalFee - totalPaid);
+
     return res.json({
       success: true,
       data: {
-        application_id:   appId,
-        status:           app.status,
-        college_fee_paid: app.college_fee_paid,
-        total_fee:        feeInfo?.total_fee || 0,
-        total_paid:       totalPaid,
-        remaining,
-        current_due:      currentDue,
-        breakdown:        breakdownWithStatus,
+        application_id:    appId,
+        status:            app.status,
+        college_fee_paid:  app.college_fee_paid,
+        total_fee:         effectiveTotalFee,
+        total_paid:        totalPaid,
+        remaining:         effectiveRemaining,
+        current_due:       pendingLinkAmount ? Math.min(pendingLinkAmount, effectiveRemaining) : currentDue,
+        breakdown:         breakdownWithStatus,
         installments,
-        paid_records:     paidRecords,
+        paid_records:      paidRecords,
+        pending_link_amount: pendingLinkAmount,
       },
     });
   } catch (err) {
@@ -577,10 +594,12 @@ router.get('/receipts/:applicationId', async (req, res) => {
     const pmtRes = await db.request()
       .input('appId', mssql.Int, appId)
       .query(`
-        SELECT id, payment_type, amount, status, gateway, gateway_txnid, gateway_payment_id, completed_at
-        FROM payments
-        WHERE application_id = @appId AND status = 'success'
-        ORDER BY completed_at ASC
+        SELECT p.id, p.payment_type, p.amount, p.status, p.gateway, p.gateway_txnid, p.gateway_payment_id, p.completed_at,
+               CASE WHEN plt.id IS NOT NULL THEN 1 ELSE 0 END AS via_payment_link
+        FROM payments p
+        LEFT JOIN payment_link_tokens plt ON plt.gateway_txnid = p.gateway_txnid AND plt.gateway_txnid IS NOT NULL
+        WHERE p.application_id = @appId AND p.status = 'success'
+        ORDER BY p.completed_at ASC
       `);
     const payments = pmtRes.recordset;
 
@@ -889,18 +908,25 @@ async function handlePayUReturn(req, res) {
       return res.redirect(frontendUrl(`/payment-result?status=success&app_id=${appId}&payment_type=${payType}`));
     }
 
+    // Check if payment came via a payment link (to suppress dashboard button on result page)
+    const viaLinkRes = await db.request()
+      .input('txnid', mssql.NVarChar, txnid)
+      .query(`SELECT COUNT(*) AS cnt FROM payment_link_tokens WHERE gateway_txnid=@txnid`);
+    const viaLink = viaLinkRes.recordset[0].cnt > 0;
+    const viaParam = viaLink ? '&via=link' : '';
+
     // Post-commit side effects
     if (payType === 'application_fee') {
-      await logActivity(appId, 'submitted', 'student', null);
+      // await logActivity(appId, 'submitted', 'student', null);
       const regParam = result.regNum ? `&reg=${encodeURIComponent(result.regNum)}` : '';
-      return res.redirect(frontendUrl(`/payment-result?status=success&app_id=${appId}&payment_type=application_fee${regParam}`));
+      return res.redirect(frontendUrl(`/payment-result?status=success&app_id=${appId}&payment_type=application_fee${regParam}${viaParam}`));
     } else {
       const { totalPaid, totalFee, firstPaid, fullyPaid } = result;
       if (firstPaid || fullyPaid) {
-        await logActivity(appId, 'fees_paid', 'student', `₹${totalPaid?.toLocaleString('en-IN')} paid`);
+        // await logActivity(appId, 'fees_paid', 'student', `₹${totalPaid?.toLocaleString('en-IN')} paid`);
         if (firstPaid) getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
       }
-      return res.redirect(frontendUrl(`/payment-result?status=success&app_id=${appId}&payment_type=college_fee&fully_paid=${fullyPaid ? '1' : '0'}`));
+      return res.redirect(frontendUrl(`/payment-result?status=success&app_id=${appId}&payment_type=college_fee&fully_paid=${fullyPaid ? '1' : '0'}${viaParam}`));
     }
   } catch (err) {
     logger.error({ err, txnid }, '[PayU] return: commitPayment failed');
@@ -977,9 +1003,9 @@ async function handlePayUWebhook(req, res) {
 
     // Side effects
     if (payType === 'application_fee') {
-      await logActivity(appId, 'submitted', 'student', 'PayU webhook');
+      // await logActivity(appId, 'submitted', 'student', 'PayU webhook');
     } else if (result.firstPaid || result.fullyPaid) {
-      await logActivity(appId, 'fees_paid', 'student', `PayU webhook: ₹${result.totalPaid?.toLocaleString('en-IN')} paid`);
+      // await logActivity(appId, 'fees_paid', 'student', `PayU webhook: ₹${result.totalPaid?.toLocaleString('en-IN')} paid`);
       if (result.firstPaid) getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
     }
 
@@ -1036,7 +1062,7 @@ router.post('/cash/:collegeId/applications/:appId', async (req, res) => {
       throw e;
     }
 
-    await logActivity(appId, 'fees_paid', 'college', `Cash ₹${amount.toLocaleString('en-IN')}`);
+    // await logActivity(appId, 'fees_paid', 'college', `Cash ₹${amount.toLocaleString('en-IN')}`);
     return res.json({ success: true, message: `Cash payment of ₹${amount.toLocaleString('en-IN')} recorded.` });
   } catch (err) {
     logger.error({ err }, 'cash payment error');
@@ -1112,13 +1138,12 @@ router.post('/generate-link', authenticate, async (req, res) => {
 
 // ── POST /payments/send-payment-link ─────────────────────────
 // Generates a link and sends it via WhatsApp template 590.
-// body: { application_id, payment_type, phone }
+// body: { application_id, payment_type, phone, amount? }
 router.post('/send-payment-link', authenticate, async (req, res) => {
-  const { application_id, payment_type = 'application_fee', phone } = req.body;
+  const { application_id, payment_type = 'application_fee', phone, amount: customAmount } = req.body;
   if (!phone) return res.status(400).json({ success: false, message: 'Phone number is required.' });
 
   try {
-    // Re-use generate-link logic by calling internally
     const appId = parseInt(application_id);
     const appRes = await db.request()
       .input('id', mssql.Int, appId)
@@ -1134,16 +1159,25 @@ router.post('/send-payment-link', authenticate, async (req, res) => {
       return res.status(404).json({ success: false, message: 'Application not found.' });
 
     const app = appRes.recordset[0];
-    let amount = 0;
+    let maxAmount = 0;
     if (payment_type === 'application_fee') {
-      amount = parseFloat(app.application_fee) || 0;
+      maxAmount = parseFloat(app.application_fee) || 0;
     } else {
       const paidRes = await db.request().input('id', mssql.Int, appId)
         .query(`SELECT ISNULL(SUM(amount),0) AS paid FROM payments WHERE application_id=@id AND payment_type='college_fee' AND status='success'`);
-      amount = Math.max(0, (parseFloat(app.fee_total_amount) || 0) - (parseFloat(paidRes.recordset[0].paid) || 0));
+      maxAmount = Math.max(0, (parseFloat(app.fee_total_amount) || 0) - (parseFloat(paidRes.recordset[0].paid) || 0));
     }
-    if (amount <= 0)
+    if (maxAmount <= 0)
       return res.status(400).json({ success: false, message: 'No outstanding amount to pay.' });
+
+    // Use caller-specified amount if provided and valid, otherwise use full outstanding
+    let amount = maxAmount;
+    if (customAmount) {
+      const reqAmt = parseFloat(customAmount);
+      if (!reqAmt || reqAmt <= 0) return res.status(400).json({ success: false, message: 'Invalid amount.' });
+      if (reqAmt > maxAmount + 0.01) return res.status(400).json({ success: false, message: `Amount ₹${reqAmt} exceeds outstanding balance ₹${maxAmount}.` });
+      amount = reqAmt;
+    }
 
     const token     = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
@@ -1167,6 +1201,9 @@ router.post('/send-payment-link', authenticate, async (req, res) => {
     const normPhone = whatsapp.normalisePhone(phone);
     const sample    = `${app.college_name},${app.registration_number || appId},${link}`;
     await whatsapp.sendTemplateMessage(normPhone, '590', sample, 'payment_link', appId);
+
+    // await logActivity(appId, 'payment_link_sent', 'college',
+    //   `₹${amount.toLocaleString('en-IN')} ${payment_type} link sent to ${phone}`);
 
     return res.json({ success: true, message: 'Payment link sent via WhatsApp.', link });
   } catch (err) {
@@ -1234,6 +1271,9 @@ async function handlePayViaToken(req, res) {
           INSERT INTO payments (application_id, payment_type, amount, status, gateway, gateway_txnid, paid_by)
           VALUES (@appId, @ptype, @amount, 'pending', 'payu', @txnid, 'student')
         `);
+
+      // await logActivity(tok.application_id, 'payment_link_opened', 'student',
+      //   `₹${amount.toLocaleString('en-IN')} ${tok.payment_type} link opened`);
     }
 
     // Token is NOT marked used here — payu-return/webhook marks it used after payment succeeds.

@@ -759,4 +759,98 @@ GO
   END TRY BEGIN CATCH END CATCH END
   GO
 
-  PRINT 'All 66 audit triggers created successfully.';
+  -- ============================================================
+  -- payments (PayU columns — replaces razorpay_* version above)
+  -- Included here so re-running this master file stays correct.
+  -- The actual migration is 021_audit_triggers_payments_links.sql
+  -- ============================================================
+  IF OBJECT_ID('dbo.trg_payments_arc_ins','TR') IS NOT NULL DROP TRIGGER dbo.trg_payments_arc_ins;
+GO
+  CREATE TRIGGER trg_payments_arc_ins ON payments AFTER INSERT AS
+  BEGIN SET NOCOUNT ON; BEGIN TRY
+    INSERT INTO [payments$Arc] (id,application_id,payment_type,amount,gateway,gateway_txnid,gateway_payment_id,status,paid_by,paid_by_user_id,attempted_at,completed_at,created_by,updated_by,action_type,action_by,machine_mac_address,comments)
+    SELECT i.id,i.application_id,i.payment_type,i.amount,i.gateway,i.gateway_txnid,i.gateway_payment_id,i.status,i.paid_by,i.paid_by_user_id,i.attempted_at,i.completed_at,i.created_by,i.updated_by,
+    'INSERT',CONVERT(NVARCHAR(150),COALESCE(i.created_by,SESSION_CONTEXT(N'app_user_id'))),CONVERT(NVARCHAR(50),SESSION_CONTEXT(N'app_machine_mac')),CONVERT(NVARCHAR(500),SESSION_CONTEXT(N'app_comments'))
+    FROM inserted i;
+  END TRY BEGIN CATCH END CATCH END
+  GO
+  IF OBJECT_ID('dbo.trg_payments_arc_upd','TR') IS NOT NULL DROP TRIGGER dbo.trg_payments_arc_upd;
+GO
+  CREATE TRIGGER trg_payments_arc_upd ON payments AFTER UPDATE AS
+  BEGIN SET NOCOUNT ON; BEGIN TRY
+    INSERT INTO [payments$Arc] (id,application_id,payment_type,amount,gateway,gateway_txnid,gateway_payment_id,status,paid_by,paid_by_user_id,attempted_at,completed_at,created_by,updated_by,action_type,action_by,machine_mac_address,comments)
+    SELECT i.id,i.application_id,i.payment_type,i.amount,i.gateway,i.gateway_txnid,i.gateway_payment_id,i.status,i.paid_by,i.paid_by_user_id,i.attempted_at,i.completed_at,i.created_by,i.updated_by,
+    'UPDATE',CONVERT(NVARCHAR(150),COALESCE(i.updated_by,SESSION_CONTEXT(N'app_user_id'))),CONVERT(NVARCHAR(50),SESSION_CONTEXT(N'app_machine_mac')),CONVERT(NVARCHAR(500),SESSION_CONTEXT(N'app_comments'))
+    FROM inserted i;
+  END TRY BEGIN CATCH END CATCH END
+  GO
+  IF OBJECT_ID('dbo.trg_payments_arc_del','TR') IS NOT NULL DROP TRIGGER dbo.trg_payments_arc_del;
+GO
+  CREATE TRIGGER trg_payments_arc_del ON payments AFTER DELETE AS
+  BEGIN SET NOCOUNT ON; BEGIN TRY
+    INSERT INTO [payments$Arc] (id,application_id,payment_type,amount,gateway,gateway_txnid,gateway_payment_id,status,paid_by,paid_by_user_id,attempted_at,completed_at,created_by,updated_by,action_type,action_by,machine_mac_address,comments)
+    SELECT d.id,d.application_id,d.payment_type,d.amount,d.gateway,d.gateway_txnid,d.gateway_payment_id,d.status,d.paid_by,d.paid_by_user_id,d.attempted_at,d.completed_at,d.created_by,d.updated_by,
+    'DELETE',CONVERT(NVARCHAR(150),COALESCE(d.updated_by,SESSION_CONTEXT(N'app_user_id'))),CONVERT(NVARCHAR(50),SESSION_CONTEXT(N'app_machine_mac')),CONVERT(NVARCHAR(500),SESSION_CONTEXT(N'app_comments'))
+    FROM deleted d;
+  END TRY BEGIN CATCH END CATCH END
+  GO
+
+  -- ============================================================
+  -- payment_link_tokens
+  -- ============================================================
+  IF OBJECT_ID('dbo.trg_payment_link_tokens_arc_ins','TR') IS NOT NULL DROP TRIGGER dbo.trg_payment_link_tokens_arc_ins;
+GO
+  CREATE TRIGGER trg_payment_link_tokens_arc_ins ON payment_link_tokens AFTER INSERT AS
+  BEGIN SET NOCOUNT ON; BEGIN TRY
+    INSERT INTO [payment_link_tokens$Arc] (id,token,application_id,college_id,payment_type,amount,gateway_txnid,used,expires_at,created_at,created_by,action_type,action_by,machine_mac_address,comments)
+    SELECT i.id,i.token,i.application_id,i.college_id,i.payment_type,i.amount,i.gateway_txnid,i.used,i.expires_at,i.created_at,i.created_by,
+    'INSERT',CONVERT(NVARCHAR(150),COALESCE(i.created_by,SESSION_CONTEXT(N'app_user_id'))),CONVERT(NVARCHAR(50),SESSION_CONTEXT(N'app_machine_mac')),CONVERT(NVARCHAR(500),SESSION_CONTEXT(N'app_comments'))
+    FROM inserted i;
+  END TRY BEGIN CATCH END CATCH END
+  GO
+  IF OBJECT_ID('dbo.trg_payment_link_tokens_arc_upd','TR') IS NOT NULL DROP TRIGGER dbo.trg_payment_link_tokens_arc_upd;
+GO
+  CREATE TRIGGER trg_payment_link_tokens_arc_upd ON payment_link_tokens AFTER UPDATE AS
+  BEGIN SET NOCOUNT ON; BEGIN TRY
+    INSERT INTO [payment_link_tokens$Arc] (id,token,application_id,college_id,payment_type,amount,gateway_txnid,used,expires_at,created_at,created_by,action_type,action_by,machine_mac_address,comments)
+    SELECT i.id,i.token,i.application_id,i.college_id,i.payment_type,i.amount,i.gateway_txnid,i.used,i.expires_at,i.created_at,i.created_by,
+    CASE WHEN d.used=0 AND i.used=1 THEN 'USED' WHEN d.gateway_txnid IS NULL AND i.gateway_txnid IS NOT NULL THEN 'OPENED' ELSE 'UPDATE' END,
+    CONVERT(NVARCHAR(150),SESSION_CONTEXT(N'app_user_id')),CONVERT(NVARCHAR(50),SESSION_CONTEXT(N'app_machine_mac')),CONVERT(NVARCHAR(500),SESSION_CONTEXT(N'app_comments'))
+    FROM inserted i JOIN deleted d ON d.id=i.id;
+  END TRY BEGIN CATCH END CATCH END
+  GO
+  IF OBJECT_ID('dbo.trg_payment_link_tokens_arc_del','TR') IS NOT NULL DROP TRIGGER dbo.trg_payment_link_tokens_arc_del;
+GO
+  CREATE TRIGGER trg_payment_link_tokens_arc_del ON payment_link_tokens AFTER DELETE AS
+  BEGIN SET NOCOUNT ON; BEGIN TRY
+    INSERT INTO [payment_link_tokens$Arc] (id,token,application_id,college_id,payment_type,amount,gateway_txnid,used,expires_at,created_at,created_by,action_type,action_by,machine_mac_address,comments)
+    SELECT d.id,d.token,d.application_id,d.college_id,d.payment_type,d.amount,d.gateway_txnid,d.used,d.expires_at,d.created_at,d.created_by,
+    'DELETE',CONVERT(NVARCHAR(150),SESSION_CONTEXT(N'app_user_id')),CONVERT(NVARCHAR(50),SESSION_CONTEXT(N'app_machine_mac')),CONVERT(NVARCHAR(500),SESSION_CONTEXT(N'app_comments'))
+    FROM deleted d;
+  END TRY BEGIN CATCH END CATCH END
+  GO
+
+  -- ============================================================
+  -- application_activity_log (append-only — INSERT trigger only)
+  -- INSTEAD OF DELETE guard prevents anyone pruning the audit trail.
+  -- ============================================================
+  IF OBJECT_ID('dbo.trg_activity_log_arc_ins','TR') IS NOT NULL DROP TRIGGER dbo.trg_activity_log_arc_ins;
+GO
+  CREATE TRIGGER trg_activity_log_arc_ins ON application_activity_log AFTER INSERT AS
+  BEGIN SET NOCOUNT ON; BEGIN TRY
+    INSERT INTO [application_activity_log$Arc] (id,application_id,action,actor_role,note,created_at,action_type)
+    SELECT i.id,i.application_id,i.action,i.actor_role,i.note,i.created_at,'INSERT'
+    FROM inserted i;
+  END TRY BEGIN CATCH END CATCH END
+  GO
+  IF OBJECT_ID('dbo.trg_activity_log_no_delete','TR') IS NOT NULL DROP TRIGGER dbo.trg_activity_log_no_delete;
+GO
+  CREATE TRIGGER trg_activity_log_no_delete ON application_activity_log INSTEAD OF DELETE AS
+  BEGIN
+    SET NOCOUNT ON;
+    RAISERROR('Deleting from application_activity_log is not permitted. This is a permanent audit trail.', 16, 1);
+    ROLLBACK;
+  END
+  GO
+
+  PRINT 'All 75 audit triggers created successfully.';

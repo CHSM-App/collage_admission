@@ -17,6 +17,7 @@ import { useState } from 'react'
 import { useCollegePayment } from '../../../shared/hooks/useCollegePayment.js'
 import PaymentReceipts from '../../student/pages/PaymentReceipts.jsx'
 import { SkeletonCards } from '../../../shared/components/Skeleton.jsx'
+import { sendPaymentLink } from '../../../services/collegeAdminService.js'
 
 function fmtINR(n) { return `₹${Number(n).toLocaleString('en-IN')}` }
 
@@ -34,10 +35,14 @@ function fmtTime(str) {
 }
 
 export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, header, onClose, showReceipts: enableReceipts = false }) {
-  const [payMode, setPayMode]           = useState(null)   // null | 'cash' | 'online'
+  const [payMode, setPayMode]           = useState(null)   // null | 'cash' | 'online' | 'link'
   const [amount, setAmount]             = useState('')
   const [note, setNote]                 = useState('')
   const [receiptsOpen, setReceiptsOpen] = useState(false)
+  const [linkPhone, setLinkPhone]       = useState('')
+  const [linkSending, setLinkSending]   = useState(false)
+  const [linkSent, setLinkSent]         = useState(false)
+  const [linkErr, setLinkErr]           = useState('')
 
   const {
     feeStatus,
@@ -75,6 +80,25 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
     await payOnline(amt, {
       onSuccess: () => { setPayMode(null); setReceiptsOpen(true) },
     })
+  }
+
+  async function handleSendLink(e) {
+    e.preventDefault()
+    const phone = linkPhone.trim().replace(/\D/g, '')
+    if (phone.length < 10) { setLinkErr('Enter a valid 10-digit mobile number.'); return }
+    const amt = parseFloat(amount)
+    if (!amt || amt <= 0) { setLinkErr('Enter a valid amount.'); return }
+    if (amt > fs.remaining + 0.01) { setLinkErr(`Amount cannot exceed remaining balance ${fmtINR(fs.remaining)}.`); return }
+    setLinkSending(true)
+    setLinkErr('')
+    try {
+      await sendPaymentLink({ application_id: appId, payment_type: 'college_fee', phone, amount: amt })
+      setLinkSent(true)
+    } catch (err) {
+      setLinkErr(err?.response?.data?.message || 'Failed to send link.')
+    } finally {
+      setLinkSending(false)
+    }
   }
 
   return (
@@ -190,22 +214,30 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
             {!allPaid && fs.total_fee > 0 && !payMode && (
               <div className="space-y-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Collect Payment</p>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-2">
                   <button
                     onClick={() => { setPayMode('cash'); setErr(''); setMsg(''); setAmount(String(amtDue)) }}
-                    className="flex flex-col items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-4 py-4 hover:border-slate-400 hover:bg-slate-50 transition"
+                    className="flex flex-col items-center gap-1.5 rounded-xl border-2 border-slate-200 bg-white px-3 py-4 hover:border-slate-400 hover:bg-slate-50 transition"
                   >
-                    <span className="text-2xl">💵</span>
-                    <span className="text-sm font-semibold text-slate-800">Cash / Offline</span>
-                    <span className="text-xs text-slate-400 text-center">Record a cash or offline payment received at the counter</span>
+                    <span className="text-xl">💵</span>
+                    <span className="text-xs font-semibold text-slate-800">Cash / Offline</span>
+                    <span className="text-xs text-slate-400 text-center leading-tight">Record cash received at counter</span>
                   </button>
                   <button
                     onClick={() => { setPayMode('online'); setErr(''); setMsg(''); setAmount(String(amtDue)) }}
-                    className="flex flex-col items-center gap-2 rounded-xl border-2 border-slate-200 bg-white px-4 py-4 hover:border-blue-400 hover:bg-blue-50 transition"
+                    className="flex flex-col items-center gap-1.5 rounded-xl border-2 border-slate-200 bg-white px-3 py-4 hover:border-blue-400 hover:bg-blue-50 transition"
                   >
-                    <span className="text-2xl">💳</span>
-                    <span className="text-sm font-semibold text-slate-800">Online (PayU)</span>
-                    <span className="text-xs text-slate-400 text-center">Student pays via UPI, card, or netbanking now</span>
+                    <span className="text-xl">💳</span>
+                    <span className="text-xs font-semibold text-slate-800">Online (PayU)</span>
+                    <span className="text-xs text-slate-400 text-center leading-tight">Pay via UPI, card or netbanking</span>
+                  </button>
+                  <button
+                    onClick={() => { setPayMode('link'); setLinkErr(''); setLinkSent(false); setLinkPhone(''); setAmount(String(amtDue)) }}
+                    className="flex flex-col items-center gap-1.5 rounded-xl border-2 border-slate-200 bg-white px-3 py-4 hover:border-emerald-400 hover:bg-emerald-50 transition"
+                  >
+                    <span className="text-xl">📲</span>
+                    <span className="text-xs font-semibold text-slate-800">WhatsApp Link</span>
+                    <span className="text-xs text-slate-400 text-center leading-tight">Send payment link to student</span>
                   </button>
                 </div>
               </div>
@@ -287,6 +319,60 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
               </form>
             )}
 
+            {/* ── WhatsApp payment link form ──────────────── */}
+            {!allPaid && payMode === 'link' && (
+              <form onSubmit={handleSendLink} className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-semibold text-emerald-800">Send Payment Link via WhatsApp</p>
+                  <button type="button" onClick={() => { setPayMode(null); setLinkErr(''); setLinkSent(false) }}
+                    className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
+                </div>
+                {linkSent ? (
+                  <div className="rounded-lg bg-white border border-emerald-200 px-4 py-3 text-sm text-emerald-700 font-medium">
+                    ✓ Payment link sent to {linkPhone}. The student can pay via the link.
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex gap-3 items-end">
+                      <div className="flex-1">
+                        <label className="text-xs text-emerald-700 mb-1 block">
+                          Amount (₹)
+                          {amtIsFixed && <span className="ml-1 text-emerald-500">(fixed instalment)</span>}
+                        </label>
+                        <input
+                          type="text" inputMode="numeric"
+                          value={amount}
+                          onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
+                          readOnly={amtIsFixed}
+                          placeholder={`Max ${fmtINR(fs.remaining)}`}
+                          className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 ${
+                            amtIsFixed ? 'bg-emerald-100 border-emerald-200 text-emerald-700 cursor-not-allowed' : 'border-emerald-200 bg-white'
+                          }`}
+                          required
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="text-xs text-emerald-700 mb-1 block">Student Mobile Number</label>
+                        <input
+                          type="tel" inputMode="numeric" maxLength={10}
+                          value={linkPhone}
+                          onChange={e => setLinkPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                          placeholder="10-digit mobile"
+                          className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                          required
+                        />
+                      </div>
+                    </div>
+                    {linkErr && <p className="text-xs text-red-600">{linkErr}</p>}
+                    <button type="submit" disabled={linkSending}
+                      className="w-full rounded-lg bg-emerald-600 text-white text-sm font-semibold px-4 py-2 hover:bg-emerald-700 disabled:opacity-50 transition">
+                      {linkSending ? 'Sending…' : 'Send via WhatsApp'}
+                    </button>
+                  </>
+                )}
+              </form>
+            )}
+
             {/* ── Transactions list ───────────────────────── */}
             {fs.paid_records?.length > 0 && (
               <div>
@@ -300,7 +386,11 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
                         </div>
                         <div>
                           <p className="font-medium text-slate-800">
-                            {p.gateway === 'cash' || p.razorpay_payment_id?.startsWith('CASH-') ? 'Cash / Offline' : `Online (${p.gateway === 'payu' ? 'PayU' : 'Online'})`}
+                            {p.gateway === 'cash' || p.razorpay_payment_id?.startsWith('CASH-')
+                              ? 'Cash / Offline'
+                              : p.via_payment_link
+                              ? 'WhatsApp Link (PayU)'
+                              : `Online (${p.gateway === 'payu' ? 'PayU' : 'Online'})`}
                           </p>
                           <p className="text-xs text-slate-400">{fmtDate(p.completed_at)} {fmtTime(p.completed_at)}</p>
                         </div>

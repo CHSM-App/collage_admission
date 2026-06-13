@@ -10,7 +10,7 @@ const LIMIT = 20
  * @param {{ page, filterStatus, filterCourse, filterYear }} filters
  * @returns {{ apps, loading, pagination, fetchApps }}
  */
-export function useApplicationsList(collegeId, { page, filterStatus, filterCourse, filterYear }) {
+export function useApplicationsList(collegeId, { page, filterStatus, filterCourse, filterYear, pendingLink }) {
   const [apps, setApps]             = useState([])
   const [loading, setLoading]       = useState(true)
   const [pagination, setPagination] = useState({ page: 1, totalPages: 1, total: 0 })
@@ -21,6 +21,7 @@ export function useApplicationsList(collegeId, { page, filterStatus, filterCours
     if (filterStatus) params.set('status', filterStatus)
     if (filterCourse) params.set('course_id', filterCourse)
     if (filterYear)   params.set('year_of_study', filterYear)
+    if (pendingLink)  params.set('pending_link', '1')
     getApplicationsList(collegeId, params)
       .then(r => {
         setApps(r.data.data || [])
@@ -28,7 +29,7 @@ export function useApplicationsList(collegeId, { page, filterStatus, filterCours
       })
       .catch(() => setApps([]))
       .finally(() => setLoading(false))
-  }, [collegeId, page, filterStatus, filterCourse, filterYear])
+  }, [collegeId, page, filterStatus, filterCourse, filterYear, pendingLink])
 
   useEffect(() => { fetchApps() }, [fetchApps])
 

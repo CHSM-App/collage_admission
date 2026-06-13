@@ -858,8 +858,8 @@ export default function Reports({ collegeId }) {
                               </span>
                             </Td>
                             <Td>
-                              <span className={`rounded-full px-2 py-0.5 font-semibold ${isCash ? 'bg-amber-50 text-amber-700' : 'bg-sky-50 text-sky-700'}`}>
-                                {isCash ? 'Cash' : 'Online'}
+                              <span className={`rounded-full px-2 py-0.5 font-semibold ${isCash ? 'bg-amber-50 text-amber-700' : t.via_payment_link ? 'bg-green-50 text-green-700' : 'bg-sky-50 text-sky-700'}`}>
+                                {isCash ? 'Cash' : t.via_payment_link ? 'WA Link' : 'Online'}
                               </span>
                             </Td>
                             <Td>{fmtDate(t.completed_at)} {fmtTime(t.completed_at)}</Td>

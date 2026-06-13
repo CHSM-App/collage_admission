@@ -20,7 +20,8 @@
 12. [All Frontend Routes & Pages](#12-all-frontend-routes--pages)
 13. [Application State Machine (Status Flow)](#13-application-state-machine-status-flow)
 14. [Fee Determination System](#14-fee-determination-system)
-15. [Payment Flow (Razorpay)](#15-payment-flow-razorpay)
+15. [Payment Flow (PayU)](#15-payment-flow-payu)
+15a. [WhatsApp Payment Links](#15a-whatsapp-payment-links)
 16. [Document Upload System](#16-document-upload-system)
 17. [WhatsApp Notifications (SMSala)](#17-whatsapp-notifications-smsala)
 18. [AI Chatbot (Gemini)](#18-ai-chatbot-gemini)
@@ -56,7 +57,7 @@ The platform supports the full admission lifecycle from a student first register
 | Frontend | React + Vite | React ^19.2 |
 | CSS Framework | Tailwind CSS | ^3.4 |
 | Authentication | JWT via httpOnly cookies | jsonwebtoken |
-| Payment Gateway | Razorpay | ^2.9 |
+| Payment Gateway | PayU (form-based redirect) | (REST via https) |
 | AI / Chatbot | Google Gemini 2.5 Flash | @google/genai ^2.4 |
 | WhatsApp Notifications | SMSala API | (REST via https) |
 | File Uploads | Multer | ^2.1 |
@@ -90,7 +91,7 @@ collage_admission/
 │   │   ├── applications.js           ← Student application list, subject selection
 │   │   ├── colleges.js               ← Public college listing/browsing
 │   │   ├── college_admin.js          ← College admin operations (review, approve, etc.)
-│   │   ├── payments.js               ← Razorpay order creation + payment verification
+│   │   ├── payments.js               ← PayU payment initiation, payu-return, payu-webhook, payment links
 │   │   ├── documents.js              ← Document upload/delete
 │   │   ├── masters.js                ← Master data CRUD (fees, courses, divisions, etc.)
 │   │   ├── certificates.js           ← Certificate generation and listing
@@ -121,7 +122,18 @@ collage_admission/
 │   │       ├── 006_prev_exam_columns.sql   ← Previous exam schema fix
 │   │       ├── 007_applications_missing_columns.sql ← Application column fixes
 │   │       ├── 008_chatbot.sql       ← Chatbot knowledge + log tables
-│   │       └── 009_college_enabled.sql ← College is_enabled column
+│   │       ├── 009_college_enabled.sql ← College is_enabled column
+│   │       ├── 010_payu_payments.sql ← Migrate payments table from Razorpay to PayU columns
+│   │       ├── 011_payment_link_tokens.sql ← WhatsApp payment link token table
+│   │       ├── 012_notifications.sql ← In-app notification table
+│   │       ├── 013_college_users.sql ← College staff accounts
+│   │       ├── 014_certificates.sql  ← Certificate tables (bonafide, character, NOC)
+│   │       ├── 015_classwise_fees.sql ← Per-class fee override table
+│   │       ├── 016_reports.sql       ← Report/analytics views
+│   │       ├── 017_application_activity_log.sql ← Activity audit trail
+│   │       ├── 018_college_fee_instalments.sql ← Multi-instalment tracking
+│   │       ├── 019_misc_fixes.sql    ← Minor column additions and fixes
+│   │       └── 020_payment_link_tokens_txnid.sql ← Adds gateway_txnid to payment_link_tokens
 │   ├── public/
 │   │   └── uploads/                  ← Uploaded documents stored here
 │   ├── app.js                        ← Express app configuration, route mounting
@@ -190,7 +202,7 @@ npm install
 ```bash
 # Backend
 cp BackEnd/.env.example BackEnd/.env
-# Edit BackEnd/.env with your DB credentials, JWT secret, Razorpay keys, etc.
+# Edit BackEnd/.env with your DB credentials, JWT secret, PayU keys, etc.
 
 # Frontend
 cp FrontEnd/.env.example FrontEnd/.env
@@ -245,8 +257,13 @@ npm run dev
 | `JWT_SECRET` | Yes | 64-byte hex string for signing JWTs. Generate with: `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"` |
 | `CORS_ORIGIN` | Yes | Comma-separated frontend origins allowed (e.g. `http://localhost:5173,https://yourdomain.com`) |
 | `NODE_ENV` | Yes | `development` or `production` |
-| `RAZORPAY_KEY_ID` | Yes | Razorpay API key ID |
-| `RAZORPAY_KEY_SECRET` | Yes | Razorpay API secret |
+| `PAYU_KEY` | Yes | PayU merchant key |
+| `PAYU_SALT` | Yes | PayU merchant salt (used for hash signing) |
+| `PAYU_BASE_URL` | Yes | PayU checkout base URL. Use `https://secure.payu.in/_payment` for production, `https://sandboxsecure.payu.in/_payment` for sandbox |
+| `PAYU_SUCCESS_URL` | Yes | Absolute URL of `/payments/payu-return` on your backend (PayU redirects here after success) |
+| `PAYU_FAILURE_URL` | Yes | Same as above (PayU also POSTs here on failure) |
+| `PAYU_WEBHOOK_URL` | Optional | Absolute backend URL for async PayU webhook (backup confirmation) |
+| `PAYMENT_LINK_BASE_URL` | Yes | Base URL of your frontend, used to construct payment link URLs (e.g. `https://yourdomain.com`) |
 | `GEMINI_API_KEY` | Yes | Google AI Studio API key for chatbot |
 | `WHATSAPP_API_TOKEN` | Optional | SMSala API token |
 | `WHATSAPP_ENABLED` | Optional | `true` or `false`. Defaults to false if not set |
@@ -257,6 +274,7 @@ npm run dev
 | `WHATSAPP_TPL_ADMISSION_CONFIRMED` | Optional | Template ID for admission confirmation |
 | `WHATSAPP_TPL_FEES_PAID` | Optional | Template ID for fee payment confirmation |
 | `WHATSAPP_TPL_ROLL_ASSIGNED` | Optional | Template ID for roll number assignment |
+| `WHATSAPP_TPL_PAYMENT_LINK` | Optional | Template ID (590) for WhatsApp payment link messages |
 
 ### Frontend (`FrontEnd/.env`)
 
@@ -522,13 +540,30 @@ All payment transactions.
 | `application_id` | INT FK → applications.id | |
 | `payment_type` | NVARCHAR(30) | `'application_fee'`, `'college_fee'`, `'college_fee_installment'` |
 | `amount` | DECIMAL(10,2) | Amount in INR |
-| `razorpay_order_id` | NVARCHAR(100) | Order ID from Razorpay |
-| `razorpay_payment_id` | NVARCHAR(100) | Payment ID from Razorpay (after success) |
+| `gateway` | NVARCHAR(30) | `'payu'`, `'cash'` |
+| `gateway_txnid` | NVARCHAR(100) | Transaction ID generated by backend, sent to PayU as `txnid` |
+| `gateway_payment_id` | NVARCHAR(100) | Payment ID returned by PayU after success |
 | `status` | NVARCHAR(20) | `'pending'`, `'success'`, `'failed'`, `'cancelled'` |
 | `paid_by` | NVARCHAR(10) | `'student'` or `'college'` |
 | `paid_by_user_id` | INT | ID of the user who paid |
 | `attempted_at` | DATETIME2 | |
 | `completed_at` | DATETIME2 | Set on success |
+
+#### `payment_link_tokens`
+Single-use tokens for WhatsApp payment links. Allows college to send a payment link to a student's WhatsApp without the student needing to log in.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | INT IDENTITY PK | |
+| `token` | NVARCHAR(100) UNIQUE | Random UUID used in the link URL |
+| `application_id` | INT FK → applications.id | |
+| `college_id` | INT FK → colleges.id | |
+| `payment_type` | NVARCHAR(30) | `'application_fee'` or `'college_fee'` |
+| `amount` | DECIMAL(10,2) | Fixed amount for this link (optional override) |
+| `gateway_txnid` | NVARCHAR(100) | PayU txnid assigned on first page open; reused on reload (idempotency) |
+| `used` | BIT DEFAULT 0 | Set to 1 after payment commits. Link becomes invalid |
+| `expires_at` | DATETIME2 | 24 hours from creation |
+| `created_at` | DATETIME2 | |
 
 ---
 
@@ -773,8 +808,19 @@ All migrations use `IF OBJECT_ID(...) IS NULL` guards so they are **safe to re-r
 | `007_applications_missing_columns.sql` | Adds any missing application columns |
 | `008_chatbot.sql` | Creates chatbot_knowledge and chatbot_logs tables |
 | `009_college_enabled.sql` | Adds `is_enabled` column to colleges |
+| `010_payu_payments.sql` | Renames Razorpay columns to `gateway`, `gateway_txnid`, `gateway_payment_id` |
+| `011_payment_link_tokens.sql` | Creates `payment_link_tokens` table for WhatsApp payment links |
+| `012_notifications.sql` | Creates in-app notifications table |
+| `013_college_users.sql` | Creates `college_users`, `college_roles`, `college_role_permissions` tables |
+| `014_certificates.sql` | Creates `certificate_bonafide`, `certificate_character`, `certificate_noc` tables |
+| `015_classwise_fees.sql` | Creates `classwise_fees` override table |
+| `016_reports.sql` | Adds report/analytics views |
+| `017_application_activity_log.sql` | Creates `application_activity_log` audit trail table |
+| `018_college_fee_instalments.sql` | Adds multi-instalment support columns |
+| `019_misc_fixes.sql` | Minor column additions and fixes |
+| `020_payment_link_tokens_txnid.sql` | Adds `gateway_txnid` column to `payment_link_tokens` for reload idempotency |
 
-> **Important:** On an existing database, start from migration 002. On a brand new database, run 001 first, then 002 through 009.
+> **Important:** On an existing database, start from migration 002. On a brand new database, run 001 first, then 002 through 020. All migrations are idempotent (safe to re-run).
 
 ---
 
@@ -908,10 +954,13 @@ Student's application listing and management.
 
 | Method | Path | Access | Description |
 |---|---|---|---|
-| POST | `/payments/create-order` | Student | Create Razorpay order for application fee or college fee |
-| POST | `/payments/verify` | Student | Verify Razorpay payment signature after completion |
+| POST | `/payments/initiate` | Student | Initiate a PayU payment — returns HTML form fields to auto-submit |
+| POST | `/payments/payu-return` | Public | PayU POST-back after checkout (verifies hash, commits payment, redirects to `/payment-result`) |
+| POST | `/payments/payu-webhook` | Public | PayU async webhook (backup in case redirect fails) |
 | GET | `/payments/college-fee-status/:applicationId` | Student | Check if college fee is paid |
 | GET | `/payments/receipts` | Student | List payment receipts |
+| GET | `/payments/pay/:token` | **Public** | WhatsApp payment link landing page — renders PayU auto-submit form (no login required) |
+| POST | `/payments/send-payment-link` | College | Generate a payment link token and send it to student via WhatsApp |
 
 ---
 
@@ -935,6 +984,8 @@ All routes require college role. Staff also need appropriate permissions.
 | POST | `/college-admin/:collegeId/roll-numbers/generate` | College (write) | Auto-generate roll numbers |
 | POST | `/college-admin/:collegeId/applications/:appId/assign-roll` | College (write) | Manually assign roll number |
 | GET | `/college-admin/:collegeId/export-applications` | College | Export applications as Excel/CSV |
+| POST | `/college-admin/:collegeId/applications/:appId/record-application-fee` | College (write) | Record cash application fee payment — submits application and generates registration number |
+| GET | `/college-admin/:collegeId/fee-receipts` | College | List all payment records (cash + online) |
 
 ---
 
@@ -1071,9 +1122,9 @@ All API calls go through domain-specific service files:
 |---|---|
 | `authService.js` | Login, register, OTP, password reset |
 | `applicationService.js` | Multi-step form, application CRUD |
-| `collegeAdminService.js` | College-side application management |
+| `collegeAdminService.js` | College-side application management + `sendPaymentLink()` |
 | `collegeService.js` | College browsing, admission periods |
-| `paymentService.js` | Razorpay integration |
+| `paymentService.js` | Student payment flow (PayU initiation, fee status, receipts) |
 | `documentService.js` | File upload/download |
 | `masterService.js` | All master data CRUD |
 | `certificateService.js` | Certificate generation |
@@ -1118,6 +1169,7 @@ All page components are lazy-loaded with `React.lazy()`. This means each page is
 |---|---|---|
 | `/apply/:applicationId` | `ApplyWizard` | Student's 6-step application form |
 | `/college/apply/:applicationId` | `CollegeApplyWizard` | College-side application view wizard |
+| `/payment-result` | `PaymentResult` | Landing page after PayU redirect. Reads `?status`, `?reg`, `?msg`, `?via` params and shows appropriate screen |
 
 ### Student Routes (DashboardLayout)
 
@@ -1306,51 +1358,186 @@ const result = await FeeDeterminationService.compute({
 
 ---
 
-## 15. Payment Flow (Razorpay)
+## 15. Payment Flow (PayU)
 
-### Application Fee Payment
+The platform uses **PayU** as the payment gateway. Unlike modal-based gateways (Razorpay), PayU uses a **form-based redirect** flow: the backend builds an HTML form with signed fields, the frontend auto-submits it, and PayU redirects back to the backend after checkout.
+
+### Key Files
+
+| File | Role |
+|---|---|
+| `BackEnd/routes/payments.js` | All payment endpoints |
+| `BackEnd/services/payU.js` | PayU helper: hash generation, txnid creation, field building |
+| `FrontEnd/src/features/student/pages/PaymentResult.jsx` | Landing page after PayU redirect |
+
+### How PayU Hash Signing Works
+
+Every PayU request requires a SHA-512 hash of specific fields in a fixed order:
+```
+hash = SHA512(key|txnid|amount|productinfo|firstname|email|||||||||||salt)
+```
+The backend computes this hash and includes it in the form fields. PayU verifies it server-side before accepting the transaction.
+
+### Application Fee Payment Flow (Student-initiated)
 
 ```
-1. Student completes all form steps
-2. Student clicks "Pay & Submit" on wizard Step 6 (Review)
-3. Frontend calls POST /payments/create-order
+1. Student completes all form steps (personal details, prev exam, docs, declaration)
+2. Student clicks "Pay & Submit" on Step 5 (Review) in the application wizard
+3. Frontend calls POST /payments/initiate
    Body: { applicationId, paymentType: 'application_fee' }
-4. Backend creates Razorpay order, saves to payments table (status: pending)
-5. Frontend opens Razorpay checkout modal with the order
-6. Student completes payment in Razorpay
-7. Razorpay calls frontend onSuccess callback with:
-   { razorpay_order_id, razorpay_payment_id, razorpay_signature }
-8. Frontend calls POST /payments/verify with these three values
-9. Backend verifies HMAC-SHA256 signature
-10. On success:
-    - Updates payment status to 'success'
-    - Sets application.application_fee_paid = 1
-    - Sets application.status = 'submitted'
-    - Generates registration_number (format: REG-YYYY-{id})
-    - Sends WhatsApp notification to student
-11. Frontend shows success, redirects to My Applications
+4. Backend:
+   a. Generates a unique txnid (format: APP-{appId}-{timestamp})
+   b. Inserts a pending payment row in the payments table
+   c. Builds PayU form fields (key, txnid, amount, hash, surl, furl, etc.)
+   d. Returns form fields as JSON
+5. Frontend renders a hidden <form> with the PayU fields and auto-submits it
+6. Browser redirects to PayU checkout page (secure.payu.in)
+7. Student completes payment on PayU
+8. PayU POSTs to /payments/payu-return (surl on success, furl on failure)
+9. Backend (payu-return):
+   a. Verifies the response hash
+   b. Calls commitPayment():
+      - Updates payment status to 'success'
+      - Sets application.application_fee_paid = 1
+      - Sets application.status = 'submitted'
+      - Generates registration_number
+      - Sends WhatsApp notification to student
+   c. Redirects browser to /payment-result?status=success&reg=REG-XXXX
+10. Student sees success screen with their registration number
 ```
 
-### College Fee Payment
+### College Fee Payment Flow (Student-initiated)
 
 ```
 1. College admin confirms application + sets fee_total_amount + fee_pay_now_amount
 2. Application status → 'confirmed'
-3. Student sees fee on My Applications page
-4. Student clicks "Pay College Fee"
-5. Same Razorpay flow as above, but paymentType: 'college_fee'
-6. On success:
-    - Updates payment status
-    - Sets application.college_fee_paid = 1
-    - Sets application.status = 'fees_paid'
-    - Sends WhatsApp notification
+3. Student sees fee on My Applications / college fee payment page
+4. Student clicks "Pay College Fee" → same PayU form-redirect flow
+   paymentType: 'college_fee'
+5. On commitPayment() success:
+   - Updates payment status
+   - Sets application.college_fee_paid = 1
+   - Sets application.status = 'fees_paid'
+   - Sends WhatsApp notification
+6. Browser redirects to /payment-result?status=success
 ```
+
+### Cash Payment (College-initiated)
+
+College admins can record cash payments directly from the application wizard or fee receipts panel:
+
+```
+POST /college-admin/:collegeId/applications/:appId/record-application-fee
+
+Body: { amount, payment_method: 'cash' }
+
+Backend (in a transaction):
+  1. Inserts payment row (gateway='cash', status='success')
+  2. Sets application.application_fee_paid = 1
+  3. Sets application.status = 'submitted'
+  4. Generates registration_number
+  5. Returns { registration_number }
+```
+
+### PayU Webhook (Backup)
+
+PayU also sends an async server-to-server POST to `/payments/payu-webhook` after payment. This is a backup in case the browser redirect fails (user closes browser mid-flow). The webhook re-runs `commitPayment()` — it is idempotent (a payment already marked `success` is not double-counted).
 
 ### Payment Security
 
-- Signature verification: `HMAC-SHA256(orderId + "|" + paymentId, RAZORPAY_KEY_SECRET)`
-- If signature doesn't match → payment rejected
-- No card/bank details ever stored — Razorpay handles all PCI-DSS compliance
+- All PayU responses verified via SHA-512 hash before committing
+- `gateway_txnid` uniquely identifies each transaction — duplicate commits rejected
+- No card/bank details ever stored — PayU handles PCI-DSS compliance
+- Rate limiting applied to payment endpoints
+
+---
+
+## 15a. WhatsApp Payment Links
+
+College admins can send a payment link directly to a student's WhatsApp. The student clicks the link, sees a PayU form, pays — **without needing to log in** to the portal.
+
+### When to Use
+
+- Student doesn't have internet access to log into the portal
+- College admin collects payment on behalf of a walk-in student
+- Quick payment collection for application fee or college fee top-ups
+
+### How to Send a Link (College Side)
+
+From either the **Application Wizard (Step 5)** or the **Fee Receipts** modal:
+
+1. Click "WhatsApp Link" payment mode
+2. Enter the student's WhatsApp phone number (or leave pre-filled if on record)
+3. Optionally enter a custom amount (defaults to outstanding balance)
+4. Click "Send Link"
+5. Backend:
+   - Creates a row in `payment_link_tokens` (random UUID token, 24h expiry)
+   - Sends WhatsApp message via SMSala template 590 with the link URL
+   - Returns success to the UI
+
+### How the Link Works (Student Side)
+
+The link URL looks like:
+```
+https://yourdomain.com/payments/pay/ABC123TOKEN
+```
+
+This is a **public route** — no login required.
+
+**On first open:**
+1. Backend looks up the token row, checks it is not `used=1` and not expired
+2. Generates a `gateway_txnid` (PayU transaction ID) and stores it on the token row
+3. Inserts a pending payment row in the `payments` table
+4. Renders a PayU auto-submit HTML form
+5. Browser auto-submits to PayU checkout
+
+**On page reload (same token):**
+1. Backend finds the existing `gateway_txnid` on the token row
+2. Reuses the same pending payment row (does NOT create a new one)
+3. Renders the PayU form again with the same txnid → PayU resumes the same session
+
+**After payment:**
+1. PayU POSTs to `/payments/payu-return`
+2. Backend calls `commitPayment()` which:
+   - Updates payment status to `success`
+   - Marks the token `used=1` (link is now consumed)
+   - Updates application status
+   - Sends confirmation WhatsApp to student
+3. Browser redirects to `/payment-result?status=success&via=link`
+4. Student sees success screen — the "Go to My Applications" button is **hidden** (since student is not logged in)
+
+### Token Lifecycle
+
+| State | Condition | Effect |
+|---|---|---|
+| Valid | `used=0` AND `expires_at > NOW()` | Link works |
+| Used | `used=1` | Link rejected — payment already made |
+| Expired | `expires_at < NOW()` AND `used=0` | Link rejected — college must send a new one |
+
+### Key Design Decisions
+
+| Decision | Reason |
+|---|---|
+| Public route (no auth) | Student shouldn't need to create an account or log in just to pay |
+| Single-use token | Prevents the same link being shared and paid multiple times |
+| 24h expiry | Limits exposure if the link is forwarded to unintended recipients |
+| `gateway_txnid` stored on token row | Ensures page reloads don't create duplicate pending payments |
+| Token marked used inside `commitPayment()` | Only marked consumed after PayU confirms success — not on page open |
+| `via=link` param on redirect | Tells the result page to hide the "Go to My Applications" button |
+
+### Database Tables Involved
+
+- `payment_link_tokens` — stores tokens (see schema in Section 6)
+- `payments` — pending row created on first link open; committed on success
+- `whatsapp_message_log` — logs the send attempt
+
+### Environment Variable Required
+
+```
+WHATSAPP_TPL_PAYMENT_LINK=590   # SMSala template ID for payment link message
+```
+
+Template 590 variables (in order): `college_name`, `registration_number`, `link_url`
 
 ---
 
@@ -1404,6 +1591,7 @@ The `normalisePhone()` function handles Indian phone number formats:
 | Admission Confirmed | `notifyAdmissionConfirmed()` | College confirms admission |
 | Fees Paid | `notifyFeesPaid()` | Payment verification success |
 | Roll Assigned | `notifyRollAssigned()` | College assigns roll number |
+| Payment Link | `sendTemplateMessage()` | College sends WhatsApp payment link to student (template 590) |
 
 ### Template Configuration
 Each template ID must be configured in `.env`. The template variables (Sample field) are comma-separated values matching the SMSala template definition.
@@ -1653,7 +1841,7 @@ Uploaded documents are stored in `BackEnd/public/uploads/`. In production:
 
 These are important rules that aren't obvious from reading the code alone:
 
-1. **Registration Number**: Generated only after the student pays the platform application fee. Format: `REG-{YYYY}-{applicationId}`. A student without a registration number has not paid.
+1. **Registration Number**: Generated when the platform application fee is paid (online via PayU or cash recorded by college). Format: `{AY}-{courseId}-{yearOfStudy}-{seq}` (e.g. `202425-03-1-0001`). A student without a registration number has not paid.
 
 2. **Fee Category Non-Granted Override**: If a student's division has `funding_type = 'NonGranted'`, their payment mode is always `Paying` regardless of caste. Government fee concessions don't apply to non-granted seats.
 
@@ -1677,6 +1865,12 @@ These are important rules that aren't obvious from reading the code alone:
 
 12. **Chatbot Strictness**: The Gemini prompt explicitly instructs the AI to only answer from the provided knowledge base context. If the answer isn't in the knowledge base, it must say so. This prevents hallucination and keeps the bot on-topic.
 
+13. **Application Not Submitted Until Fee Paid**: When a college admin fills in an application on behalf of a student (via `CollegeApplyWizard`), the application stays in `draft` status until the application fee is paid. The application is only transitioned to `submitted` at the point of fee payment — either by cash recording or online payment. This ensures the college does not accidentally submit a fee-unpaid application.
+
+14. **Payment Link Single-Use Guarantee**: A WhatsApp payment link token is consumed (`used=1`) only when `commitPayment()` runs successfully. If a student opens the link, reaches PayU, but the payment fails, the token remains valid and the student can click the link again. However, once payment succeeds, the token is permanently invalidated.
+
+15. **PayU Idempotency**: The `gateway_txnid` field links a payment link token to a specific PayU transaction. If the student opens the link multiple times before paying, the backend always reuses the same pending payment row and the same txnid. This prevents duplicate payments for a single link.
+
 ---
 
-*Last updated: May 2026. For questions, see the git log or open an issue.*
+*Last updated: June 2026. For questions, see the git log or open an issue.*

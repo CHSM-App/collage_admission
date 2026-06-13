@@ -55,12 +55,13 @@ export default function ApplicationInbox({ collegeId, collegeName = '' }) {
   const [filterCourse, setFilterCourse] = useState('')
   const [filterYear, setFilterYear]     = useState('')
   const [showExport, setShowExport]     = useState(false)
+  const [pendingLink, setPendingLink]   = useState(false)
 
   // Reset to page 1 whenever filters change
-  useEffect(() => { setPage(1) }, [filterStatus, filterCourse, filterYear])
+  useEffect(() => { setPage(1) }, [filterStatus, filterCourse, filterYear, pendingLink])
 
   const { apps, loading, pagination, fetchApps } = useApplicationsList(collegeId, {
-    page, filterStatus, filterCourse, filterYear,
+    page, filterStatus, filterCourse, filterYear, pendingLink,
   })
 
   const statusCounts = useStatusCounts(apps)
@@ -93,10 +94,10 @@ export default function ApplicationInbox({ collegeId, collegeName = '' }) {
     searched, 'submitted_at', 'desc', { numericCols: ['year_of_study'] }
   )
 
-  const hasFilters = search || filterStatus || filterCourse || filterYear
+  const hasFilters = search || filterStatus || filterCourse || filterYear || pendingLink
 
   function clearFilters() {
-    setSearch(''); setFilterStatus(''); setFilterCourse(''); setFilterYear(''); setPage(1)
+    setSearch(''); setFilterStatus(''); setFilterCourse(''); setFilterYear(''); setPendingLink(false); setPage(1)
   }
 
   function openApp(appId) {
@@ -190,6 +191,19 @@ export default function ApplicationInbox({ collegeId, collegeName = '' }) {
           ))}
         </select>
 
+        {/* Payment link pending toggle */}
+        {/* <button
+          onClick={() => setPendingLink(v => !v)}
+          className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-semibold whitespace-nowrap transition ${
+            pendingLink
+              ? 'border-green-400 bg-green-50 text-green-700'
+              : 'border-slate-200 bg-white text-slate-500 hover:border-green-300 hover:text-green-700'
+          }`}
+        >
+          <span className={`h-2 w-2 rounded-full ${pendingLink ? 'bg-green-500' : 'bg-slate-300'}`} />
+          Link Pending
+        </button> */}
+
         {hasFilters && (
           <button
             onClick={clearFilters}
@@ -233,17 +247,17 @@ export default function ApplicationInbox({ collegeId, collegeName = '' }) {
           </div>
 
           {filtered.map((app, i) => {
-
             const meta = STATUS_META[app.status] || { label: app.status, color: 'bg-slate-100 text-slate-600' }
+            const hasPendingLink = !!app.has_pending_link
             return (
               <button
                 key={app.id}
                 onClick={() => openApp(app.id)}
                 className={`w-full text-left grid sm:grid-cols-[1fr_1fr_10rem_12rem_6rem] px-4 py-2.5 hover:bg-blue-50 transition items-center ${
                   i !== 0 ? 'border-t-2 border-slate-300' : ''
-                }`}
+                } ${hasPendingLink ? 'bg-green-50' : ''}`}
               >
-                <div className="min-w-0 pr-3">      
+                <div className="min-w-0 pr-3">
                   <p className="font-medium text-sm text-slate-900 truncate">{app.student_name}</p>
                   <p className="text-xs text-slate-400 truncate">{app.student_email} · {app.phone}</p>
                 </div>
@@ -254,9 +268,17 @@ export default function ApplicationInbox({ collegeId, collegeName = '' }) {
                 <span className="font-mono text-xs text-slate-400 truncate pr-3">
                   {app.registration_number || '—'}
                 </span>
-                <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap ${meta.color}`}>
-                  {meta.label}
-                </span>
+                <div className="flex flex-col gap-1">
+                  <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap ${meta.color}`}>
+                    {meta.label}
+                  </span>
+                  {hasPendingLink && (
+                    <span className="inline-flex w-fit items-center gap-1 rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-700 whitespace-nowrap">
+                      <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                      Link Pending
+                    </span>
+                  )}
+                </div>
                 <span className="text-xs text-slate-400 whitespace-nowrap text-right">
                   {app.submitted_at ? new Date(app.submitted_at).toLocaleDateString('en-IN') : '—'}
                 </span>

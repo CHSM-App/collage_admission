@@ -279,7 +279,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
       )}
 
       {/* ── Collect Fee Payment ── */}
-      {['confirmed', 'fees_paid'].includes(d.status) && canFees && (
+      {(['confirmed', 'fees_paid'].includes(d.status) || d.has_pending_link) && canFees && (
         <CollegeCollectPayPanel
           appId={appId}
           collegeId={collegeId}
@@ -511,6 +511,8 @@ const ACTION_META = {
   enrolled:               { label: 'Enrolled',                        color: 'bg-green-600',   actor: 'Student' },
   subject_selected:       { label: 'Subjects Selected',               color: 'bg-violet-400',  actor: 'Student' },
   cancelled:              { label: 'Application Cancelled',           color: 'bg-slate-500',   actor: 'College' },
+  payment_link_sent:      { label: 'Payment Link Sent via WhatsApp',  color: 'bg-green-500',   actor: 'College' },
+  payment_link_opened:    { label: 'Payment Link Opened by Student',  color: 'bg-green-400',   actor: 'Student' },
 }
 
 function ActivityTimeline({ app }) {

@@ -44,16 +44,16 @@ const applicationMutationLimiter = rateLimit({
 router.use('/subjects', applicationMutationLimiter);
 router.post('/',        applicationMutationLimiter);
 
-async function logActivity(appId, action, actorRole, note = null) {
-  try {
-    await db.request()
-      .input('appId',     mssql.Int,     parseInt(appId))
-      .input('action',    mssql.NVarChar, action)
-      .input('actorRole', mssql.NVarChar, actorRole)
-      .input('note',      mssql.NVarChar, note || null)
-      .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
-  } catch (e) { logger.warn({ err: e }, 'logActivity failed'); }
-}
+// async function logActivity(appId, action, actorRole, note = null) {
+//   try {
+//     await db.request()
+//       .input('appId',     mssql.Int,     parseInt(appId))
+//       .input('action',    mssql.NVarChar, action)
+//       .input('actorRole', mssql.NVarChar, actorRole)
+//       .input('note',      mssql.NVarChar, note || null)
+//       .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
+//   } catch (e) { logger.warn({ err: e }, 'logActivity failed'); }
+// }
 
 // ── Helper: generate registration number ────────────────────
 async function generateRegNumber(collegeId, courseId, year, academicYear) {
@@ -394,7 +394,7 @@ router.post('/:id/submit', async (req, res) => {
       throw txErr;
     }
 
-    await logActivity(appId, 'submitted', 'student', null);
+    // await logActivity(appId, 'submitted', 'student', null);
 
     return res.json({
       success: true,
@@ -484,7 +484,7 @@ router.post('/:id/pay-college-fee', async (req, res) => {
       throw txErr;
     }
 
-    await logActivity(appId, 'fees_paid', 'student', null);
+    // await logActivity(appId, 'fees_paid', 'student', null);
 
     return res.json({ success: true, message: 'College fee paid successfully.' });
   } catch (err) {
@@ -592,7 +592,7 @@ router.post('/:id/subjects', async (req, res) => {
       throw txErr;
     }
 
-    await logActivity(appId, 'enrolled', 'student', null);
+    // await logActivity(appId, 'enrolled', 'student', null);
 
     return res.json({ success: true, message: 'Subjects selected. Enrollment complete.' });
   } catch (err) {

@@ -508,10 +508,13 @@ router.post('/otp/verify', otpVerifyValidators, validate, async (req, res) => {
 router.post('/register/student', registerLimiter, async (req, res) => {
   const { full_name, email, password, phone, dob, gender, address, city, category } = req.body;
 
-  if (!full_name || !email || !password) {
-    return res.status(400).json({ message: 'Name, email and password are required.' });
+  if (!full_name || !email) {
+    return res.status(400).json({ message: 'Name and email are required.' });
   }
-  const pwdErr = validatePassword(password);
+  // If no password provided (college-registered student), generate a random one.
+  // The student will use Forgot Password to set their own password.
+  const effectivePassword = password || require('crypto').randomBytes(16).toString('hex');
+  const pwdErr = password ? validatePassword(password) : null;
   if (pwdErr) return res.status(400).json({ message: pwdErr });
 
   try {
@@ -528,7 +531,7 @@ router.post('/register/student', registerLimiter, async (req, res) => {
       return res.status(409).json({ message: 'An account with this phone number already exists.' });
     }
 
-    const hash = await bcrypt.hash(password, 10);
+    const hash = await bcrypt.hash(effectivePassword, 10);
 
     const result = await db.request()
       .input('full_name', full_name)

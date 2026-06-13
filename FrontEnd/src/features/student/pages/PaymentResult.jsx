@@ -18,9 +18,10 @@ export default function PaymentResult() {
   const [params]  = useSearchParams()
   const navigate  = useNavigate()
 
-  const status = params.get('status')   // 'success' | 'failed' | 'error' | 'pending'
-  const reg    = params.get('reg')      // registration number (application_fee only)
-  const reason = params.get('msg') || params.get('reason')   // failure/error message
+  const status  = params.get('status')   // 'success' | 'failed' | 'error' | 'pending'
+  const reg     = params.get('reg')      // registration number (application_fee only)
+  const reason  = params.get('msg') || params.get('reason')   // failure/error message
+  const viaLink = params.get('via') === 'link'  // payment came from a WhatsApp payment link
 
   if (status === 'error') {
     return (
@@ -83,9 +84,11 @@ export default function PaymentResult() {
             </p>
           )}
 
-          <Button onClick={() => navigate('/student/dashboard')} className="mx-auto">
-            Go to My Applications →
-          </Button>
+          {!viaLink && (
+            <Button onClick={() => navigate('/student/dashboard')} className="mx-auto">
+              Go to My Applications →
+            </Button>
+          )}
         </div>
       </div>
     )
