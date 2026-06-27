@@ -271,7 +271,7 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
                   </div>
                   <button type="submit" disabled={saving}
                     className="shrink-0 rounded-lg bg-slate-900 text-white text-sm font-semibold px-4 py-2 hover:bg-slate-700 disabled:opacity-50 transition">
-                    {saving ? 'Saving…' : 'Record'}
+                    {saving ? 'Saving…' : 'Collect Payment'}
                   </button>
                 </div>
                 <div>

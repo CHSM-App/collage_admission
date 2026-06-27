@@ -589,15 +589,37 @@ export default function FeesMaster({ collegeId }) {
                   </>
               }
             </div>
-            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 shrink-0">
-              <span className="text-xs text-slate-400">
-                {cwRows.filter(r => r.selected).length} of {cwRows.length} fee heads selected for {cwSelAY}
-              </span>
-              <div className="flex gap-3">
-                <button onClick={() => setCwModal(false)} className="px-4 py-2 text-sm text-slate-600">Close</button>
-                <button onClick={saveCw} disabled={cwSaving || cwHeadRows.length === 0} className="px-5 py-2 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700 disabled:opacity-50">
-                  {cwSaving ? 'Saving…' : 'Save'}
-                </button>
+            <div className="border-t border-slate-100 shrink-0">
+              {cwRows.length > 0 && (
+                <div className="px-6 py-3 bg-slate-50 border-b border-slate-100 flex flex-wrap gap-x-6 gap-y-1">
+                  <span className="text-xs font-bold text-slate-600 uppercase tracking-wide self-center mr-2">Total (selected)</span>
+                  {[1,2,3,4].map(n => {
+                    const total = cwRows
+                      .filter(r => r.selected)
+                      .reduce((sum, r) => {
+                        const ov = r[`cat${n}_amount`]
+                        const amt = ov !== '' && ov != null ? parseFloat(ov) : parseFloat(r[`base_cat${n}`] || 0)
+                        return sum + (isNaN(amt) ? 0 : amt)
+                      }, 0)
+                    return (
+                      <div key={n} className="flex items-center gap-1.5">
+                        <span className="text-xs text-slate-400">Cat-{n}:</span>
+                        <span className="text-xs font-bold font-mono text-slate-800">₹{total.toLocaleString('en-IN')}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+              <div className="flex items-center justify-between px-6 py-4">
+                <span className="text-xs text-slate-400">
+                  {cwRows.filter(r => r.selected).length} of {cwRows.length} fee heads selected for {cwSelAY}
+                </span>
+                <div className="flex gap-3">
+                  <button onClick={() => setCwModal(false)} className="px-4 py-2 text-sm text-slate-600">Close</button>
+                  <button onClick={saveCw} disabled={cwSaving || cwHeadRows.length === 0} className="px-5 py-2 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700 disabled:opacity-50">
+                    {cwSaving ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

@@ -606,7 +606,7 @@ async function computeFeeForApp(appId, collegeId, divisionOverride) {
     .input('id',  mssqlShared.Int, appId)
     .input('col', mssqlShared.Int, collegeId)
     .query(`
-      SELECT course_id, year_of_study, academic_year, app_division, app_caste,
+      SELECT course_id, year_of_study, academic_year, app_division, app_category,
              app_special_status, fees_category
       FROM applications WHERE id=@id AND college_id=@col
     `);
@@ -618,7 +618,7 @@ async function computeFeeForApp(appId, collegeId, divisionOverride) {
     facultyMasterId: a.course_id,
     yearLevel:       yearMap[a.year_of_study] || null,
     divisionLetter:  divisionOverride || a.app_division || null,
-    caste:           a.app_caste || null,
+    caste:           a.app_category || null,
     specialStatus:   a.app_special_status || null,
     academicYear:    a.academic_year || null,
     pool:            db,

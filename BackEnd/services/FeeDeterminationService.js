@@ -147,11 +147,8 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
   const { mode: paymentMode, reason: paymentModeReason } = determinePaymentMode(caste, specialStatus, fundingType)
 
   // 3. Fetch applicable fee heads + amounts
-  // Fee heads are filtered by academic_year on fees_master.
-  // Classwise overrides are also filtered by academic_year.
-  // Only return heads that have a classwise_fees entry for this class+student_type (INNER JOIN).
-  // If no faculty/yearLevel context, fall back to all active heads for that academic year (LEFT JOIN).
-  const slabCol = `fees_cat${slab}_amount`
+  // Always LEFT JOIN classwise_fees — fees_master base amounts are the fallback.
+  // Classwise rows override per-class/student_type when present.
   const feesRes = await resolvedPool.request()
     .input('cid', mssql.Int,      collegeId)
     .input('fid', mssql.Int,      facultyMasterId || null)
@@ -166,11 +163,11 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
         cf.cat1_amount AS cw_cat1, cf.cat2_amount AS cw_cat2,
         cf.cat3_amount AS cw_cat3, cf.cat4_amount AS cw_cat4
       FROM fees_master fm
-      ${facultyMasterId && yearLevel ? 'INNER' : 'LEFT'} JOIN classwise_fees cf
+      LEFT JOIN classwise_fees cf
         ON cf.fees_code = fm.fees_code
         AND cf.college_id = @cid
-        AND cf.faculty_master_id = @fid
-        AND cf.year_level = @yl
+        AND (@fid IS NULL OR cf.faculty_master_id = @fid)
+        AND (@yl IS NULL OR cf.year_level = @yl)
         AND cf.student_type = @st
         AND (@ay IS NULL OR cf.academic_year = @ay)
       WHERE fm.college_id = @cid
