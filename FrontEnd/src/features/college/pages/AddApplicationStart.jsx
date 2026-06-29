@@ -97,7 +97,8 @@ export default function AddApplicationStart() {
     if (!full_name.trim()) { setRegError('Full name is required.'); return }
     if (!email.trim())     { setRegError('Email is required.'); return }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setRegError('Enter a valid email address.'); return }
-    if (phone.trim() && !/^[6-9]\d{9}$/.test(phone.trim())) { setRegError('Mobile number must be 10 digits starting with 6–9.'); return }
+    if (!phone.trim()) { setRegError('Mobile number is required.'); return }
+    if (!/^[6-9]\d{9}$/.test(phone.trim())) { setRegError('Mobile number must be 10 digits starting with 6–9.'); return }
 
     setRegistering(true)
     try {
@@ -244,7 +245,7 @@ export default function AddApplicationStart() {
               placeholder="student@example.com"
             />
             <RegField
-              label="Phone"
+              label="Phone" required
               value={regForm.phone}
               onChange={v => setRegForm(f => ({ ...f, phone: v }))}
               placeholder="10-digit mobile"

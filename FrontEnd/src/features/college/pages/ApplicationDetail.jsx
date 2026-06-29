@@ -183,7 +183,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
       <div className="rounded-lg border border-slate-200 bg-slate-50 px-5 py-3 flex items-center justify-between gap-4">
         <p className="text-sm font-semibold text-slate-700">{flowInfo.label}</p>
         <div className="flex items-center gap-3">
-          {canEditApp && ['submitted', 'under_review', 'correction_requested', 'correction_done'].includes(d.status) && (
+          {canEditApp && (
             <button
               onClick={() => navigate(`/college/apply/${appId}`)}
               className="rounded-md bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-700 transition"
@@ -279,7 +279,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
       )}
 
       {/* ── Collect Fee Payment ── */}
-      {(['confirmed', 'fees_paid'].includes(d.status) || d.has_pending_link) && canFees && (
+      {((['confirmed', 'fees_paid'].includes(d.status) || !!d.has_pending_link) && canFees) && (
         <CollegeCollectPayPanel
           appId={appId}
           collegeId={collegeId}

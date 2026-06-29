@@ -95,7 +95,7 @@ export default function FeesMaster({ collegeId }) {
   const CW_STUDENT_TYPE_LABEL = { Grand: 'Grant', NonGrand: 'Non-Grant', Outsider: 'Outsider' }
 
   function load(silent = false) {
-    const wasMiss = !masterCacheHas(`fees:${collegeId}:`) || !masterCacheHas(`bank:${collegeId}`)
+    const wasMiss = !masterCacheHas(`fees:${collegeId}`) || !masterCacheHas(`bank:${collegeId}`)
     if (!silent && wasMiss) setLoading(true)
     Promise.all([
       getFeesList(collegeId, null, r => setAllRows(r.data.data || [])),
@@ -304,6 +304,7 @@ export default function FeesMaster({ collegeId }) {
             <table className="w-full text-sm border-collapse">
               <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
                 <tr>
+                  {rw && <th className="px-2 py-2.5 w-8" />}
                   <FMTh col="sequence_auto_fees"  label="Seq"     align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-8" />
                   <FMTh col="fees_head"           label="Fees Head" align="left" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} />
                   <FMTh col="short_name"          label="Short"   align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
@@ -314,7 +315,6 @@ export default function FeesMaster({ collegeId }) {
                   <FMTh col="fees_cat4_amount"    label="Cat-4"   align="right"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
                   <th className="px-3 py-2.5 text-center w-20">Refund.</th>
                   <FMTh col="is_active"           label="Status"  align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-16" />
-                  {rw && <th className="px-3 py-2.5 w-8" />}
                   <th className="px-3 py-2.5 w-20" />
                 </tr>
               </thead>

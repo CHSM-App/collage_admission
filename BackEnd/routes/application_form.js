@@ -521,13 +521,14 @@ async function getCollegeName(appId) {
 // Editable statuses: student can edit form until scrutiny_accepted
 const EDITABLE_STATUSES = ['draft', 'submitted', 'under_review', 'correction_requested', 'correction_done'];
 
-async function assertDraft(appId, res) {
+async function assertDraft(appId, res, user = null) {
   const r = await db.request()
     .input('id', mssql.Int, appId)
     .query('SELECT id, status, student_id, year_of_study, application_fee_paid FROM applications WHERE id = @id');
   if (!r.recordset.length) { res.status(404).json({ success: false, message: 'Application not found.' }); return null; }
   const app = r.recordset[0];
-  if (!EDITABLE_STATUSES.includes(app.status)) {
+  const isCollegeStaff = user && user.role === 'college';
+  if (!isCollegeStaff && !EDITABLE_STATUSES.includes(app.status)) {
     res.status(400).json({ success: false, message: 'Application can no longer be edited after scrutiny acceptance.' });
     return null;
   }
@@ -537,7 +538,7 @@ async function assertDraft(appId, res) {
 // ── PATCH /api/applications/:id/confirm-context (Step 1 → advance to step 2) ───
 router.patch('/applications/:id/confirm-context', async (req, res) => {
   const appId = parseInt(req.params.id);
-  const app = await assertDraft(appId, res);
+  const app = await assertDraft(appId, res, req.user);
   if (!app) return;
   try {
     await db.request()
@@ -559,7 +560,7 @@ router.patch('/applications/:id/confirm-context', async (req, res) => {
 // ── PATCH /api/applications/:id/personal-details (Step 2) ───
 router.patch('/applications/:id/personal-details', async (req, res) => {
   const appId = parseInt(req.params.id);
-  const app = await assertDraft(appId, res);
+  const app = await assertDraft(appId, res, req.user);
   if (!app) return;
 
   const {
@@ -641,7 +642,7 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
 // ── PATCH /api/applications/:id/other-details (Step 3) ──────
 router.patch('/applications/:id/other-details', async (req, res) => {
   const appId = parseInt(req.params.id);
-  const app = await assertDraft(appId, res);
+  const app = await assertDraft(appId, res, req.user);
   if (!app) return;
 
   const {
@@ -752,7 +753,7 @@ router.patch('/applications/:id/other-details', async (req, res) => {
 // Each exam row: { institute, board, month_year, seat_no, marks_obtained, marks_max, percentage, class_grade, remark }
 router.patch('/applications/:id/previous-exam', async (req, res) => {
   const appId = parseInt(req.params.id);
-  const app = await assertDraft(appId, res);
+  const app = await assertDraft(appId, res, req.user);
   if (!app) return;
 
   const { exams } = req.body; // keyed by exam_type
@@ -851,7 +852,7 @@ router.patch('/applications/:id/previous-exam', async (req, res) => {
 // Links an existing student_document to this application, or creates a new student_document entry.
 router.post('/applications/:id/form-documents', async (req, res) => {
   const appId = parseInt(req.params.id);
-  const app = await assertDraft(appId, res);
+  const app = await assertDraft(appId, res, req.user);
   if (!app) return;
 
   const { student_id, document_type_id, file_name, file_path } = req.body;
@@ -947,7 +948,7 @@ router.post('/applications/:id/form-documents', async (req, res) => {
 router.delete('/applications/:id/form-documents/:docTypeId', async (req, res) => {
   const appId      = parseInt(req.params.id);
   const docTypeId  = parseInt(req.params.docTypeId);
-  const app = await assertDraft(appId, res);
+  const app = await assertDraft(appId, res, req.user);
   if (!app) return;
 
   try {
@@ -966,7 +967,7 @@ router.delete('/applications/:id/form-documents/:docTypeId', async (req, res) =>
 // ── POST /api/applications/:id/declaration (Step 6) ─────────
 router.post('/applications/:id/declaration', async (req, res) => {
   const appId = parseInt(req.params.id);
-  const app = await assertDraft(appId, res);
+  const app = await assertDraft(appId, res, req.user);
   if (!app) return;
 
   const { accepted } = req.body;
@@ -1026,7 +1027,7 @@ router.post('/applications/:id/declaration', async (req, res) => {
 // after a college correction request. Skips payment, sets status → under_review.
 router.post('/applications/:id/resubmit', async (req, res) => {
   const appId = parseInt(req.params.id);
-  const app = await assertDraft(appId, res);
+  const app = await assertDraft(appId, res, req.user);
   if (!app) return;
 
   if (!app.application_fee_paid) {

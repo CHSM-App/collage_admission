@@ -76,6 +76,13 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
       .catch(() => {})
   }, [data.college_id, data.course_id, data.year_of_study])
 
+  // ── Clear special_status when caste is not Gen. ──
+  useEffect(() => {
+    if (data.category !== 'Gen.' && data.special_status) {
+      onChange({ target: { name: 'special_status', value: '' } })
+    }
+  }, [data.category])
+
   // ── Auto-determine fees_category from caste+special_status ──
   useEffect(() => {
     const result = determineFeesCategory(data.category, data.special_status)
@@ -240,13 +247,17 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
         </FormField>
 
         {/* Special Status */}
-        <FormField label="Special Status (Optional)" hint="Select only if applicable — may qualify for additional concession.">
+        <FormField
+          label="Special Status (Optional)"
+          hint={data.category !== 'Gen.' ? 'Special status is only applicable for Gen. category.' : 'Select only if applicable — may qualify for additional concession.'}
+        >
           <RadioGroup
             name="special_status"
             options={SPECIAL_OPTIONS}
             value={data.special_status}
             onChange={v => onChange({ target: { name: 'special_status', value: v } })}
             clearable
+            disabled={data.category !== 'Gen.'}
           />
         </FormField>
 
