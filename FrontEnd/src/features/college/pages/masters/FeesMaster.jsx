@@ -157,8 +157,11 @@ export default function FeesMaster({ collegeId }) {
     finally { setDragging(false) }
   }
 
-  const [pulling, setPulling] = useState(false)
-  async function pullFromPrevYear() {
+  const [pulling, setPulling]           = useState(false)
+  const [pullModal, setPullModal]       = useState(null)  // null | { prevAY, toCopy, selected: Set }
+  const [pullSaving, setPullSaving]     = useState(false)
+
+  function openPullModal() {
     const idx = AY_OPTIONS.indexOf(selAY)
     if (idx <= 0) return
     const prevAY = AY_OPTIONS[idx - 1]
@@ -167,18 +170,38 @@ export default function FeesMaster({ collegeId }) {
     const existing = new Set(rows.map(r => r.fees_head.trim().toLowerCase()))
     const toCopy = prevRows.filter(r => !existing.has(r.fees_head.trim().toLowerCase()))
     if (toCopy.length === 0) { toast.error(`All heads from ${prevAY} already exist in ${selAY}.`); return }
-    if (!confirm(`Copy ${toCopy.length} fee head(s) from ${prevAY} to ${selAY}?`)) return
-    setPulling(true)
+    setPullModal({ prevAY, toCopy, selected: new Set(toCopy.map(r => r.fees_code)) })
+  }
+
+  async function confirmPull() {
+    if (!pullModal) return
+    const { prevAY, toCopy, selected } = pullModal
+    const chosen = toCopy.filter(r => selected.has(r.fees_code))
+    if (chosen.length === 0) { toast.error('Select at least one fee head.'); return }
+    setPullSaving(true)
     try {
       const maxSeq = rows.reduce((m, r) => Math.max(m, r.sequence_auto_fees || 0), 0)
-      for (let i = 0; i < toCopy.length; i++) {
-        const { fees_code, bank_name, ...rest } = toCopy[i]
+      for (let i = 0; i < chosen.length; i++) {
+        const { fees_code, bank_name, ...rest } = chosen[i]
         await createFees(collegeId, { ...rest, academic_year: selAY, sequence_auto_fees: maxSeq + i + 1 })
       }
       load(true)
-      toast.success(`Copied ${toCopy.length} head(s) from ${prevAY} to ${selAY}.`)
+      toast.success(`Copied ${chosen.length} head(s) from ${prevAY} to ${selAY}.`)
+      setPullModal(null)
     } catch (e) { toast.error(getErrorMessage(e, 'Pull failed.')) }
-    finally { setPulling(false) }
+    finally { setPullSaving(false) }
+  }
+
+  function togglePullRow(code) {
+    setPullModal(m => {
+      const next = new Set(m.selected)
+      next.has(code) ? next.delete(code) : next.add(code)
+      return { ...m, selected: next }
+    })
+  }
+
+  function toggleAllPull(checked) {
+    setPullModal(m => ({ ...m, selected: checked ? new Set(m.toCopy.map(r => r.fees_code)) : new Set() }))
   }
 
   // ── Classwise Fees ──────────────────────────────────────────
@@ -289,9 +312,9 @@ export default function FeesMaster({ collegeId }) {
             Classwise Fees
           </button>
           {rw && AY_OPTIONS.indexOf(selAY) > 0 && (
-            <button onClick={pullFromPrevYear} disabled={pulling}
-              className="px-3 py-1.5 border border-slate-300 text-slate-700 text-sm rounded-lg hover:bg-slate-50 disabled:opacity-50">
-              {pulling ? 'Pulling…' : `↓ Pull from ${AY_OPTIONS[AY_OPTIONS.indexOf(selAY) - 1]}`}
+            <button onClick={openPullModal}
+              className="px-3 py-1.5 border border-slate-300 text-slate-700 text-sm rounded-lg hover:bg-slate-50">
+              ↓ Pull from {AY_OPTIONS[AY_OPTIONS.indexOf(selAY) - 1]}
             </button>
           )}
           {rw && <button onClick={openNew} className="px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700">+ New Fee Head</button>}
@@ -620,6 +643,69 @@ export default function FeesMaster({ collegeId }) {
                     {cwSaving ? 'Saving…' : 'Save'}
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Pull from Previous Year Modal */}
+      {pullModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
+              <div>
+                <h3 className="font-semibold text-slate-800">Pull from {pullModal.prevAY}</h3>
+                <p className="text-xs text-slate-400 mt-0.5">Select fee heads to copy into {selAY}</p>
+              </div>
+              <button onClick={() => setPullModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+            </div>
+            <div className="overflow-y-auto flex-1 px-6 py-4">
+              <table className="w-full text-sm">
+                <thead className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200">
+                  <tr>
+                    <th className="pb-2 text-center w-10">
+                      <input
+                        type="checkbox"
+                        checked={pullModal.toCopy.length > 0 && pullModal.selected.size === pullModal.toCopy.length}
+                        onChange={e => toggleAllPull(e.target.checked)}
+                        className="accent-slate-700"
+                      />
+                    </th>
+                    <th className="pb-2 text-left">Fee Head</th>
+                    <th className="pb-2 text-center w-20">Type</th>
+                    <th className="pb-2 text-right w-20">Cat-1 (₹)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {pullModal.toCopy.map(r => (
+                    <tr key={r.fees_code} className={`transition ${pullModal.selected.has(r.fees_code) ? '' : 'opacity-40'}`}>
+                      <td className="py-2 text-center">
+                        <input type="checkbox" checked={pullModal.selected.has(r.fees_code)}
+                          onChange={() => togglePullRow(r.fees_code)} className="accent-slate-700" />
+                      </td>
+                      <td className="py-2">
+                        <p className="font-medium text-slate-800">{r.fees_head}</p>
+                        <p className="text-xs text-slate-400">{r.short_name}</p>
+                      </td>
+                      <td className="py-2 text-center">
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{r.fees_type}</span>
+                      </td>
+                      <td className="py-2 text-right font-mono text-slate-700">
+                        {parseFloat(r.fees_cat1_amount || 0).toLocaleString('en-IN')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 shrink-0">
+              <span className="text-xs text-slate-400">{pullModal.selected.size} of {pullModal.toCopy.length} selected</span>
+              <div className="flex gap-3">
+                <button onClick={() => setPullModal(null)} className="px-4 py-2 text-sm text-slate-600">Cancel</button>
+                <button onClick={confirmPull} disabled={pullSaving || pullModal.selected.size === 0}
+                  className="px-5 py-2 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700 disabled:opacity-50">
+                  {pullSaving ? 'Copying…' : `Copy ${pullModal.selected.size} Head(s)`}
+                </button>
               </div>
             </div>
           </div>
