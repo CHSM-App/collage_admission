@@ -355,23 +355,23 @@ export default function FeesMaster({ collegeId }) {
         <>
           {loading ? <SkeletonTable rows={4} cols={4} /> : (
             <>
-              <div className="hidden sm:block overflow-x-auto rounded-lg border-2 border-slate-400">
+              <div className="hidden sm:block overflow-x-auto border border-slate-300">
                 <table className="w-full text-sm border-collapse">
-                  <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
+                  <thead className="bg-slate-50 text-xs font-bold text-slate-600 uppercase tracking-wide border-b border-slate-300">
                     <tr>
-                      {rw && <th className="px-2 py-2.5 w-8" />}
+                      {rw && <th className="px-2 py-1 w-8 border-r border-slate-200" />}
                       <FMTh col="sequence_auto_fees" label="Seq"      align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-8" />
                       <FMTh col="fees_head"          label="Fees Head" align="left"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} />
                       <FMTh col="short_name"         label="Short"    align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
                       <FMTh col="fees_type"          label="Type"     align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
-                      <th className="px-3 py-2.5 text-center w-20">Refund.</th>
+                      <th className="px-3 py-1 text-center w-20 border-r border-slate-200">Refund.</th>
                       <FMTh col="is_active"          label="Status"   align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-16" />
-                      <th className="px-3 py-2.5 w-20" />
+                      <th className="px-3 py-1 w-20 border-r border-slate-200" />
                     </tr>
                   </thead>
                   <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
                     <SortableContext items={dragRows.map(r => r.fees_code)} strategy={verticalListSortingStrategy}>
-                      <tbody className="divide-y-2 divide-slate-300">
+                      <tbody className="divide-y divide-slate-200">
                         {dragRows.length === 0 && (
                           <tr><td colSpan={rw ? 8 : 7} className="px-4 py-8 text-center text-slate-500">
                             No fee heads configured for {selAY}.
@@ -472,11 +472,11 @@ export default function FeesMaster({ collegeId }) {
           ) : (
             <>
               <p className="text-xs text-slate-400 mb-3">Check a fee head to include it for this class. Leave amounts blank to use the base Fees Master amount.</p>
-              <div className="overflow-x-auto rounded-lg border-2 border-slate-400">
+              <div className="overflow-x-auto border border-slate-300">
                 <table className="w-full text-sm border-collapse min-w-[640px]">
-                  <thead className="bg-slate-100 text-xs font-bold text-slate-500 uppercase tracking-wide border-b-2 border-slate-400">
+                  <thead className="bg-slate-50 text-xs font-bold text-slate-500 uppercase tracking-wide border-b border-slate-300">
                     <tr>
-                      <th className="px-3 py-2.5 text-center w-10">
+                      <th className="px-3 py-1 text-center w-10 border-r border-slate-200">
                         <input
                           type="checkbox"
                           title="Select all"
@@ -485,28 +485,28 @@ export default function FeesMaster({ collegeId }) {
                           className="accent-slate-700"
                         />
                       </th>
-                      <th className="px-3 py-2.5 text-left">Fee Head</th>
+                      <th className="px-3 py-1 text-left border-r border-slate-200">Fee Head</th>
                       {effectiveCats.map(c => (
-                        <th key={c.slab_index} className="px-3 py-2.5 text-center whitespace-nowrap">
+                        <th key={c.slab_index} className="px-3 py-1 text-center whitespace-nowrap border-r border-slate-200">
                           {c.category_name || `Cat-${c.slab_index}`}
                         </th>
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y-2 divide-slate-300">
+                  <tbody className="divide-y divide-slate-200">
                     {cwRows.map(r => (
                       <tr key={r.fees_code} className={`transition ${r.selected ? 'hover:bg-blue-50' : 'opacity-40'}`}>
-                        <td className="px-3 py-2.5 text-center">
+                        <td className="px-3 py-1 text-center border-r border-slate-200">
                           <input type="checkbox" checked={!!r.selected}
                             onChange={e => updateCw(r.fees_code, 'selected', e.target.checked)}
                             className="accent-slate-700" />
                         </td>
-                        <td className="px-3 py-2.5">
+                        <td className="px-3 py-1 border-r border-slate-200">
                           <p className="font-medium text-slate-900">{r.fees_head}</p>
                           <p className="text-xs text-slate-400">{r.short_name}</p>
                         </td>
                         {effectiveCats.map(c => (
-                          <td key={c.slab_index} className="px-3 py-2.5 text-center">
+                          <td key={c.slab_index} className="px-3 py-1 text-center border-r border-slate-200">
                             <input
                               type="number" step="0.01"
                               value={r[`cat${c.slab_index}_amount`] ?? ''}
@@ -673,7 +673,7 @@ export default function FeesMaster({ collegeId }) {
               <table className="w-full text-sm">
                 <thead className="text-xs font-semibold text-slate-500 uppercase tracking-wide border-b border-slate-200">
                   <tr>
-                    <th className="pb-2 text-center w-10">
+                    <th className="pb-2 text-center w-10 border-r border-slate-200">
                       <input
                         type="checkbox"
                         checked={pullModal.toCopy.length > 0 && pullModal.selected.size === pullModal.toCopy.length}
@@ -681,18 +681,18 @@ export default function FeesMaster({ collegeId }) {
                         className="accent-slate-700"
                       />
                     </th>
-                    <th className="pb-2 text-left">Fee Head</th>
+                    <th className="pb-2 text-left border-r border-slate-200">Fee Head</th>
                     <th className="pb-2 text-center w-20">Type</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {pullModal.toCopy.map(r => (
                     <tr key={r.fees_code} className={`transition ${pullModal.selected.has(r.fees_code) ? '' : 'opacity-40'}`}>
-                      <td className="py-2 text-center">
+                      <td className="py-2 text-center border-r border-slate-200">
                         <input type="checkbox" checked={pullModal.selected.has(r.fees_code)}
                           onChange={() => togglePullRow(r.fees_code)} className="accent-slate-700" />
                       </td>
-                      <td className="py-2">
+                      <td className="py-2 border-r border-slate-200">
                         <p className="font-medium text-slate-800">{r.fees_head}</p>
                         <p className="text-xs text-slate-400">{r.short_name}</p>
                       </td>
@@ -732,31 +732,31 @@ function SortableFMRow({ row: r, rw, onEdit, onDelete, dragging }) {
   return (
     <tr ref={setNodeRef} style={style} className="hover:bg-blue-50 transition">
       {rw && (
-        <td className="px-2 py-2.5 text-center w-8">
+        <td className="px-2 py-1 text-center w-8 border-r border-slate-200">
           <span {...attributes} {...listeners}
             className="cursor-grab active:cursor-grabbing text-slate-300 hover:text-slate-500 select-none text-lg leading-none"
             title="Drag to reorder">⠿</span>
         </td>
       )}
-      <td className="px-3 py-2.5 text-slate-500 text-center">{r.sequence_auto_fees}</td>
-      <td className="px-3 py-2.5">
+      <td className="px-3 py-1 text-slate-500 text-center border-r border-slate-200">{r.sequence_auto_fees}</td>
+      <td className="px-3 py-1 border-r border-slate-200">
         <p className="font-medium text-slate-900">{r.fees_head}</p>
         {r.bank_name && <p className="text-xs text-slate-400">{r.bank_name}</p>}
       </td>
-      <td className="px-3 py-2.5 text-slate-700 text-xs">{r.short_name}</td>
-      <td className="px-3 py-2.5 text-center">
+      <td className="px-3 py-1 text-slate-700 text-xs border-r border-slate-200">{r.short_name}</td>
+      <td className="px-3 py-1 text-center border-r border-slate-200">
         <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">{r.fees_type}</span>
         {r.is_other_misc ? <span className="ml-1 text-xs text-amber-500">Misc</span> : null}
       </td>
-      <td className="px-3 py-2.5 text-center">
+      <td className="px-3 py-1 text-center border-r border-slate-200">
         {r.is_refundable ? <span className="text-green-600 text-xs font-medium">Yes</span> : <span className="text-slate-300 text-xs">No</span>}
       </td>
-      <td className="px-3 py-2.5 text-center">
+      <td className="px-3 py-1 text-center border-r border-slate-200">
         <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
           {r.is_active ? 'Active' : 'Off'}
         </span>
       </td>
-      <td className="px-3 py-2.5 text-right space-x-3 whitespace-nowrap">
+      <td className="px-3 py-1 text-right space-x-3 whitespace-nowrap">
         {rw && <button onClick={() => onEdit(r)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>}
         {rw && r.is_active && <button onClick={() => onDelete(r)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Off</button>}
       </td>
@@ -773,7 +773,7 @@ function FMTh({ col, label, align = 'left', sortCol, sortDir, onSort, className 
   const active = sortCol === col
   return (
     <th
-      className={`px-3 py-2.5 text-${align} cursor-pointer select-none text-xs font-bold uppercase tracking-wide text-slate-600 hover:text-slate-900 transition ${className}`}
+      className={`px-3 py-1 text-${align} cursor-pointer select-none text-xs font-bold uppercase tracking-wide text-slate-600 hover:text-slate-900 transition border-r border-slate-200 ${className}`}
       onClick={() => onSort(col)}
     >
       <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'ml-auto' : ''}`}>

@@ -116,7 +116,7 @@ function resolveSlabFromMaster(master, caste, specialStatus) {
  *   studentPayable:     number,   // always equal to totalFee
  * }
  */
-async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, caste, specialStatus, studentType, academicYear, pool }) {
+async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, caste, specialStatus, studentType, academicYear, isNewStudent, pool }) {
   // pool may be a Promise (from db.js connect) — await it
   const resolvedPool = await Promise.resolve(pool)
 
@@ -185,19 +185,108 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
     `)
 
   // 4. Build breakdown — classwise override takes priority; slab drives which column to use
-  const breakdown = feesRes.recordset.map(row => {
-    const cwCol   = `cw_cat${slab}`
-    const baseCol = `fees_cat${slab}_amount`
-    const amount  = row[cwCol] != null ? parseFloat(row[cwCol]) : parseFloat(row[baseCol] || 0)
-    return {
-      fees_code:    row.fees_code,
-      fees_head:    row.fees_head,
-      short_name:   row.short_name,
-      fees_type:    row.fees_type,
-      is_refundable: !!row.is_refundable,
-      amount,
+  //    Also fetch the set of fees_codes that have classwise rows ONLY for 'Outsider'
+  //    (no row for the resolved student type) — these must be excluded for non-new students.
+  let outsiderOnlyCodes = new Set()
+  if (facultyMasterId && yearLevel) {
+    const outsiderOnlyRes = await resolvedPool.request()
+      .input('cid', mssql.Int,      collegeId)
+      .input('fid', mssql.Int,      facultyMasterId)
+      .input('yl',  mssql.NVarChar, yearLevel)
+      .input('st',  mssql.NVarChar, resolvedStudentType)
+      .input('ay',  mssql.NVarChar, academicYear || null)
+      .query(`
+        SELECT DISTINCT cf.fees_code
+        FROM classwise_fees cf
+        WHERE cf.college_id = @cid
+          AND cf.faculty_master_id = @fid
+          AND cf.year_level = @yl
+          AND cf.student_type = 'Outsider'
+          AND (@ay IS NULL OR cf.academic_year = @ay)
+          AND NOT EXISTS (
+            SELECT 1 FROM classwise_fees cf2
+            WHERE cf2.college_id = cf.college_id
+              AND cf2.faculty_master_id = cf.faculty_master_id
+              AND cf2.year_level = cf.year_level
+              AND cf2.fees_code = cf.fees_code
+              AND cf2.student_type = @st
+              AND (@ay IS NULL OR cf2.academic_year = @ay)
+          )
+      `)
+    outsiderOnlyCodes = new Set(outsiderOnlyRes.recordset.map(r => r.fees_code))
+  }
+
+  const breakdown = feesRes.recordset
+    .filter(row => isNewStudent || !outsiderOnlyCodes.has(row.fees_code))
+    .map(row => {
+      const cwCol   = `cw_cat${slab}`
+      const baseCol = `fees_cat${slab}_amount`
+      const amount  = row[cwCol] != null ? parseFloat(row[cwCol]) : parseFloat(row[baseCol] || 0)
+      return {
+        fees_code:    row.fees_code,
+        fees_head:    row.fees_head,
+        short_name:   row.short_name,
+        fees_type:    row.fees_type,
+        is_refundable: !!row.is_refundable,
+        amount,
+      }
+    })
+
+  // 5. For new students, also include Outsider-specific fee heads configured for this
+  //    class and year. New = FY always, or higher years with no prior app at this college.
+  if (isNewStudent && facultyMasterId) {
+    const outsiderRes = await resolvedPool.request()
+      .input('cid', mssql.Int,      collegeId)
+      .input('fid', mssql.Int,      facultyMasterId)
+      .input('yl',  mssql.NVarChar, yearLevel)
+      .input('ay',  mssql.NVarChar, academicYear || null)
+      .query(`
+        SELECT
+          fm.fees_code, fm.fees_head, fm.short_name, fm.fees_type, fm.is_refundable,
+          cf.cat1_amount AS cw_cat1, cf.cat2_amount AS cw_cat2,
+          cf.cat3_amount AS cw_cat3, cf.cat4_amount AS cw_cat4,
+          cf.cat5_amount AS cw_cat5, cf.cat6_amount AS cw_cat6,
+          cf.cat7_amount AS cw_cat7, cf.cat8_amount AS cw_cat8,
+          fm.fees_cat1_amount, fm.fees_cat2_amount, fm.fees_cat3_amount, fm.fees_cat4_amount,
+          fm.fees_cat5_amount, fm.fees_cat6_amount, fm.fees_cat7_amount, fm.fees_cat8_amount
+        FROM classwise_fees cf
+        JOIN fees_master fm ON fm.fees_code = cf.fees_code
+        WHERE cf.college_id = @cid
+          AND cf.faculty_master_id = @fid
+          AND cf.year_level = @yl
+          AND cf.student_type = 'Outsider'
+          AND (@ay IS NULL OR cf.academic_year = @ay)
+          AND fm.is_active = 1
+          AND (@ay IS NULL OR fm.academic_year = @ay)
+      `)
+
+    for (const row of outsiderRes.recordset) {
+      // Resolve outsider amount: try student's slab first, then scan all slabs for first non-null.
+      const cwSlabAmount = row[`cw_cat${slab}`]
+      const cwFallback = cwSlabAmount != null ? cwSlabAmount
+        : [1,2,3,4,5,6,7,8].reduce((found, n) => found != null ? found : row[`cw_cat${n}`], null)
+      const amount = cwFallback != null ? parseFloat(cwFallback) : 0
+
+      // If this fee head already exists in the breakdown (fetched with Grand/NonGrand type,
+      // amount=0 because there's no classwise row for that type), replace its amount with
+      // the outsider amount. Otherwise append as a new entry.
+      const existing = breakdown.find(h => h.fees_code === row.fees_code)
+      if (existing) {
+        existing.amount = amount
+        existing.is_outsider = true
+      } else {
+        breakdown.push({
+          fees_code:     row.fees_code,
+          fees_head:     row.fees_head,
+          short_name:    row.short_name,
+          fees_type:     row.fees_type,
+          is_refundable: !!row.is_refundable,
+          amount,
+          is_outsider:   true,
+        })
+      }
     }
-  })
+  }
 
   const totalFee       = breakdown.reduce((s, r) => s + r.amount, 0)
   const studentPayable = totalFee

@@ -76,9 +76,9 @@ export default function BankMaster({ collegeId }) {
       {loading ? <SkeletonTable rows={4} cols={3} /> : (
         <>
           {/* Desktop table — matches Program Master grid styling. */}
-          <div className="hidden sm:block overflow-x-auto rounded-lg border-2 border-slate-400">
+          <div className="hidden sm:block overflow-x-auto border border-slate-300">
             <table className="w-full text-sm border-collapse">
-              <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
+              <thead className="bg-slate-50 text-xs font-bold text-slate-600 uppercase tracking-wide border-b border-slate-300">
                 <tr>
                   <MSTh col="bank_name"           label="Bank Name"   align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortBM} />
                   <MSTh col="bank_account_number" label="Account No." align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortBM} />
@@ -86,24 +86,24 @@ export default function BankMaster({ collegeId }) {
                   <MSTh col="ifsc_code"           label="IFSC"        align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortBM} />
                   <MSTh col="account_type"        label="Type"        align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortBM} />
                   <MSTh col="is_active"           label="Status"      align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortBM} />
-                  <th className="px-4 py-2.5" />
+                  <th className="px-3 py-1 border-r border-slate-200" />
                 </tr>
               </thead>
-              <tbody className="divide-y-2 divide-slate-300">
+              <tbody className="divide-y divide-slate-200">
                 {sorted.length === 0 && <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">No bank accounts configured.</td></tr>}
                 {sorted.map(r => (
                   <tr key={r.ledger_code} className="hover:bg-blue-50 transition">
-                    <td className="px-4 py-2.5 font-medium text-slate-900">{r.bank_name}</td>
-                    <td className="px-4 py-2.5 font-mono text-slate-700">{r.bank_account_number}</td>
-                    <td className="px-4 py-2.5 text-slate-700">{r.branch || '—'}</td>
-                    <td className="px-4 py-2.5 font-mono text-slate-700">{r.ifsc_code || '—'}</td>
-                    <td className="px-4 py-2.5 text-center text-slate-700">{r.account_type || '—'}</td>
-                    <td className="px-4 py-2.5 text-center">
+                    <td className="px-3 py-1 font-medium text-slate-900 border-r border-slate-200">{r.bank_name}</td>
+                    <td className="px-3 py-1 font-mono text-slate-700 border-r border-slate-200">{r.bank_account_number}</td>
+                    <td className="px-3 py-1 text-slate-700 border-r border-slate-200">{r.branch || '—'}</td>
+                    <td className="px-3 py-1 font-mono text-slate-700 border-r border-slate-200">{r.ifsc_code || '—'}</td>
+                    <td className="px-3 py-1 text-center text-slate-700 border-r border-slate-200">{r.account_type || '—'}</td>
+                    <td className="px-3 py-1 text-center border-r border-slate-200">
                       <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                         {r.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-right space-x-3 whitespace-nowrap">
+                    <td className="px-3 py-1 text-right space-x-3 whitespace-nowrap">
                       {rw && <button onClick={() => openEdit(r)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>}
                       {rw && r.is_active && <button onClick={() => softDelete(r)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Deactivate</button>}
                     </td>
@@ -188,7 +188,7 @@ function MSTh({ col, label, align = 'left', sortCol, sortDir, onSort }) {
   const active = sortCol === col
   return (
     <th
-      className={`px-4 py-2.5 text-${align} cursor-pointer select-none text-xs font-bold uppercase tracking-wide text-slate-600 hover:text-slate-900 transition`}
+      className={`px-3 py-1 text-${align} cursor-pointer select-none text-xs font-bold uppercase tracking-wide text-slate-600 hover:text-slate-900 transition border-r border-slate-200`}
       onClick={() => onSort(col)}
     >
       <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'ml-auto' : ''}`}>

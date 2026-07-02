@@ -221,26 +221,26 @@ export default function CourseMaster({ collegeId }) {
       {success && <p className="mb-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{success}</p>}
 
       {loading ? <SkeletonTable rows={4} cols={5} /> : (
-        <div className="overflow-x-auto rounded-lg border-2 border-slate-400 -mx-0">
+        <div className="overflow-x-auto border border-slate-300 -mx-0">
           <div className="min-w-[860px]">
             <table className="w-full text-xs border-collapse">
-              <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
+              <thead className="bg-slate-50 text-xs font-bold text-slate-600 uppercase tracking-wide border-b border-slate-300">
                 <tr>
-                  <th className="px-3 py-2.5 text-left w-28">Subject Code</th>
-                  <th className="px-3 py-2.5 text-left">Subject Title</th>
-                  <th className="px-3 py-2.5 text-center w-16">Credits</th>
-                  <th className="px-3 py-2.5 text-center w-20">Type</th>
-                  <th className="px-3 py-2.5 text-center w-20">Max Int.</th>
-                  <th className="px-3 py-2.5 text-center w-20">Min Int.</th>
-                  <th className="px-3 py-2.5 text-center w-20">Max SE</th>
-                  <th className="px-3 py-2.5 text-center w-20">Min SE</th>
-                  <th className="px-3 py-2.5 text-center w-20">Max Tot.</th>
-                  <th className="px-3 py-2.5 text-center w-20">Min Tot.</th>
-                  <th className="px-3 py-2.5 text-center w-16">Order</th>
-                  <th className="px-3 py-2.5 w-8" />
+                  <th className="px-3 py-1 text-left w-28 border-r border-slate-200">Subject Code</th>
+                  <th className="px-3 py-1 text-left border-r border-slate-200">Subject Title</th>
+                  <th className="px-3 py-1 text-center w-16 border-r border-slate-200">Credits</th>
+                  <th className="px-3 py-1 text-center w-20 border-r border-slate-200">Type</th>
+                  <th className="px-3 py-1 text-center w-20 border-r border-slate-200">Max Int.</th>
+                  <th className="px-3 py-1 text-center w-20 border-r border-slate-200">Min Int.</th>
+                  <th className="px-3 py-1 text-center w-20 border-r border-slate-200">Max SE</th>
+                  <th className="px-3 py-1 text-center w-20 border-r border-slate-200">Min SE</th>
+                  <th className="px-3 py-1 text-center w-20 border-r border-slate-200">Max Tot.</th>
+                  <th className="px-3 py-1 text-center w-20 border-r border-slate-200">Min Tot.</th>
+                  <th className="px-3 py-1 text-center w-16 border-r border-slate-200">Order</th>
+                  <th className="px-3 py-1 w-8" />
                 </tr>
               </thead>
-              <tbody className="divide-y-2 divide-slate-300">
+              <tbody className="divide-y divide-slate-200">
                 {rows.length === 0 && (
                   <tr><td colSpan={12} className="px-4 py-8 text-center text-slate-500">
                     No subjects yet. Click "+ Add Row" to begin.
@@ -248,34 +248,34 @@ export default function CourseMaster({ collegeId }) {
                 )}
                 {rows.map(r => (
                   <tr key={r._key} className={r.is_new ? 'bg-blue-50/40' : 'hover:bg-blue-50 transition'}>
-                    <td className="px-2 py-1.5">
+                    <td className="px-2 py-1 border-r border-slate-200">
                       <input value={r.course_code} onChange={e => updateRow(r._key,'course_code',e.target.value.toUpperCase())}
                         className={cell} placeholder="UBIFSI.1" />
                     </td>
-                    <td className="px-2 py-1.5">
+                    <td className="px-2 py-1 border-r border-slate-200">
                       <input value={r.course_title} onChange={e => updateRow(r._key,'course_title',e.target.value)}
                         className={`${cell} min-w-[160px]`} placeholder="Financial Accounting" />
                     </td>
-                    <td className="px-2 py-1.5">
+                    <td className="px-2 py-1 border-r border-slate-200">
                       <input type="number" step="0.5" value={r.credits} onChange={e => updateRow(r._key,'credits',e.target.value)}
                         className={`${cell} text-center`} placeholder="4.0" />
                     </td>
-                    <td className="px-2 py-1.5">
+                    <td className="px-2 py-1 border-r border-slate-200">
                       <select value={r.subject_type} onChange={e => updateRow(r._key,'subject_type',e.target.value)} className={cell}>
                         {SUBJECT_TYPES.map(t => <option key={t}>{t}</option>)}
                       </select>
                     </td>
                     {['max_internal','min_internal','max_sem_end','min_sem_end','max_total','min_total'].map(f => (
-                      <td key={f} className="px-2 py-1.5">
+                      <td key={f} className="px-2 py-1 border-r border-slate-200">
                         <input type="number" value={r[f]} onChange={e => updateRow(r._key, f, e.target.value)}
                           className={`${cell} text-center`} placeholder="—" />
                       </td>
                     ))}
-                    <td className="px-2 py-1.5">
+                    <td className="px-2 py-1 border-r border-slate-200">
                       <input type="number" value={r.display_order} onChange={e => updateRow(r._key,'display_order',e.target.value)}
                         className={`${cell} text-center`} placeholder="0" />
                     </td>
-                    <td className="px-2 py-1.5 text-center">
+                    <td className="px-2 py-1 text-center">
                       <button onClick={() => deleteRow(r)} className="text-red-400 hover:text-red-600 text-base leading-none">×</button>
                     </td>
                   </tr>

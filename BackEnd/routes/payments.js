@@ -477,6 +477,7 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
                a.admission_period_id, a.college_fee_paid,
                a.fee_total_amount, a.fee_pay_now_amount,
                a.app_division, a.app_category, a.app_caste, a.app_special_status,
+               a.student_id,
                fm.code_no AS faculty_master_id,
                CASE a.year_of_study WHEN 1 THEN 'FY' WHEN 2 THEN 'SY' WHEN 3 THEN 'TY'
                                     WHEN 4 THEN '4Y' WHEN 5 THEN '5Y' ELSE NULL END AS year_level
@@ -497,6 +498,23 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
     // Fetch fee breakdown from FeeDeterminationService for head-level payment display
     let breakdown = [];
     try {
+      // Determine if student is new to this college:
+      // FY (year 1) → always new. Higher years → new if no prior confirmed app at this college.
+      let isNewStudent = app.year_of_study === 1;
+      if (!isNewStudent) {
+        const priorRes = await db.request()
+          .input('sid', mssql.Int, app.student_id)
+          .input('col', mssql.Int, app.college_id)
+          .input('cur', mssql.Int, appId)
+          .query(`
+            SELECT TOP 1 id FROM applications
+            WHERE student_id = @sid
+              AND college_id = @col
+              AND id <> @cur
+              AND status IN ('confirmed', 'fees_paid', 'roll_assigned')
+          `);
+        isNewStudent = priorRes.recordset.length === 0;
+      }
       const feeResult = await feeSvc.compute({
         collegeId:       app.college_id,
         facultyMasterId: app.faculty_master_id,
@@ -505,6 +523,7 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
         caste:           app.app_category || app.app_caste || null,
         specialStatus:   app.app_special_status,
         academicYear:    app.academic_year || null,
+        isNewStudent,
         pool:            db,
       });
       // Exclude Misc and ExamFees from the regular college fee breakdown —

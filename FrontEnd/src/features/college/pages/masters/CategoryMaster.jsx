@@ -11,7 +11,7 @@ import {
 
 const SLAB_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8]
 
-const inp = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300'
+const inp = 'w-full border border-slate-200 rounded-lg px-3 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300'
 
 export default function CategoryMaster({ collegeId }) {
   const { canWrite } = usePermissions()
@@ -106,16 +106,16 @@ function CastesTab({ master, collegeId, rw, onReload, toast }) {
         {rw && <button onClick={openNew} className="px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700">+ Add Caste</button>}
       </div>
 
-      <div className="rounded-lg border-2 border-slate-300 overflow-hidden">
+      <div className="border border-slate-300 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-100 text-xs font-bold uppercase tracking-wide text-slate-600 border-b-2 border-slate-300">
+          <thead className="bg-slate-50 text-xs font-bold uppercase tracking-wide text-slate-600 border-b border-slate-300">
             <tr>
-              <th className="px-3 py-2.5 text-center w-12">Order</th>
-              <th className="px-3 py-2.5 text-left">Caste Name</th>
-              <th className="px-3 py-2.5 text-center w-20">Gen. Type</th>
-              <th className="px-3 py-2.5 text-left">Fees Category</th>
-              <th className="px-3 py-2.5 text-center w-16">Status</th>
-              {rw && <th className="px-3 py-2.5 w-20" />}
+              <th className="px-3 py-1 text-center w-12 border-r border-slate-200">Order</th>
+              <th className="px-3 py-1 text-left border-r border-slate-200">Caste Name</th>
+              <th className="px-3 py-1 text-center w-20 border-r border-slate-200">Gen. Type</th>
+              <th className="px-3 py-1 text-left border-r border-slate-200">Fees Category</th>
+              <th className="px-3 py-1 text-center w-16 border-r border-slate-200">Status</th>
+              {rw && <th className="px-3 py-1 w-20" />}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
@@ -126,21 +126,21 @@ function CastesTab({ master, collegeId, rw, onReload, toast }) {
               const fc = feesCatForCaste(r.id)
               return (
                 <tr key={r.id} className={`hover:bg-blue-50 transition ${!r.is_active ? 'opacity-40' : ''}`}>
-                  <td className="px-3 py-2 text-center text-slate-500">{r.display_order}</td>
-                  <td className="px-3 py-2 font-medium text-slate-900">{r.caste_name}</td>
-                  <td className="px-3 py-2 text-center">
+                  <td className="px-3 py-1 text-center text-slate-500 border-r border-slate-200">{r.display_order}</td>
+                  <td className="px-3 py-1 font-medium text-slate-900 border-r border-slate-200">{r.caste_name}</td>
+                  <td className="px-3 py-1 text-center border-r border-slate-200">
                     {r.is_gen_type ? <span className="text-xs bg-indigo-100 text-indigo-700 rounded-full px-2 py-0.5 font-semibold">Gen.</span> : <span className="text-slate-300">—</span>}
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-1 border-r border-slate-200">
                     {fc ? <span className="text-xs bg-slate-100 text-slate-700 rounded-full px-2 py-0.5">{fc.category_name}</span> : <span className="text-xs text-slate-400">Not mapped</span>}
                   </td>
-                  <td className="px-3 py-2 text-center">
+                  <td className="px-3 py-1 text-center border-r border-slate-200">
                     <span className={`text-xs font-semibold rounded-full px-2 py-0.5 ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                       {r.is_active ? 'Active' : 'Off'}
                     </span>
                   </td>
                   {rw && (
-                    <td className="px-3 py-2 text-right space-x-2 whitespace-nowrap">
+                    <td className="px-3 py-1 text-right space-x-2 whitespace-nowrap">
                       <button onClick={() => openEdit(r)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>
                       {r.is_active && <button onClick={() => softDelete(r)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Off</button>}
                     </td>
@@ -154,7 +154,7 @@ function CastesTab({ master, collegeId, rw, onReload, toast }) {
 
       {modal && (
         <Modal title={modal === 'new' ? 'Add Caste' : 'Edit Caste'} onClose={() => setModal(null)}>
-          {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
+          {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-1">{error}</p>}
           <F label="Caste Name *"><input value={form.caste_name} onChange={e => setForm(f => ({ ...f, caste_name: e.target.value }))} className={inp} placeholder="e.g. SC" /></F>
           <F label="Display Order"><input type="number" value={form.display_order} onChange={e => setForm(f => ({ ...f, display_order: parseInt(e.target.value) || 1 }))} className={inp} /></F>
           <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
@@ -208,15 +208,15 @@ function StatusesTab({ master, collegeId, rw, onReload, toast }) {
         {rw && <button onClick={openNew} className="px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700">+ Add Status</button>}
       </div>
 
-      <div className="rounded-lg border-2 border-slate-300 overflow-hidden">
+      <div className="border border-slate-300 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-100 text-xs font-bold uppercase tracking-wide text-slate-600 border-b-2 border-slate-300">
+          <thead className="bg-slate-50 text-xs font-bold uppercase tracking-wide text-slate-600 border-b border-slate-300">
             <tr>
-              <th className="px-3 py-2.5 text-center w-12">Order</th>
-              <th className="px-3 py-2.5 text-left">Status Name</th>
-              <th className="px-3 py-2.5 text-left">Fees Category</th>
-              <th className="px-3 py-2.5 text-center w-16">Status</th>
-              {rw && <th className="px-3 py-2.5 w-20" />}
+              <th className="px-3 py-1 text-center w-12 border-r border-slate-200">Order</th>
+              <th className="px-3 py-1 text-left border-r border-slate-200">Status Name</th>
+              <th className="px-3 py-1 text-left border-r border-slate-200">Fees Category</th>
+              <th className="px-3 py-1 text-center w-16 border-r border-slate-200">Status</th>
+              {rw && <th className="px-3 py-1 w-20" />}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
@@ -227,18 +227,18 @@ function StatusesTab({ master, collegeId, rw, onReload, toast }) {
               const fc = feesCatForStatus(r.id)
               return (
                 <tr key={r.id} className={`hover:bg-blue-50 transition ${!r.is_active ? 'opacity-40' : ''}`}>
-                  <td className="px-3 py-2 text-center text-slate-500">{r.display_order}</td>
-                  <td className="px-3 py-2 font-medium text-slate-900">{r.status_name}</td>
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-1 text-center text-slate-500 border-r border-slate-200">{r.display_order}</td>
+                  <td className="px-3 py-1 font-medium text-slate-900 border-r border-slate-200">{r.status_name}</td>
+                  <td className="px-3 py-1 border-r border-slate-200">
                     {fc ? <span className="text-xs bg-slate-100 text-slate-700 rounded-full px-2 py-0.5">{fc.category_name}</span> : <span className="text-xs text-slate-400">Not mapped</span>}
                   </td>
-                  <td className="px-3 py-2 text-center">
+                  <td className="px-3 py-1 text-center border-r border-slate-200">
                     <span className={`text-xs font-semibold rounded-full px-2 py-0.5 ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                       {r.is_active ? 'Active' : 'Off'}
                     </span>
                   </td>
                   {rw && (
-                    <td className="px-3 py-2 text-right space-x-2 whitespace-nowrap">
+                    <td className="px-3 py-1 text-right space-x-2 whitespace-nowrap">
                       <button onClick={() => openEdit(r)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>
                       {r.is_active && <button onClick={() => softDelete(r)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Off</button>}
                     </td>
@@ -252,7 +252,7 @@ function StatusesTab({ master, collegeId, rw, onReload, toast }) {
 
       {modal && (
         <Modal title={modal === 'new' ? 'Add Special Status' : 'Edit Special Status'} onClose={() => setModal(null)}>
-          {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
+          {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-1">{error}</p>}
           <F label="Status Name *"><input value={form.status_name} onChange={e => setForm(f => ({ ...f, status_name: e.target.value }))} className={inp} placeholder="e.g. EBC" /></F>
           <F label="Display Order"><input type="number" value={form.display_order} onChange={e => setForm(f => ({ ...f, display_order: parseInt(e.target.value) || 1 }))} className={inp} /></F>
           <ModalFooter onClose={() => setModal(null)} onSave={save} saving={saving} />
@@ -334,16 +334,16 @@ function FeesCatsTab({ master, collegeId, rw, onReload, toast }) {
         </button>}
       </div>
 
-      <div className="rounded-lg border-2 border-slate-300 overflow-hidden">
+      <div className="border border-slate-300 overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-slate-100 text-xs font-bold uppercase tracking-wide text-slate-600 border-b-2 border-slate-300">
+          <thead className="bg-slate-50 text-xs font-bold uppercase tracking-wide text-slate-600 border-b border-slate-300">
             <tr>
-              <th className="px-3 py-2.5 text-center w-14">Cat. Index</th>
-              <th className="px-3 py-2.5 text-left">Category Name</th>
-              <th className="px-3 py-2.5 text-left">Mapped Castes</th>
-              <th className="px-3 py-2.5 text-left">Mapped Statuses</th>
-              <th className="px-3 py-2.5 text-center w-16">Status</th>
-              {rw && <th className="px-3 py-2.5 w-20" />}
+              <th className="px-3 py-1 text-center w-14 border-r border-slate-200">Cat. Index</th>
+              <th className="px-3 py-1 text-left border-r border-slate-200">Category Name</th>
+              <th className="px-3 py-1 text-left border-r border-slate-200">Mapped Castes</th>
+              <th className="px-3 py-1 text-left border-r border-slate-200">Mapped Statuses</th>
+              <th className="px-3 py-1 text-center w-16 border-r border-slate-200">Status</th>
+              {rw && <th className="px-3 py-1 w-20" />}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
@@ -355,29 +355,29 @@ function FeesCatsTab({ master, collegeId, rw, onReload, toast }) {
               const mappedStatuses = statusesForFc(r.id)
               return (
                 <tr key={r.id} className={`hover:bg-blue-50 transition ${!r.is_active ? 'opacity-40' : ''}`}>
-                  <td className="px-3 py-2 text-center">
+                  <td className="px-3 py-1 text-center border-r border-slate-200">
                     <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-slate-800 text-white text-xs font-bold">{r.slab_index}</span>
                   </td>
-                  <td className="px-3 py-2 font-semibold text-slate-900">{r.category_name}</td>
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-1 font-semibold text-slate-900 border-r border-slate-200">{r.category_name}</td>
+                  <td className="px-3 py-1 border-r border-slate-200">
                     <div className="flex flex-wrap gap-1">
                       {mappedCastes.length === 0 ? <span className="text-xs text-slate-400">—</span> :
                         mappedCastes.map(c => <span key={c.id} className="text-xs bg-slate-100 text-slate-700 rounded px-1.5 py-0.5">{c.caste_name}</span>)}
                     </div>
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-1 border-r border-slate-200">
                     <div className="flex flex-wrap gap-1">
                       {mappedStatuses.length === 0 ? <span className="text-xs text-slate-400">—</span> :
                         mappedStatuses.map(s => <span key={s.id} className="text-xs bg-indigo-50 text-indigo-700 rounded px-1.5 py-0.5">{s.status_name}</span>)}
                     </div>
                   </td>
-                  <td className="px-3 py-2 text-center">
+                  <td className="px-3 py-1 text-center border-r border-slate-200">
                     <span className={`text-xs font-semibold rounded-full px-2 py-0.5 ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                       {r.is_active ? 'Active' : 'Off'}
                     </span>
                   </td>
                   {rw && (
-                    <td className="px-3 py-2 text-right space-x-2 whitespace-nowrap">
+                    <td className="px-3 py-1 text-right space-x-2 whitespace-nowrap">
                       <button onClick={() => openEdit(r)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>
                       {r.is_active && <button onClick={() => softDelete(r)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Off</button>}
                     </td>
@@ -398,7 +398,7 @@ function FeesCatsTab({ master, collegeId, rw, onReload, toast }) {
               <button onClick={() => setModal(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
             </div>
             <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
-              {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>}
+              {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-1">{error}</p>}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <F label="Category Name *">

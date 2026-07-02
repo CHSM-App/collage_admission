@@ -287,13 +287,13 @@ export default function ApplicationInbox({ collegeId, collegeName = '' }) {
       )}
 
       {!loading && filtered.length > 0 && (
-        <div className="rounded-lg border-2 border-slate-400 overflow-hidden">
-          <div className="hidden sm:grid grid-cols-[1fr_1fr_10rem_12rem_6rem] bg-slate-100 border-b-2 border-slate-400 px-4 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-600">
-            <InboxTh col="student_name"       label="Student"       sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
-            <InboxTh col="course_name"        label="Course / Year" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
-            <InboxTh col="registration_number" label="Reg No."      sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
-            <InboxTh col="status"             label="Status"        sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
-            <InboxTh col="submitted_at"       label="Date"          sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
+        <div className="border border-slate-300 overflow-hidden">
+          <div className="hidden sm:grid grid-cols-[1fr_1fr_10rem_12rem_6rem] bg-slate-50 border-b border-slate-300 text-xs font-bold uppercase tracking-wide text-slate-600">
+            <div className="px-3 py-1 border-r border-slate-200"><InboxTh col="student_name"        label="Student"       sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} /></div>
+            <div className="px-3 py-1 border-r border-slate-200"><InboxTh col="course_name"         label="Course / Year" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} /></div>
+            <div className="px-3 py-1 border-r border-slate-200"><InboxTh col="registration_number" label="Reg No."       sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} /></div>
+            <div className="px-3 py-1 border-r border-slate-200"><InboxTh col="status"              label="Status"        sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} /></div>
+            <div className="px-3 py-1"><InboxTh col="submitted_at" label="Date" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" /></div>
           </div>
 
           {filtered.map((app, i) => {
@@ -303,22 +303,21 @@ export default function ApplicationInbox({ collegeId, collegeName = '' }) {
               <button
                 key={app.id}
                 onClick={() => openApp(app.id)}
-                className={`w-full text-left grid sm:grid-cols-[1fr_1fr_10rem_12rem_6rem] px-4 py-2.5 hover:bg-blue-50 transition items-center ${
-                  i !== 0 ? 'border-t-2 border-slate-300' : ''
+                className={`w-full text-left grid sm:grid-cols-[1fr_1fr_10rem_12rem_6rem] hover:bg-blue-50 transition items-stretch ${
+                  i !== 0 ? 'border-t border-slate-200' : ''
                 } ${hasPendingLink ? 'bg-green-50' : ''}`}
               >
-                <div className="min-w-0 pr-3">
+                <div className="min-w-0 px-3 py-1 sm:border-r sm:border-slate-200 flex items-center">
                   <p className="font-medium text-sm text-slate-900 truncate">{app.student_name}</p>
-                  <p className="text-xs text-slate-400 truncate">{app.student_email} · {app.phone}</p>
                 </div>
-                <div className="min-w-0 pr-3">
+                <div className="min-w-0 px-3 py-1 sm:border-r sm:border-slate-200 flex flex-col justify-center">
                   <p className="text-sm text-slate-700 truncate">{app.course_name}</p>
                   <p className="text-xs text-slate-400">{YEAR_LABEL[app.year_of_study]} · {app.academic_year}</p>
                 </div>
-                <span className="font-mono text-xs text-slate-400 truncate pr-3">
-                  {app.registration_number || '—'}
-                </span>
-                <div className="flex flex-col gap-1">
+                <div className="px-3 py-1 sm:border-r sm:border-slate-200 flex items-center">
+                  <span className="font-mono text-xs text-slate-400 truncate">{app.registration_number || '—'}</span>
+                </div>
+                <div className="px-3 py-1 sm:border-r sm:border-slate-200 flex flex-col justify-center gap-1">
                   <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap ${meta.color}`}>
                     {meta.label}
                   </span>
@@ -329,9 +328,11 @@ export default function ApplicationInbox({ collegeId, collegeName = '' }) {
                     </span>
                   )}
                 </div>
-                <span className="text-xs text-slate-400 whitespace-nowrap text-right">
-                  {app.submitted_at ? new Date(app.submitted_at).toLocaleDateString('en-IN') : '—'}
-                </span>
+                <div className="px-3 py-1 flex items-center justify-end">
+                  <span className="text-xs text-slate-400 whitespace-nowrap">
+                    {app.submitted_at ? new Date(app.submitted_at).toLocaleDateString('en-IN') : '—'}
+                  </span>
+                </div>
               </button>
             )
           })}

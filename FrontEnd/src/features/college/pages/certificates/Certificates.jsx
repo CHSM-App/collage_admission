@@ -520,13 +520,13 @@ export default function Certificates({ collegeId, readOnly }) {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
                 <tr>
-                  <th className="px-4 py-2.5 text-left">Type</th>
-                  <th className="px-4 py-2.5 text-left">Cert. No.</th>
-                  <th className="px-4 py-2.5 text-left">Date</th>
-                  <th className="px-4 py-2.5 text-left">Student</th>
-                  <th className="px-4 py-2.5 text-left">Reg. No.</th>
-                  <th className="px-4 py-2.5 text-left">Class</th>
-                  <th className="px-4 py-2.5 text-right"></th>
+                  <th className="px-3 py-1 text-left border-r border-slate-200">Type</th>
+                  <th className="px-3 py-1 text-left border-r border-slate-200">Cert. No.</th>
+                  <th className="px-3 py-1 text-left border-r border-slate-200">Date</th>
+                  <th className="px-3 py-1 text-left border-r border-slate-200">Student</th>
+                  <th className="px-3 py-1 text-left border-r border-slate-200">Reg. No.</th>
+                  <th className="px-3 py-1 text-left border-r border-slate-200">Class</th>
+                  <th className="px-3 py-1 text-right"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -534,17 +534,17 @@ export default function Certificates({ collegeId, readOnly }) {
                   const badge = TYPE_BADGE[row._type] || {}
                   return (
                     <tr key={`${row._type}-${row._id}`} className="hover:bg-slate-50">
-                      <td className="px-4 py-2.5">
+                      <td className="px-3 py-1 border-r border-slate-200">
                         <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${badge.cls}`}>
                           {badge.label}
                         </span>
                       </td>
-                      <td className="px-4 py-2.5 font-mono text-xs text-slate-700">{row.certificate_no}</td>
-                      <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{fmtDateIN(row.certificate_date)}</td>
-                      <td className="px-4 py-2.5 text-slate-800">{row.student_name}</td>
-                      <td className="px-4 py-2.5 font-mono text-xs text-slate-500">{row.reg_no || '—'}</td>
-                      <td className="px-4 py-2.5 text-slate-600">{row.class_name || '—'}</td>
-                      <td className="px-4 py-2.5 text-right">
+                      <td className="px-3 py-1 font-mono text-xs text-slate-700 border-r border-slate-200">{row.certificate_no}</td>
+                      <td className="px-3 py-1 text-slate-600 whitespace-nowrap border-r border-slate-200">{fmtDateIN(row.certificate_date)}</td>
+                      <td className="px-3 py-1 text-slate-800 border-r border-slate-200">{row.student_name}</td>
+                      <td className="px-3 py-1 font-mono text-xs text-slate-500 border-r border-slate-200">{row.reg_no || '—'}</td>
+                      <td className="px-3 py-1 text-slate-600 border-r border-slate-200">{row.class_name || '—'}</td>
+                      <td className="px-3 py-1 text-right">
                         <button
                           onClick={() => handlePrint(row)}
                           className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline"

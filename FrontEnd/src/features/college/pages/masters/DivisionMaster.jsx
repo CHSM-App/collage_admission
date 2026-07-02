@@ -144,26 +144,26 @@ export default function DivisionMaster({ collegeId }) {
       {saved && <p className="mb-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">Saved successfully.</p>}
 
       {loading ? <SkeletonTable rows={4} cols={3} /> : (
-        <div className="overflow-x-auto rounded-lg border-2 border-slate-400">
+        <div className="overflow-x-auto border border-slate-300">
           <div className="min-w-[640px]">
-            {/* Radio-grid styled to match the Program Master grid: slate-400
-                outer border, slate-100 header, bold uppercase tracked titles,
-                slate-300 inner cell borders. */}
+            {/* Radio-grid styled to match the Program Master grid: slate-300
+                outer border, slate-50 header, bold uppercase tracked titles,
+                slate-200 inner cell borders. */}
             <table className="text-sm border-collapse w-full">
-              <thead className="bg-slate-100 border-b-2 border-slate-400">
+              <thead className="bg-slate-50 border-b border-slate-300">
                 <tr>
-                  <th className="w-28 border-r-2 border-slate-300 px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-600 text-left">Funding Type</th>
+                  <th className="w-28 border-r border-slate-200 px-3 py-1 text-xs font-bold uppercase tracking-wide text-slate-600 text-left">Funding Type</th>
                   {DIVISIONS.map((d, i) => (
-                    <th key={d} className={`px-3 py-2.5 text-xs font-bold uppercase tracking-wide text-slate-600 text-center w-14 ${i < DIVISIONS.length - 1 ? 'border-r-2 border-slate-300' : ''}`}>
+                    <th key={d} className={`px-3 py-1 text-xs font-bold uppercase tracking-wide text-slate-600 text-center w-14 ${i < DIVISIONS.length - 1 ? 'border-r border-slate-200' : ''}`}>
                       Div {d}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y-2 divide-slate-300">
+              <tbody className="divide-y divide-slate-200">
                 {FUNDING_OPTS.map(ftype => (
                   <tr key={ftype} className="hover:bg-blue-50 transition">
-                    <td className="border-r-2 border-slate-300 px-3 py-2.5 text-xs font-semibold text-slate-700 bg-slate-50 whitespace-nowrap">
+                    <td className="border-r border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 bg-slate-50 whitespace-nowrap">
                       {ftype === 'NonGranted' ? 'Non-Granted' : ftype}
                       {ftype === 'Both' && <span className="ml-1 text-slate-400 font-normal">(confirm)</span>}
                     </td>
@@ -171,7 +171,7 @@ export default function DivisionMaster({ collegeId }) {
                       const checked = grid[d] === ftype
                       const active  = grid[d] !== null
                       return (
-                        <td key={d} className={`text-center px-2 py-2.5 transition ${!active ? 'bg-slate-50' : ''} ${i < DIVISIONS.length - 1 ? 'border-r-2 border-slate-300' : ''}`}>
+                        <td key={d} className={`text-center px-2 py-1 transition ${!active ? 'bg-slate-50' : ''} ${i < DIVISIONS.length - 1 ? 'border-r border-slate-200' : ''}`}>
                           <input
                             type="radio"
                             name={`div-${d}`}
@@ -186,9 +186,9 @@ export default function DivisionMaster({ collegeId }) {
                 ))}
                 {/* Clear row */}
                 <tr>
-                  <td className="border-r-2 border-slate-300 px-3 py-2.5 text-xs text-slate-400 bg-slate-50">Not configured</td>
+                  <td className="border-r border-slate-200 px-3 py-1 text-xs text-slate-400 bg-slate-50">Not configured</td>
                   {DIVISIONS.map((d, i) => (
-                    <td key={d} className={`text-center px-2 py-2.5 ${i < DIVISIONS.length - 1 ? 'border-r-2 border-slate-300' : ''}`}>
+                    <td key={d} className={`text-center px-2 py-1 ${i < DIVISIONS.length - 1 ? 'border-r border-slate-200' : ''}`}>
                       {grid[d] !== null ? (
                         <button onClick={() => setGrid(g => ({ ...g, [d]: null }))}
                           title="Clear this division"

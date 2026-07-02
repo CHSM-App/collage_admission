@@ -135,36 +135,36 @@ export default function FacultyMaster({ collegeId }) {
           {/* Desktop table — styled to match the Application Inbox grid:
               border-2/slate-400 outer, slate-100 header, bold uppercase tracked
               titles, blue-50 row hover, slate-300 row dividers. */}
-          <div className="hidden sm:block overflow-x-auto rounded-lg border-2 border-slate-400">
+          <div className="hidden sm:block overflow-x-auto border border-slate-300">
             <table className="w-full text-sm border-collapse">
-              <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
+              <thead className="bg-slate-50 text-xs font-bold text-slate-600 uppercase tracking-wide border-b border-slate-300">
                 <tr>
                   <Th col="degree_course_code" label="Code"      align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <Th col="degree_course_name" label="Name"      align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <Th col="duration_years"     label="Years"     align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
-                  <th className="px-4 py-2.5 text-left">Exam Seat Codes</th>
+                  <th className="px-3 py-1 text-left border-r border-slate-200">Exam Seat Codes</th>
                   <Th col="is_active"          label="Status"    align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
-                  <th className="px-4 py-2.5" />
+                  <th className="px-3 py-1 border-r border-slate-200" />
                 </tr>
               </thead>
-              <tbody className="divide-y-2 divide-slate-300">
+              <tbody className="divide-y divide-slate-200">
                 {filtered.length === 0 && (
                   <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">No records found.</td></tr>
                 )}
                 {filtered.map(r => (
                   <tr key={r.code_no} className="hover:bg-blue-50 transition">
-                    <td className="px-4 py-2.5 font-mono font-semibold text-slate-900">{r.degree_course_code}</td>
-                    <td className="px-4 py-2.5 text-slate-700">{r.degree_course_name}</td>
-                    <td className="px-4 py-2.5 text-center text-slate-700">{r.duration_years}</td>
-                    <td className="px-4 py-2.5 text-slate-400 text-xs">
+                    <td className="px-3 py-1 font-mono font-semibold text-slate-900 border-r border-slate-200">{r.degree_course_code}</td>
+                    <td className="px-3 py-1 text-slate-700 border-r border-slate-200">{r.degree_course_name}</td>
+                    <td className="px-3 py-1 text-center text-slate-700 border-r border-slate-200">{r.duration_years}</td>
+                    <td className="px-3 py-1 text-slate-400 text-xs border-r border-slate-200">
                       {[r.exam_seat_code_year1, r.exam_seat_code_year2, r.exam_seat_code_year3, r.exam_seat_code_year4, r.exam_seat_code_year5].filter(Boolean).join(' / ') || '—'}
                     </td>
-                    <td className="px-4 py-2.5 text-center">
+                    <td className="px-3 py-1 text-center border-r border-slate-200">
                       <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                         {r.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-right space-x-3 whitespace-nowrap">
+                    <td className="px-3 py-1 text-right space-x-3 whitespace-nowrap">
                       {rw && <button onClick={() => openEdit(r)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>}
                       {rw && r.is_active && <button onClick={() => softDelete(r)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Deactivate</button>}
                     </td>
@@ -280,7 +280,7 @@ function Th({ col, label, align, sortCol, sortDir, onSort }) {
   const active = sortCol === col
   return (
     <th
-      className={`px-4 py-2.5 text-${align} cursor-pointer select-none text-xs font-bold uppercase tracking-wide text-slate-600 hover:text-slate-900 transition`}
+      className={`px-3 py-1 text-${align} cursor-pointer select-none text-xs font-bold uppercase tracking-wide text-slate-600 hover:text-slate-900 transition border-r border-slate-200`}
       onClick={() => onSort(col)}
     >
       <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'ml-auto' : ''}`}>

@@ -213,7 +213,7 @@ export default function DocumentsMaster({ collegeId }) {
       </div>
 
       {/* Current required documents list */}
-      <div className="rounded-lg border-2 border-slate-400 bg-white overflow-hidden mb-5">
+      <div className="border border-slate-300 bg-white overflow-hidden mb-5">
         <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
           <p className="text-xs font-bold uppercase tracking-wide text-slate-500">
             Required Documents ({rows.length})
@@ -229,18 +229,18 @@ export default function DocumentsMaster({ collegeId }) {
           </p>
         ) : (
           <table className="w-full text-sm border-collapse">
-            <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
+            <thead className="bg-slate-50 text-xs font-bold text-slate-600 uppercase tracking-wide border-b border-slate-300">
               <tr>
                 <DMTh col="document_type_name" label="Document"  align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortDM} />
                 <DMTh col="is_mandatory"       label="Mandatory" align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortDM} />
-                {rw && <th className="px-4 py-2.5 text-right text-xs font-bold uppercase tracking-wide text-slate-600">Actions</th>}
+                {rw && <th className="px-3 py-1 text-right text-xs font-bold uppercase tracking-wide text-slate-600">Actions</th>}
               </tr>
             </thead>
-            <tbody className="divide-y-2 divide-slate-300">
+            <tbody className="divide-y divide-slate-200">
               {sortedRows.map(row => (
                 <tr key={row.id} className="hover:bg-blue-50 transition">
-                  <td className="px-4 py-2.5 text-slate-800 font-medium">{row.document_type_name}</td>
-                  <td className="px-4 py-2.5 text-center">
+                  <td className="px-3 py-1 text-slate-800 font-medium border-r border-slate-200">{row.document_type_name}</td>
+                  <td className="px-3 py-1 text-center border-r border-slate-200">
                     {rw ? (
                       <button
                         onClick={() => toggleMandatory(row)}
@@ -261,7 +261,7 @@ export default function DocumentsMaster({ collegeId }) {
                     )}
                   </td>
                   {rw && (
-                    <td className="px-4 py-2.5 text-right">
+                    <td className="px-3 py-1 text-right">
                       <button
                         onClick={() => handleDelete(row.id)}
                         className="text-xs text-red-500 hover:text-red-700 font-semibold"
@@ -334,7 +334,7 @@ function DMTh({ col, label, align = 'left', sortCol, sortDir, onSort }) {
   const active = sortCol === col
   return (
     <th
-      className={`px-4 py-2.5 text-${align} text-xs font-bold uppercase tracking-wide text-slate-600 cursor-pointer select-none hover:text-slate-800 transition`}
+      className={`px-3 py-1 text-${align} text-xs font-bold uppercase tracking-wide text-slate-600 cursor-pointer select-none hover:text-slate-800 transition border-r border-slate-200`}
       onClick={() => onSort(col)}
     >
       <span className="inline-flex items-center gap-1">

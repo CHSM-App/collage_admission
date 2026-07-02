@@ -196,30 +196,30 @@ export default function GroupMaster({ collegeId }) {
       {loading ? <SkeletonTable rows={4} cols={3} /> : (
         <>
           {/* Desktop table — matches Program Master grid styling. */}
-          <div className="hidden sm:block overflow-x-auto rounded-lg border-2 border-slate-400">
+          <div className="hidden sm:block overflow-x-auto border border-slate-300">
             <table className="w-full text-sm border-collapse">
-              <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
+              <thead className="bg-slate-50 text-xs font-bold text-slate-600 uppercase tracking-wide border-b border-slate-300">
                 <tr>
                   <GMTh col="group_code"        label="Group Code"  align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortGM} />
                   <GMTh col="group_description" label="Description" align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortGM} />
                   <GMTh col="course_count"      label="Subjects"    align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortGM} />
                   <GMTh col="is_active"         label="Status"      align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortGM} />
-                  <th className="px-4 py-2.5" />
+                  <th className="px-3 py-1 border-r border-slate-200" />
                 </tr>
               </thead>
-              <tbody className="divide-y-2 divide-slate-300">
+              <tbody className="divide-y divide-slate-200">
                 {sortedGroups.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-slate-500">No groups defined.</td></tr>}
                 {sortedGroups.map(g => (
                   <tr key={g.id} className="hover:bg-blue-50 transition">
-                    <td className="px-4 py-2.5 font-mono font-semibold text-slate-900">{g.group_code}</td>
-                    <td className="px-4 py-2.5 text-slate-700">{g.group_description}</td>
-                    <td className="px-4 py-2.5 text-center text-slate-700">{g.course_count}</td>
-                    <td className="px-4 py-2.5 text-center">
+                    <td className="px-3 py-1 font-mono font-semibold text-slate-900 border-r border-slate-200">{g.group_code}</td>
+                    <td className="px-3 py-1 text-slate-700 border-r border-slate-200">{g.group_description}</td>
+                    <td className="px-3 py-1 text-center text-slate-700 border-r border-slate-200">{g.course_count}</td>
+                    <td className="px-3 py-1 text-center border-r border-slate-200">
                       <span className={`inline-flex w-fit rounded-full px-2.5 py-0.5 text-xs font-semibold ${g.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                         {g.is_active ? 'Active' : 'Inactive'}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-right space-x-3 whitespace-nowrap">
+                    <td className="px-3 py-1 text-right space-x-3 whitespace-nowrap">
                       {rw && <button onClick={() => openEdit(g)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>}
                       {rw && g.is_active && <button onClick={() => softDelete(g)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Deactivate</button>}
                     </td>
@@ -335,7 +335,7 @@ function GMTh({ col, label, align = 'left', sortCol, sortDir, onSort }) {
   const active = sortCol === col
   return (
     <th
-      className={`px-4 py-2.5 text-${align} cursor-pointer select-none text-xs font-bold uppercase tracking-wide text-slate-600 hover:text-slate-900 transition`}
+      className={`px-3 py-1 text-${align} cursor-pointer select-none text-xs font-bold uppercase tracking-wide text-slate-600 hover:text-slate-900 transition border-r border-slate-200`}
       onClick={() => onSort(col)}
     >
       <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'ml-auto' : ''}`}>

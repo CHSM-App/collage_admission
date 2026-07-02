@@ -180,21 +180,21 @@ function RegularTab({ collegeId }) {
       ) : (
         <>
           {/* Desktop table */}
-          <div className="hidden sm:block overflow-x-auto rounded-lg border-2 border-slate-400">
+          <div className="hidden sm:block overflow-x-auto border border-slate-300">
             <table className="w-full text-sm">
-              <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
+              <thead className="bg-slate-50 text-xs font-bold text-slate-600 uppercase tracking-wide border-b border-slate-300">
                 <tr>
                   <SortTh col="student_name"        label="Student"       align="left"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <SortTh col="course_name"         label="Course / Year" align="left"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <SortTh col="registration_number" label="Reg. No."      align="left"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <SortTh col="fee_total_amount"    label="Total Fee"     align="right" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <SortTh col="amount_paid"         label="Paid"          align="right" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
-                  <th className="px-4 py-2.5 text-right">Remaining</th>
-                  <th className="px-4 py-2.5 text-center">Status</th>
+                  <th className="px-3 py-1 text-right border-r border-slate-200">Remaining</th>
+                  <th className="px-3 py-1 text-center border-r border-slate-200">Status</th>
                   <SortTh col="completed_at"        label="Last Paid"     align="left"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                 </tr>
               </thead>
-              <tbody className="divide-y-2 divide-slate-300">
+              <tbody className="divide-y divide-slate-200">
                 {summary.map(r => {
                   const total     = r.fee_total_amount != null ? Number(r.fee_total_amount) : null
                   const paidAmt   = Number(r.amount_paid) || 0
@@ -203,30 +203,30 @@ function RegularTab({ collegeId }) {
                     <tr
                       key={r.application_id}
                       onClick={() => setSelected(r)}
-                      className="hover:bg-blue-50 cursor-pointer transition border-b-2 border-slate-300 last:border-b-0"
+                      className="hover:bg-blue-50 cursor-pointer transition border-b border-slate-200 last:border-b-0"
                     >
-                      <td className="px-4 py-3">
+                      <td className="px-3 py-1 border-r border-slate-200">
                         <p className="font-medium text-slate-800">{r.student_name}</p>
                         <p className="text-xs text-slate-400">{r.student_phone || '—'}</p>
                       </td>
-                      <td className="px-4 py-3 text-slate-600">
+                      <td className="px-3 py-1 text-slate-600 border-r border-slate-200">
                         {r.course_name}
                         <span className="ml-1 text-xs text-slate-400">· {YEAR_LABEL[r.year_of_study]}</span>
                       </td>
-                      <td className="px-4 py-3 font-mono text-slate-500 text-xs">{r.registration_number || '—'}</td>
-                      <td className="px-4 py-3 text-right text-slate-700">
+                      <td className="px-3 py-1 font-mono text-slate-500 text-xs border-r border-slate-200">{r.registration_number || '—'}</td>
+                      <td className="px-3 py-1 text-right text-slate-700 border-r border-slate-200">
                         {total != null ? `₹${total.toLocaleString('en-IN')}` : '—'}
                       </td>
-                      <td className="px-4 py-3 text-right font-semibold text-emerald-700">
+                      <td className="px-3 py-1 text-right font-semibold text-emerald-700 border-r border-slate-200">
                         {paidAmt > 0 ? `₹${paidAmt.toLocaleString('en-IN')}` : '—'}
                       </td>
-                      <td className="px-4 py-3 text-right font-semibold text-amber-700">
+                      <td className="px-3 py-1 text-right font-semibold text-amber-700 border-r border-slate-200">
                         {remaining != null && remaining > 0 ? `₹${remaining.toLocaleString('en-IN')}` : '—'}
                       </td>
-                      <td className="px-4 py-3 text-center">
+                      <td className="px-3 py-1 text-center border-r border-slate-200">
                         <StatusBadge remaining={remaining} total={total} paidAmt={paidAmt} />
                       </td>
-                      <td className="px-4 py-3 text-slate-500 text-xs">
+                      <td className="px-3 py-1 text-slate-500 text-xs">
                         {r.completed_at ? fmtDate(r.completed_at) : '—'}
                       </td>
                     </tr>
@@ -372,52 +372,40 @@ function MiscExamTab({ collegeId, paymentType, feeType, label }) {
       ) : (
         <>
           {/* Desktop table */}
-          <div className="hidden sm:block overflow-x-auto rounded-lg border-2 border-slate-400">
+          <div className="hidden sm:block overflow-x-auto border border-slate-300">
             <table className="w-full text-sm">
-              <thead className="bg-slate-100 text-xs font-bold text-slate-600 uppercase tracking-wide border-b-2 border-slate-400">
+              <thead className="bg-slate-50 text-xs font-bold text-slate-600 uppercase tracking-wide border-b border-slate-300">
                 <tr>
-                  <th className="px-4 py-2.5 text-left">Student</th>
-                  <th className="px-4 py-2.5 text-left">Course / Year</th>
-                  <th className="px-4 py-2.5 text-left">Reg. No.</th>
-                  <th className="px-4 py-2.5 text-right">Amount</th>
-                  <th className="px-4 py-2.5 text-center">Status</th>
-                  <th className="px-4 py-2.5 text-left">Fee Heads</th>
-                  <th className="px-4 py-2.5 text-left">Date &amp; Time</th>
+                  <th className="px-3 py-1 text-left border-r border-slate-200">Student</th>
+                  <th className="px-3 py-1 text-left border-r border-slate-200">Course / Year</th>
+                  <th className="px-3 py-1 text-left border-r border-slate-200">Reg. No.</th>
+                  <th className="px-3 py-1 text-right border-r border-slate-200">Amount</th>
+                  <th className="px-3 py-1 text-center border-r border-slate-200">Status</th>
+                  <th className="px-3 py-1 text-left">Date &amp; Time</th>
                 </tr>
               </thead>
-              <tbody className="divide-y-2 divide-slate-300">
+              <tbody className="divide-y divide-slate-200">
                 {receipts.map((r, i) => (
-                  <tr key={i} onClick={() => r.status === 'success' && setSelectedReceipt(r)} className={`border-b-2 border-slate-300 last:border-b-0 transition ${r.status === 'success' ? 'hover:bg-blue-50 cursor-pointer' : 'cursor-default'}`}>
-                    <td className="px-4 py-3">
+                  <tr key={i} onClick={() => r.status === 'success' && setSelectedReceipt(r)} className={`border-b border-slate-200 last:border-b-0 transition ${r.status === 'success' ? 'hover:bg-blue-50 cursor-pointer' : 'cursor-default'}`}>
+                    <td className="px-3 py-1 border-r border-slate-200">
                       <p className="font-medium text-slate-800">{r.student_name}</p>
                       <p className="text-xs text-slate-400">{r.student_phone || '—'}</p>
                     </td>
-                    <td className="px-4 py-3 text-slate-600">
+                    <td className="px-3 py-1 text-slate-600 border-r border-slate-200">
                       {r.course_name}
                       <span className="ml-1 text-xs text-slate-400">· {YEAR_LABEL[r.year_of_study]}</span>
                     </td>
-                    <td className="px-4 py-3 font-mono text-slate-500 text-xs">{r.registration_number || '—'}</td>
-                    <td className="px-4 py-3 text-right font-semibold text-emerald-700">
+                    <td className="px-3 py-1 font-mono text-slate-500 text-xs border-r border-slate-200">{r.registration_number || '—'}</td>
+                    <td className="px-3 py-1 text-right font-semibold text-emerald-700 border-r border-slate-200">
                       ₹{Number(r.amount).toLocaleString('en-IN')}
                     </td>
-                    <td className="px-4 py-3 text-center">
+                    <td className="px-3 py-1 text-center border-r border-slate-200">
                       {r.status === 'success'
                         ? <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">Paid</span>
                         : <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">Pending</span>
                       }
                     </td>
-                    <td className="px-4 py-3">
-                      {r.fee_heads?.length > 0 ? (
-                        <div className="flex flex-wrap gap-1">
-                          {r.fee_heads.map(h => (
-                            <span key={h.fees_code} className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">{h.fees_head}</span>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="text-slate-400 text-xs">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-slate-500 text-xs">{r.status === 'success' ? fmtDateTime(r.completed_at) : '—'}</td>
+                    <td className="px-3 py-1 text-slate-500 text-xs">{r.status === 'success' ? fmtDateTime(r.completed_at) : '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1050,7 +1038,7 @@ function CollegeFeeModal({ row, collegeId, onClose }) {
 function SortTh({ col, label, align, sortCol, sortDir, onSort }) {
   const active = sortCol === col
   return (
-    <th className={`px-4 py-2.5 text-${align} cursor-pointer select-none hover:text-slate-900 transition`} onClick={() => onSort(col)}>
+    <th className={`px-3 py-1 text-${align} cursor-pointer select-none hover:text-slate-900 transition border-r border-slate-200`} onClick={() => onSort(col)}>
       <span className="inline-flex items-center gap-1">
         {label}
         <span className="text-slate-300">{active ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}</span>

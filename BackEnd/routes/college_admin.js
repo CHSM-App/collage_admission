@@ -611,12 +611,32 @@ async function computeFeeForApp(appId, collegeId, divisionOverride) {
     .input('col', mssqlShared.Int, collegeId)
     .query(`
       SELECT course_id, year_of_study, academic_year, app_division, app_category,
-             app_special_status, fees_category
+             app_special_status, fees_category, student_id
       FROM applications WHERE id=@id AND college_id=@col
     `);
   if (!r.recordset.length) return null;
   const a = r.recordset[0];
   const yearMap = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' };
+
+  // Determine if this student is new to this college:
+  // FY (year 1) → always new.
+  // Higher years → new if no prior confirmed/fees_paid application exists at this college.
+  let isNewStudent = a.year_of_study === 1;
+  if (!isNewStudent) {
+    const priorRes = await db.request()
+      .input('sid', mssqlShared.Int, a.student_id)
+      .input('col', mssqlShared.Int, collegeId)
+      .input('cur', mssqlShared.Int, appId)
+      .query(`
+        SELECT TOP 1 id FROM applications
+        WHERE student_id = @sid
+          AND college_id = @col
+          AND id <> @cur
+          AND status IN ('confirmed', 'fees_paid', 'roll_assigned')
+      `);
+    isNewStudent = priorRes.recordset.length === 0;
+  }
+
   const result = await feeSvc.compute({
     collegeId,
     facultyMasterId: a.course_id,
@@ -625,6 +645,7 @@ async function computeFeeForApp(appId, collegeId, divisionOverride) {
     caste:           a.app_category || null,
     specialStatus:   a.app_special_status || null,
     academicYear:    a.academic_year || null,
+    isNewStudent,
     pool:            db,
   });
 
