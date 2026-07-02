@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useApplicationsList } from '../hooks/useApplicationsList.js'
 import { useSortableTable } from '../../../shared/hooks/useSortableTable.js'
 import Pagination from '../../../shared/components/Pagination.jsx'
@@ -48,20 +48,37 @@ function useStatusCounts(apps) {
 
 export default function ApplicationInbox({ collegeId, collegeName = '' }) {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
 
-  const [page, setPage]                 = useState(1)
-  const [search, setSearch]             = useState('')
-  const [filterStatus, setFilterStatus] = useState('')
-  const [filterCourse, setFilterCourse] = useState('')
-  const [filterYear, setFilterYear]     = useState('')
-  const [showExport, setShowExport]     = useState(false)
-  const [pendingLink, setPendingLink]   = useState(false)
+  // Filters persisted in URL so they survive navigation to app detail and back
+  const page           = parseInt(searchParams.get('ib_page')     || '1', 10)
+  const search         = searchParams.get('ib_q')       || ''
+  const filterStatus   = searchParams.get('ib_status')  || ''
+  const filterCourse   = searchParams.get('ib_course')  || ''
+  const filterYear     = searchParams.get('ib_year')    || ''
+  const filterDivision = searchParams.get('ib_div')     || ''
+  const pendingLink    = searchParams.get('ib_plink')   === '1'
 
-  // Reset to page 1 whenever filters change
-  useEffect(() => { setPage(1) }, [filterStatus, filterCourse, filterYear, pendingLink])
+  const [showExport, setShowExport] = useState(false)
+
+  function setParam(key, value) {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      if (value) next.set(key, value); else next.delete(key)
+      return next
+    }, { replace: true })
+  }
+
+  const setPage           = v => setParam('ib_page',   v === 1 ? '' : String(v))
+  const setSearch         = v => setParam('ib_q',      v)
+  const setFilterStatus   = v => setParam('ib_status', v)
+  const setFilterCourse   = v => setParam('ib_course', v)
+  const setFilterYear     = v => setParam('ib_year',   v)
+  const setFilterDivision = v => setParam('ib_div',    v)
+  const setPendingLink    = v => setParam('ib_plink',  v ? '1' : '')
 
   const { apps, loading, pagination, fetchApps } = useApplicationsList(collegeId, {
-    page, filterStatus, filterCourse, filterYear, pendingLink,
+    page, filterStatus, filterCourse, filterYear, filterDivision, pendingLink,
   })
 
   const statusCounts = useStatusCounts(apps)
@@ -75,6 +92,13 @@ export default function ApplicationInbox({ collegeId, collegeName = '' }) {
   const yearOptions = useMemo(() => {
     const set = new Set(apps.map(a => a.year_of_study).filter(Boolean))
     return [...set].sort()
+  }, [apps])
+
+  const [seenDivisions, setSeenDivisions] = useState([])
+  useEffect(() => {
+    const fresh = apps.map(a => a.app_division).filter(Boolean)
+    if (fresh.length > 0)
+      setSeenDivisions(prev => [...new Set([...prev, ...fresh])].sort())
   }, [apps])
 
   // Client-side search filter (haystack join) then sort via shared hook
@@ -94,14 +118,18 @@ export default function ApplicationInbox({ collegeId, collegeName = '' }) {
     searched, 'submitted_at', 'desc', { numericCols: ['year_of_study'] }
   )
 
-  const hasFilters = search || filterStatus || filterCourse || filterYear || pendingLink
+  const hasFilters = search || filterStatus || filterCourse || filterYear || filterDivision || pendingLink
 
   function clearFilters() {
-    setSearch(''); setFilterStatus(''); setFilterCourse(''); setFilterYear(''); setPendingLink(false); setPage(1)
+    setSearchParams({ section: 'inbox' }, { replace: true })
   }
 
   function openApp(appId) {
-    navigate(`/college/dashboard?section=app&app_id=${appId}`)
+    // Preserve inbox filter params in the URL so they're restored on back navigation
+    const next = new URLSearchParams(searchParams)
+    next.set('section', 'app')
+    next.set('app_id', appId)
+    navigate(`/college/dashboard?${next.toString()}`)
   }
 
   return (
@@ -190,6 +218,28 @@ export default function ApplicationInbox({ collegeId, collegeName = '' }) {
             <option key={y} value={y}>{YEAR_LABEL[y]} — Year {y}</option>
           ))}
         </select>
+
+        {/* Division filter */}
+        {seenDivisions.length > 0 && (
+          <div className="relative inline-flex items-center">
+            <select
+              value={filterDivision}
+              onChange={e => setFilterDivision(e.target.value)}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-36 pr-7"
+            >
+              <option value="">All Divisions</option>
+              {seenDivisions.map(d => (
+                <option key={d} value={d}>Division {d}</option>
+              ))}
+            </select>
+            {filterDivision && (
+              <button
+                onClick={() => setFilterDivision('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 text-xs"
+              >✕</button>
+            )}
+          </div>
+        )}
 
         {/* Payment link pending toggle */}
         {/* <button

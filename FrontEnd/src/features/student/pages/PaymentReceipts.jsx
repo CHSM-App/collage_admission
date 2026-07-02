@@ -8,8 +8,11 @@ import { getPaymentReceipts } from '../../../services/paymentService.js'
 
 const YEAR_LABEL = { 1: 'First Year (FY)', 2: 'Second Year (SY)', 3: 'Third Year (TY)', 4: 'Fourth Year (4Y)', 5: 'Fifth Year (5Y)' }
 const TYPE_LABEL = {
-  application_fee: 'Platform Fee',
-  college_fee:     'College Fee',
+  application_fee:          'Platform Fee',
+  college_fee:              'College Fee',
+  college_fee_installment:  'College Fee (Instalment)',
+  misc_fee:                 'Misc Fees',
+  exam_fee:                 'Exam Fees',
 }
 
 // DB returns datetime strings without timezone (IST stored as-is).
@@ -64,33 +67,39 @@ export default function PaymentReceipts({ applicationId, onClose, hideTypes = []
           <button onClick={onClose} className="text-xs text-slate-400 hover:text-slate-600">✕ Close</button>
         </div>
       )}
-      {payments.map((pmt, idx) => (
-        <div key={pmt.id} className="rounded-lg border border-slate-200 overflow-hidden">
+      {payments.map((pmt, idx) => {
+        const isPending = pmt.status !== 'success'
+        return (
+        <div key={pmt.id} className={`rounded-lg border overflow-hidden ${isPending ? 'border-amber-200' : 'border-slate-200'}`}>
           <button
-            onClick={() => setActiveId(activeId === pmt.id ? null : pmt.id)}
-            className="w-full flex items-center justify-between px-3 py-2.5 bg-white hover:bg-slate-50 transition text-left"
+            onClick={() => !isPending && setActiveId(activeId === pmt.id ? null : pmt.id)}
+            className={`w-full flex items-center justify-between px-3 py-2.5 transition text-left ${isPending ? 'bg-amber-50 cursor-default' : 'bg-white hover:bg-slate-50 cursor-pointer'}`}
           >
             <div className="flex items-center gap-2.5">
-              <div className="h-6 w-6 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
-                <span className="text-emerald-700 text-xs font-bold">{idx + 1}</span>
+              <div className={`h-6 w-6 rounded-full flex items-center justify-center shrink-0 ${isPending ? 'bg-amber-100' : 'bg-emerald-100'}`}>
+                <span className={`text-xs font-bold ${isPending ? 'text-amber-700' : 'text-emerald-700'}`}>{idx + 1}</span>
               </div>
               <div>
                 <p className="text-sm font-semibold text-slate-900 leading-tight">
                   {TYPE_LABEL[pmt.payment_type] || pmt.payment_type}
                 </p>
                 <p className="text-xs text-slate-400">
-                  {fmtDate(pmt.completed_at)} {fmtTime(pmt.completed_at)}
+                  {isPending ? 'Awaiting payment' : `${fmtDate(pmt.completed_at)} ${fmtTime(pmt.completed_at)}`}
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <span className="text-sm font-bold text-slate-950">₹{Number(pmt.amount).toLocaleString('en-IN')}</span>
-              <span className="text-slate-300 text-xs">{activeId === pmt.id ? '▲' : '▼'}</span>
+              {isPending
+                ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">Pending</span>
+                : <span className="text-slate-300 text-xs">{activeId === pmt.id ? '▲' : '▼'}</span>
+              }
             </div>
           </button>
-          {activeId === pmt.id && <ReceiptSheet app={data.application} pmt={pmt} showOrderId={showOrderId} />}
+          {!isPending && activeId === pmt.id && <ReceiptSheet app={data.application} pmt={pmt} showOrderId={showOrderId} />}
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
@@ -111,13 +120,20 @@ function ReceiptSheet({ app, pmt, showOrderId = false }) {
     const yrShort = { 1:'FY', 2:'SY', 3:'TY', 4:'4Y', 5:'5Y' }[app.year_of_study] || ''
     const classLabel = `${yrShort}${app.degree_course_code || ''}${app.app_division ? ' - ' + app.app_division : ''}`
     const heads = pmt.fee_heads || []
+    const headsHaveAmounts = heads.some(h => h.paid != null || h.amount != null)
     const dataRows = heads.length
-      ? heads.map((h, i) => `
+      ? headsHaveAmounts
+        ? heads.map((h, i) => `
           <tr>
             <td style="border:1px solid #000;padding:3px 6px;text-align:center;font-size:11px;">${i+1}</td>
             <td style="border:1px solid #000;padding:3px 8px;font-size:11px;">${h.fees_head}</td>
-            <td style="border:1px solid #000;padding:3px 8px;text-align:right;font-size:11px;">${Number(h.paid||h.amount).toFixed(2)}</td>
+            <td style="border:1px solid #000;padding:3px 8px;text-align:right;font-size:11px;">${Number(h.paid ?? h.amount).toFixed(2)}</td>
           </tr>`).join('')
+        : `<tr>
+            <td style="border:1px solid #000;padding:3px 6px;text-align:center;font-size:11px;">1</td>
+            <td style="border:1px solid #000;padding:3px 8px;font-size:11px;">${heads.map(h => h.fees_head).join(', ')}</td>
+            <td style="border:1px solid #000;padding:3px 8px;text-align:right;font-size:11px;">${Number(pmt.amount).toFixed(2)}</td>
+          </tr>`
       : `<tr>
           <td style="border:1px solid #000;padding:3px 6px;text-align:center;font-size:11px;">1</td>
           <td style="border:1px solid #000;padding:3px 8px;font-size:11px;">${fullLabel}</td>
@@ -228,8 +244,11 @@ function ReceiptSheet({ app, pmt, showOrderId = false }) {
   const yrShort = { 1:'FY', 2:'SY', 3:'TY', 4:'4Y', 5:'5Y' }[app.year_of_study] || ''
   const classLabel = `${yrShort}${app.degree_course_code || ''}${app.app_division ? ' - ' + app.app_division : ''}`
   const heads = pmt.fee_heads || []
+  const headsHaveAmounts = heads.some(h => h.paid != null || h.amount != null)
   const displayRows = heads.length
-    ? heads
+    ? headsHaveAmounts
+      ? heads
+      : [{ fees_head: heads.map(h => h.fees_head).join(', '), paid: pmt.amount, amount: pmt.amount }]
     : [{ fees_head: fullLabel, paid: pmt.amount, amount: pmt.amount }]
   const fillerCount = 0 // spacer handled by a single stretchy row inside ReceiptCopy
 

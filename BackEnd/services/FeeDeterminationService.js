@@ -13,31 +13,11 @@
 
 const mssql = require('mssql')
 
-// ── Caste / Status group constants ────────────────────────────
-
-// BCC castes: qualify for full government fee reimbursement
-const BCC_CASTES    = ['SC', 'ST', 'DT/VJ', 'NT(A)', 'NT(B)', 'NT(C)', 'SBC']
-
-// Cat-3 castes (backward classes — use Cat-3 slab in Fees Master)
-// Same set as BCC plus OBC
+// ── Hardcoded fallback constants (used when college has no category master set up) ──
 const CAT3_CASTES   = ['SC', 'ST', 'DT/VJ', 'NT(A)', 'NT(B)', 'NT(C)', 'SBC', 'OBC']
-
-// Statuses that map to Cat-2 (partial concession: EBC/PTC/STC/Army)
 const CAT2_STATUSES = ['EBC', 'PTC', 'STC', 'Ex-Service']
-
-// Statuses that map to Cat-4 (institution-configurable: FF/PH/Widows/Govt.Wards)
-// TODO: confirm with stakeholder the official institutional definition of Cat-4
 const CAT4_STATUSES = ['FF', 'PH', 'Widows', 'C.Govt.', 'S.Govt.']
 
-/**
- * determineSlab(caste, specialStatus) → { slab: 1|2|3|4, reason: string }
- *
- * Priority order per spec:
- *   1. Caste in CAT3_CASTES → Cat-3
- *   2. Status in CAT2_STATUSES → Cat-2
- *   3. Status in CAT4_STATUSES → Cat-4
- *   4. Default → Cat-1 (General/Open)
- */
 function determineSlab(caste, specialStatus) {
   if (caste && CAT3_CASTES.includes(caste)) {
     return { slab: 3, reason: `Cat-3 assigned — Caste "${caste}" qualifies as backward class.` }
@@ -57,40 +37,65 @@ function determineSlab(caste, specialStatus) {
 }
 
 /**
- * determinePaymentMode(caste, specialStatus, fundingType)
- *   → { mode: 'Paying'|'Other'|'BCC', reason: string }
- *
- * Priority:
- *   A. Caste in BCC_CASTES AND fundingType != 'NonGranted' → BCC
- *   B. Caste = OBC OR any specialStatus selected → Other
- *   C. Default → Paying
- *   C modifier: if fundingType = 'NonGranted' → override to Paying
+ * loadCollegeCategoryMaster(collegeId, pool)
+ * Loads fees_categories with their caste/status mappings.
+ * Returns null if college has no category master configured (triggers fallback).
  */
-function determinePaymentMode(caste, specialStatus, fundingType) {
-  let mode, reason
+async function loadCollegeCategoryMaster(collegeId, pool) {
+  const countRes = await pool.request()
+    .input('col', mssql.Int, collegeId)
+    .query('SELECT COUNT(*) AS cnt FROM fees_categories WHERE college_id=@col AND is_active=1')
+  if (countRes.recordset[0].cnt === 0) return null
 
-  if (caste && BCC_CASTES.includes(caste)) {
-    mode   = 'BCC'
-    reason = `BCC assigned — Caste "${caste}" qualifies for government fee reimbursement.`
-  } else if ((caste === 'OBC') || specialStatus) {
-    mode   = 'Other'
-    reason = specialStatus
-      ? `Other assigned — Special status "${specialStatus}" qualifies for concession/scheme.`
-      : 'Other assigned — OBC may qualify for non-creamy-layer concession.'
-  } else {
-    mode   = 'Paying'
-    reason = caste
-      ? `Paying assigned — Caste "${caste}" with no concession scheme.`
-      : 'Paying assigned by default — no caste/status selected.'
+  const [catsRes, casteMapsRes, statusMapsRes] = await Promise.all([
+    pool.request().input('col', mssql.Int, collegeId)
+      .query('SELECT * FROM fees_categories WHERE college_id=@col AND is_active=1 ORDER BY display_order, slab_index'),
+    pool.request().input('col', mssql.Int, collegeId)
+      .query(`SELECT fcc.fees_category_id, cc.caste_name
+              FROM fees_category_castes fcc
+              JOIN category_castes cc ON cc.id = fcc.caste_id
+              JOIN fees_categories fc ON fc.id = fcc.fees_category_id
+              WHERE fc.college_id=@col`),
+    pool.request().input('col', mssql.Int, collegeId)
+      .query(`SELECT fcs.fees_category_id, css.status_name
+              FROM fees_category_special_statuses fcs
+              JOIN category_special_statuses css ON css.id = fcs.special_status_id
+              JOIN fees_categories fc ON fc.id = fcs.fees_category_id
+              WHERE fc.college_id=@col`),
+  ])
+
+  return {
+    categories:    catsRes.recordset,
+    casteMappings: casteMapsRes.recordset,    // [{ fees_category_id, caste_name }]
+    statusMappings: statusMapsRes.recordset,  // [{ fees_category_id, status_name }]
   }
+}
 
-  // NonGranted seats don't receive government concessions — override to Paying
-  if (fundingType === 'NonGranted' && mode !== 'Paying') {
-    reason += ` [Overridden to Paying — Division is Non-Granted; government concessions don't apply.]`
-    mode = 'Paying'
-  }
+/**
+ * resolveSlabFromMaster(master, caste, specialStatus)
+ * Returns { slab, slabReason }
+ * using the college's dynamic category master.
+ *
+ * Priority: special status overrides caste mapping; fallback to first category.
+ */
+function resolveSlabFromMaster(master, caste, specialStatus) {
+  const { categories, casteMappings, statusMappings } = master
 
-  return { mode, reason }
+  // Find fees_category for this caste
+  const casteMap = casteMappings.find(m => m.caste_name === caste)
+  const fcFromCaste = casteMap ? categories.find(c => c.id === casteMap.fees_category_id) : null
+
+  // Find fees_category for this special status
+  const statusMap = specialStatus ? statusMappings.find(m => m.status_name === specialStatus) : null
+  const fcFromStatus = statusMap ? categories.find(c => c.id === statusMap.fees_category_id) : null
+
+  // Special status overrides caste; fallback to caste category, then first category
+  const fc = fcFromStatus || fcFromCaste || categories[0]
+
+  const slab       = fc.slab_index
+  const slabReason = `${fc.category_name} assigned — slab ${slab}.`
+
+  return { slab, slabReason }
 }
 
 /**
@@ -103,14 +108,12 @@ function determinePaymentMode(caste, specialStatus, fundingType) {
  * {
  *   feesCategorySlab:   1|2|3|4,
  *   slabReason:         string,
- *   paymentMode:        'Paying'|'Other'|'BCC',
- *   paymentModeReason:  string,
  *   fundingType:        'Granted'|'NonGranted'|'Both'|null,
  *   studentType:        'Grand'|'NonGrand'|'Outsider',
  *   breakdown: [{ fees_code, fees_head, short_name, fees_type, is_refundable, amount }],
  *   totalFee:           number,
- *   reimbursableAmount: number,   // for BCC: sum of reimbursable heads
- *   studentPayable:     number,   // totalFee - reimbursableAmount
+ *   reimbursableAmount: number,   // always 0
+ *   studentPayable:     number,   // always equal to totalFee
  * }
  */
 async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, caste, specialStatus, studentType, academicYear, pool }) {
@@ -142,13 +145,16 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
     ? FUNDING_TO_STUDENT_TYPE[fundingType]
     : (VALID_STUDENT_TYPES.includes(studentType) ? studentType : 'Grand')
 
-  // 2. Determine slab and payment mode
-  const { slab, reason: slabReason }               = determineSlab(caste, specialStatus)
-  const { mode: paymentMode, reason: paymentModeReason } = determinePaymentMode(caste, specialStatus, fundingType)
+  // 2. Determine slab — dynamic master if available, else hardcoded fallback
+  let slab, slabReason
+  const master = await loadCollegeCategoryMaster(collegeId, resolvedPool)
+  if (master) {
+    ;({ slab, slabReason } = resolveSlabFromMaster(master, caste, specialStatus))
+  } else {
+    ;({ slab, reason: slabReason } = determineSlab(caste, specialStatus))
+  }
 
-  // 3. Fetch applicable fee heads + amounts
-  // Always LEFT JOIN classwise_fees — fees_master base amounts are the fallback.
-  // Classwise rows override per-class/student_type when present.
+  // 3. Fetch applicable fee heads + amounts (cat1–cat8)
   const feesRes = await resolvedPool.request()
     .input('cid', mssql.Int,      collegeId)
     .input('fid', mssql.Int,      facultyMasterId || null)
@@ -157,11 +163,13 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
     .input('ay',  mssql.NVarChar, academicYear || null)
     .query(`
       SELECT
-        fm.fees_code, fm.fees_head, fm.short_name, fm.fees_type,
-        fm.is_refundable,
+        fm.fees_code, fm.fees_head, fm.short_name, fm.fees_type, fm.is_refundable,
         fm.fees_cat1_amount, fm.fees_cat2_amount, fm.fees_cat3_amount, fm.fees_cat4_amount,
+        fm.fees_cat5_amount, fm.fees_cat6_amount, fm.fees_cat7_amount, fm.fees_cat8_amount,
         cf.cat1_amount AS cw_cat1, cf.cat2_amount AS cw_cat2,
-        cf.cat3_amount AS cw_cat3, cf.cat4_amount AS cw_cat4
+        cf.cat3_amount AS cw_cat3, cf.cat4_amount AS cw_cat4,
+        cf.cat5_amount AS cw_cat5, cf.cat6_amount AS cw_cat6,
+        cf.cat7_amount AS cw_cat7, cf.cat8_amount AS cw_cat8
       FROM fees_master fm
       LEFT JOIN classwise_fees cf
         ON cf.fees_code = fm.fees_code
@@ -176,11 +184,11 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
       ORDER BY fm.sequence_auto_fees
     `)
 
-  // 4. Build breakdown — classwise override takes priority
+  // 4. Build breakdown — classwise override takes priority; slab drives which column to use
   const breakdown = feesRes.recordset.map(row => {
-    const cwCol  = `cw_cat${slab}`
+    const cwCol   = `cw_cat${slab}`
     const baseCol = `fees_cat${slab}_amount`
-    const amount = row[cwCol] != null ? parseFloat(row[cwCol]) : parseFloat(row[baseCol] || 0)
+    const amount  = row[cwCol] != null ? parseFloat(row[cwCol]) : parseFloat(row[baseCol] || 0)
     return {
       fees_code:    row.fees_code,
       fees_head:    row.fees_head,
@@ -191,26 +199,19 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
     }
   })
 
-  const totalFee           = breakdown.reduce((s, r) => s + r.amount, 0)
-  // For BCC: reimbursable = all heads marked is_refundable; student pays only non-refundable
-  // TODO: confirm with stakeholder which specific heads are reimbursed for BCC
-  const reimbursableAmount = paymentMode === 'BCC'
-    ? breakdown.filter(r => r.is_refundable).reduce((s, r) => s + r.amount, 0)
-    : 0
-  const studentPayable     = totalFee - reimbursableAmount
+  const totalFee       = breakdown.reduce((s, r) => s + r.amount, 0)
+  const studentPayable = totalFee
 
   return {
-    feesCategorySlab:  slab,
+    feesCategorySlab: slab,
     slabReason,
-    paymentMode,
-    paymentModeReason,
     fundingType,
     studentType: resolvedStudentType,
     breakdown,
     totalFee,
-    reimbursableAmount,
+    reimbursableAmount: 0,
     studentPayable,
   }
 }
 
-module.exports = { compute, determineSlab, determinePaymentMode }
+module.exports = { compute, determineSlab }

@@ -14,6 +14,7 @@ import DivisionMaster      from './masters/DivisionMaster.jsx'
 import FeesMaster          from './masters/FeesMaster.jsx'
 import DocumentsMaster     from './masters/DocumentsMaster.jsx'
 import ClassMaster         from './masters/ClassMaster.jsx'
+import CategoryMaster      from './masters/CategoryMaster.jsx'
 import FeeReceipts         from './FeeReceipts.jsx'
 import Reports             from './Reports.jsx'
 import Certificates from './certificates/Certificates.jsx'
@@ -87,6 +88,7 @@ export default function CollegeDashboard() {
   if (section === 'master-division')  return navAllowed('master-division')  ? <>{masterReadOnly && <ReadOnlyBanner label="Division Master" />}<DivisionMaster  collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
   if (section === 'master-fees')      return navAllowed('master-fees')      ? <>{masterReadOnly && <ReadOnlyBanner label="Fees Master" />}<FeesMaster          collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
   if (section === 'master-documents') return navAllowed('master-documents') ? <>{masterReadOnly && <ReadOnlyBanner label="Required Documents" />}<DocumentsMaster collegeId={user?.id} readOnly={masterReadOnly} /></> : <NavBlocked />
+  if (section === 'master-categories') return navAllowed('master-categories') ? <>{masterReadOnly && <ReadOnlyBanner label="Category Master" />}<CategoryMaster collegeId={user?.id} /></> : <NavBlocked />
   if (section === 'fee-receipts')     return navAllowed('fee-receipts')     ? <FeeReceipts collegeId={user?.id} />                                                                                                             : <NavBlocked />
   if (section === 'reports')          return navAllowed('reports')          ? <Reports     collegeId={user?.id} />                                                                                                                : <NavBlocked />
 
@@ -105,7 +107,8 @@ function Overview({ user, navAllowed }) {
     { title: 'Fee Receipts',         desc: 'View pending and paid college fee receipts.',          section: 'fee-receipts',     accent: 'orange' },
     { title: 'Reports',              desc: 'Fee collection reports by date, class, and year.',     section: 'reports',          accent: 'green' },
     { title: 'Faculty Master',       desc: 'Manage degree programs and university codes.',        section: 'master-faculty',   accent: 'slate' },
-    { title: 'Fees Master',          desc: 'Configure fee heads, slabs, and classwise overrides.',section: 'master-fees',     accent: 'rose' },
+    { title: 'Fees Master',          desc: 'Configure fee heads, slabs, and classwise overrides.',section: 'master-fees',       accent: 'rose' },
+    { title: 'Category Master',      desc: 'Manage castes, special statuses, and fees categories.', section: 'master-categories', accent: 'purple' },
   ]
   const cards = allCards.filter(c => navAllowed(c.section))
 

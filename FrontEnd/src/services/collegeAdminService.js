@@ -61,3 +61,15 @@ export const sendPaymentLink = (data) =>
 
 export const getPaymentLinkData = (token) =>
   api.get(`payments/pay/${token}`)
+
+export const getMiscExamHeads = (collegeId, type) =>
+  api.get(`college-admin/${collegeId}/fees/misc-exam-heads${type ? `?type=${type}` : ''}`)
+
+export const recordMiscPayment = (collegeId, appId, data) =>
+  api.post(`college-admin/${collegeId}/applications/${appId}/record-misc-payment`, data)
+
+export const getMiscExamReceipts = (collegeId, params) =>
+  api.get(`college-admin/${collegeId}/misc-exam-receipts?${params}`)
+
+export const createMiscFee = (collegeId, appId, data) =>
+  api.post(`college-admin/${collegeId}/applications/${appId}/create-misc-fee`, data)

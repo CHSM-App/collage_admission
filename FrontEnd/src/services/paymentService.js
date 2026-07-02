@@ -11,3 +11,9 @@ export const getPaymentReceipts = (applicationId) =>
 
 export const studentHasPayments = (studentId) =>
   api.get(`payments/student-has-payments?student_id=${studentId}`)
+
+export const getMiscFeeStatus = (appId) =>
+  api.get(`payments/misc-fee-status/${appId}`)
+
+export const initiateMiscFeePayment = (data) =>
+  api.post('payments/initiate-misc-fee', data)

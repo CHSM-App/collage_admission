@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getApplicationDetail, postApplicationAction, confirmApplication, setApplicationFee, getComputedFee, getAppInstallments } from '../../../services/collegeAdminService.js'
 import { getDivisions } from '../../../services/masterService.js'
 import { getSubjectSelections } from '../../../services/applicationService.js'
@@ -44,6 +44,18 @@ const STATUS_FLOW = {
 
 export default function ApplicationDetail({ collegeId, appId }) {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+
+  // Build back-to-inbox URL preserving any ib_* filter params that were in the URL
+  function goBackToInbox() {
+    const next = new URLSearchParams()
+    next.set('section', 'inbox')
+    for (const [k, v] of searchParams.entries()) {
+      if (k.startsWith('ib_')) next.set(k, v)
+    }
+    navigate(`/college/dashboard?${next.toString()}`)
+  }
+
   const { canWrite } = usePermissions()
   const canReview   = canWrite('review_application')
   const canUpload   = canWrite('upload_documents')
@@ -115,7 +127,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
     try {
       await postApplicationAction(collegeId, appId, endpoint, body)
       if (successMsg) toast.success(successMsg)
-      navigate('/college/dashboard?section=inbox')
+      goBackToInbox()
     } catch (err) {
       const msg = err?.response?.data?.message || 'Action failed.'
       setError(msg)
@@ -140,7 +152,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
         document_ids_verified: app?.documents?.map(d => d.id) || [],
       })
       toast.success('Admission confirmed. Student can now pay the college fee.')
-      navigate('/college/dashboard?section=inbox')
+      goBackToInbox()
     } catch (err) {
       const msg = err?.response?.data?.message || 'Action failed.'
       setError(msg)
@@ -159,7 +171,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
   return (
     <section className="space-y-5 max-w-3xl">
       <button
-        onClick={() => navigate('/college/dashboard?section=inbox')}
+        onClick={() => goBackToInbox()}
         className="text-sm text-blue-600 hover:underline"
       >
         ← Back to inbox
@@ -319,7 +331,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
       )}
 
       {/* Step 2: Student visited — verify docs, set fees, confirm */}
-      {canReview && d.status === 'doc_verified' && (
+      {canReview && ['doc_verified', 'scrutiny_accepted', 'doc_verification_pending'].includes(d.status) && (
         <div className="space-y-3">
           <p className="text-sm text-slate-600">
             Student has been notified to visit the college. Once the student visits and documents are verified in person, set the fee and confirm admission.

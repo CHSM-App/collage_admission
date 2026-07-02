@@ -132,7 +132,7 @@ async function getCollegeFeTotal(app) {
     if (fmRes.recordset.length) {
       const appDetails = await db.request()
         .input('id', mssql.Int, app.id)
-        .query(`SELECT app_category, fees_category, app_division FROM applications WHERE id = @id`);
+        .query(`SELECT app_category, app_special_status, fees_category, app_division FROM applications WHERE id = @id`);
       const det = appDetails.recordset[0] || {};
 
       const result = await feeSvc.compute({
@@ -141,20 +141,25 @@ async function getCollegeFeTotal(app) {
         yearLevel,
         divisionLetter:  det.app_division || null,
         caste:           det.app_category || null,
-        specialStatus:   null,
+        specialStatus:   det.app_special_status || null,
         academicYear:    app.academic_year || null,
         pool:            db,
       });
 
       if (result.breakdown.length > 0) {
+        // Exclude Misc and ExamFees from regular college fee totals
+        const regularBreakdown = result.breakdown.filter(h => {
+          const t = (h.fees_type || '').toLowerCase();
+          return t !== 'misc' && t !== 'examfees';
+        });
+        const regularTotal   = regularBreakdown.reduce((s, h) => s + (parseFloat(h.amount) || 0), 0);
         return {
-          total_fee:           result.totalFee,
-          student_payable:     result.studentPayable,
-          reimbursable_amount: result.reimbursableAmount,
-          payment_mode:        result.paymentMode,
-          fees_category_slab:  result.feesCategorySlab,
-          breakdown:           result.breakdown,
-          source:              'fees_master',
+          total_fee:          regularTotal,
+          student_payable:    regularTotal,
+          reimbursable_amount: 0,
+          fees_category_slab: result.feesCategorySlab,
+          breakdown:          regularBreakdown,
+          source:             'fees_master',
         };
       }
     }
@@ -198,6 +203,27 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
   })();
 
   if (!app) throw new Error(`Application ${appId} not found`);
+
+  // misc_fee / exam_fee — simply mark the payment as success, no application status change
+  if (paymentType === 'misc_fee' || paymentType === 'exam_fee') {
+    const dup = await db.request()
+      .input('txnid', mssql.NVarChar, txnid)
+      .query(`SELECT id FROM payments WHERE gateway_txnid = @txnid AND status = 'success'`);
+    if (dup.recordset.length > 0) return { alreadyProcessed: true };
+
+    await db.request()
+      .input('txnid', mssql.NVarChar, txnid)
+      .input('gpid',  mssql.NVarChar, gatewayPaymentId || null)
+      .input('appId', mssql.Int,      appId)
+      .input('actor', mssql.NVarChar, actorStr)
+      .query(`
+        UPDATE payments
+        SET status = 'success', gateway_payment_id = @gpid, completed_at = GETDATE(), updated_by = @actor
+        WHERE gateway_txnid = @txnid AND application_id = @appId AND status = 'pending'
+      `);
+
+    return { alreadyProcessed: false };
+  }
 
   if (paymentType === 'application_fee') {
     const pool = await db;
@@ -374,6 +400,72 @@ function frontendUrl(path) {
   return `${base}${path}`;
 }
 
+// ── GET /payments/misc-fee-status/:applicationId ─────────────
+// Returns pending and paid misc/exam payments for this application (student auth)
+router.get('/misc-fee-status/:applicationId', async (req, res) => {
+  const appId = parseInt(req.params.applicationId);
+  try {
+    const pmtRes = await db.request()
+      .input('appId', mssql.Int, appId)
+      .query(`
+        SELECT id, payment_type, amount, status, notes, attempted_at, completed_at
+        FROM payments
+        WHERE application_id = @appId
+          AND payment_type IN ('misc_fee', 'exam_fee')
+        ORDER BY attempted_at DESC
+      `);
+
+    const rows = pmtRes.recordset;
+    if (!rows.length) {
+      return res.json({ success: true, data: { pending: [], paid: [] } });
+    }
+
+    // Collect all unique fee_codes across all payments
+    const allCodes = new Set();
+    const parsedNotes = rows.map(r => {
+      let parsed = {};
+      try { parsed = JSON.parse(r.notes || '{}'); } catch (_) {}
+      (parsed.fee_codes || []).forEach(c => allCodes.add(parseInt(c)));
+      return parsed;
+    });
+
+    // Fetch fee head names in bulk
+    let headMap = {};
+    if (allCodes.size > 0) {
+      const codesStr = [...allCodes].join(',');
+      const headsRes = await db.request().query(`
+        SELECT fees_code, fees_head FROM fees_master WHERE fees_code IN (${codesStr})
+      `);
+      headsRes.recordset.forEach(h => { headMap[h.fees_code] = h.fees_head; });
+    }
+
+    const toItem = (r, notes) => ({
+      id:           r.id,
+      payment_type: r.payment_type,
+      amount:       parseFloat(r.amount) || 0,
+      fee_heads:    (notes.fee_codes || []).map(c => ({
+        fees_code: c,
+        fees_head: headMap[c] || String(c),
+      })),
+      created_at:   r.attempted_at,
+      completed_at: r.completed_at,
+    });
+
+    const pending = [];
+    const paid    = [];
+    rows.forEach((r, i) => {
+      const item = toItem(r, parsedNotes[i]);
+      if (r.status === 'success') paid.push(item);
+      else if (r.status === 'pending') pending.push(item);
+    });
+
+    return res.json({ success: true, data: { pending, paid } });
+  } catch (err) {
+    logger.error({ err }, 'misc-fee-status error');
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
 // ── GET /payments/college-fee-status/:applicationId ──────────
 router.get('/college-fee-status/:applicationId', async (req, res) => {
   const appId = parseInt(req.params.applicationId);
@@ -384,7 +476,7 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
         SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study, a.academic_year,
                a.admission_period_id, a.college_fee_paid,
                a.fee_total_amount, a.fee_pay_now_amount,
-               a.app_division, a.app_caste, a.app_special_status,
+               a.app_division, a.app_category, a.app_caste, a.app_special_status,
                fm.code_no AS faculty_master_id,
                CASE a.year_of_study WHEN 1 THEN 'FY' WHEN 2 THEN 'SY' WHEN 3 THEN 'TY'
                                     WHEN 4 THEN '4Y' WHEN 5 THEN '5Y' ELSE NULL END AS year_level
@@ -410,12 +502,17 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
         facultyMasterId: app.faculty_master_id,
         yearLevel:       app.year_level,
         divisionLetter:  app.app_division,
-        caste:           app.app_caste,
+        caste:           app.app_category || app.app_caste || null,
         specialStatus:   app.app_special_status,
         academicYear:    app.academic_year || null,
         pool:            db,
       });
-      breakdown = feeResult?.breakdown || [];
+      // Exclude Misc and ExamFees from the regular college fee breakdown —
+      // those are collected separately via the Misc/Exam Fees receipt flow.
+      breakdown = (feeResult?.breakdown || []).filter(h => {
+        const t = (h.fees_type || '').toLowerCase();
+        return t !== 'misc' && t !== 'examfees';
+      });
     } catch (_) { /* breakdown stays empty if fee not configured */ }
 
     const paidRes = await db.request()
@@ -430,7 +527,12 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
       `);
     const paidRecords = paidRes.recordset;
     const totalPaid   = paidRecords.reduce((s, p) => s + parseFloat(p.amount), 0);
-    const remaining   = Math.max(0, totalFee - totalPaid);
+
+    // totalFee from getCollegeFeTotal already excludes Misc/ExamFees for fees_master source.
+    // For manual fee overrides, use as-is (college explicitly set the amount).
+    const effectiveTotalFeeBase = totalFee;
+
+    const remaining   = Math.max(0, effectiveTotalFeeBase - totalPaid);
 
     // Compute head-level payment status: heads clear sequentially (first head first).
     // Platform Fees heads are excluded from sequential clearance — they are shown but not
@@ -494,7 +596,7 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
     }
 
     // If no fee is configured but there's an active pending payment link, use the link amount as total_fee
-    let effectiveTotalFee = feeInfo?.total_fee || 0;
+    let effectiveTotalFee = effectiveTotalFeeBase || 0;
     let pendingLinkAmount = null;
     if (effectiveTotalFee === 0) {
       const linkRes = await db.request()
@@ -594,11 +696,12 @@ router.get('/receipts/:applicationId', async (req, res) => {
     const pmtRes = await db.request()
       .input('appId', mssql.Int, appId)
       .query(`
-        SELECT p.id, p.payment_type, p.amount, p.status, p.gateway, p.gateway_txnid, p.gateway_payment_id, p.completed_at,
+        SELECT p.id, p.payment_type, p.amount, p.status, p.gateway, p.gateway_txnid, p.gateway_payment_id, p.completed_at, p.notes,
                CASE WHEN plt.id IS NOT NULL THEN 1 ELSE 0 END AS via_payment_link
         FROM payments p
         LEFT JOIN payment_link_tokens plt ON plt.gateway_txnid = p.gateway_txnid AND plt.gateway_txnid IS NOT NULL
-        WHERE p.application_id = @appId AND p.status = 'success'
+        WHERE p.application_id = @appId
+          AND (p.status = 'success' OR (p.status = 'pending' AND p.payment_type IN ('misc_fee','exam_fee')))
         ORDER BY p.completed_at ASC
       `);
     const payments = pmtRes.recordset;
@@ -611,7 +714,7 @@ router.get('/receipts/:applicationId', async (req, res) => {
       const appExtra = await db.request()
         .input('id2', mssql.Int, appId)
         .query(`
-          SELECT a.college_id, a.course_id, a.year_of_study, a.academic_year, a.app_division, a.app_caste, a.app_special_status,
+          SELECT a.college_id, a.course_id, a.year_of_study, a.academic_year, a.app_division, a.app_category, a.app_caste, a.app_special_status,
                  fm.code_no AS faculty_master_id,
                  CASE a.year_of_study WHEN 1 THEN 'FY' WHEN 2 THEN 'SY' WHEN 3 THEN 'TY'
                                       WHEN 4 THEN '4Y' WHEN 5 THEN '5Y' ELSE NULL END AS year_level
@@ -626,12 +729,15 @@ router.get('/receipts/:applicationId', async (req, res) => {
           facultyMasterId: ae.faculty_master_id,
           yearLevel:       ae.year_level,
           divisionLetter:  ae.app_division,
-          caste:           ae.app_caste,
+          caste:           ae.app_category || ae.app_caste || null,
           specialStatus:   ae.app_special_status,
           academicYear:    ae.academic_year || null,
           pool:            db,
         });
-        feeBreakdown = feeResult?.breakdown || [];
+        feeBreakdown = (feeResult?.breakdown || []).filter(h => {
+          const t = (h.fees_type || '').toLowerCase();
+          return t !== 'misc' && t !== 'examfees';
+        });
       }
     } catch (_) { /* leave feeBreakdown empty */ }
 
@@ -684,7 +790,41 @@ router.get('/receipts/:applicationId', async (req, res) => {
       return { ...pmt, fee_heads: headRows };
     });
 
-    return res.json({ success: true, data: { application: app, payments: paymentsWithHeads } });
+    // Enrich misc_fee/exam_fee payments with fee_heads from their notes JSON
+    // Collect unique fee_codes used across all misc/exam payments
+    const miscFeeCodeSet = new Set();
+    const miscNotesMap = {};
+    paymentsWithHeads.forEach(pmt => {
+      if (pmt.payment_type === 'misc_fee' || pmt.payment_type === 'exam_fee') {
+        let notes = {};
+        try { notes = JSON.parse(pmt.notes || '{}'); } catch (_) {}
+        miscNotesMap[pmt.id] = notes;
+        (notes.fee_codes || []).forEach(c => miscFeeCodeSet.add(parseInt(c)));
+      }
+    });
+
+    let miscHeadMap = {};
+    if (miscFeeCodeSet.size > 0) {
+      const codesStr = [...miscFeeCodeSet].join(',');
+      try {
+        const miscHeadsRes = await db.request().query(`
+          SELECT fees_code, fees_head FROM fees_master WHERE fees_code IN (${codesStr})
+        `);
+        miscHeadsRes.recordset.forEach(h => { miscHeadMap[h.fees_code] = h.fees_head; });
+      } catch (_) {}
+    }
+
+    const enrichedPayments = paymentsWithHeads.map(pmt => {
+      if (pmt.payment_type !== 'misc_fee' && pmt.payment_type !== 'exam_fee') return pmt;
+      const notes = miscNotesMap[pmt.id] || {};
+      const feeHeads = (notes.fee_codes || []).map(c => ({
+        fees_code: c,
+        fees_head: miscHeadMap[c] || String(c),
+      }));
+      return { ...pmt, fee_heads: feeHeads };
+    });
+
+    return res.json({ success: true, data: { application: app, payments: enrichedPayments } });
   } catch (err) {
     logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
@@ -849,6 +989,96 @@ router.post('/initiate', initiateValidators, validate, async (req, res) => {
   }
 });
 
+// ── POST /payments/initiate-misc-fee ─────────────────────────
+// Student pays a pending misc/exam fee online via PayU.
+// body: { application_id, payment_id }
+router.post('/initiate-misc-fee', async (req, res) => {
+  const { application_id, payment_id } = req.body;
+  const appId = parseInt(application_id);
+  const pmtId = parseInt(payment_id);
+
+  if (!appId || !pmtId) {
+    return res.status(400).json({ success: false, message: 'application_id and payment_id are required.' });
+  }
+
+  try {
+    // Fetch the pending payment and verify it belongs to this student's application
+    const pmtRes = await db.request()
+      .input('pmtId', mssql.Int, pmtId)
+      .input('appId', mssql.Int, appId)
+      .query(`
+        SELECT p.id, p.payment_type, p.amount, p.status, p.gateway_txnid, p.notes,
+               a.student_id, a.college_id,
+               s.full_name AS student_name, s.email AS student_email, s.phone AS student_phone
+        FROM payments p
+        JOIN applications a ON a.id = p.application_id
+        JOIN students s ON s.id = a.student_id
+        WHERE p.id = @pmtId AND p.application_id = @appId
+          AND p.payment_type IN ('misc_fee','exam_fee')
+          AND p.status = 'pending'
+      `);
+
+    if (!pmtRes.recordset.length) {
+      return res.status(404).json({ success: false, message: 'Pending misc/exam payment not found for this application.' });
+    }
+    const pmt = pmtRes.recordset[0];
+
+    // Verify the authenticated student owns this application
+    if (req.user.role === 'student' && req.user.id !== pmt.student_id) {
+      return res.status(403).json({ success: false, message: 'Access denied.' });
+    }
+
+    const amount      = parseFloat(pmt.amount);
+    const paymentType = pmt.payment_type;
+
+    // Generate a new unique txnid for PayU and update the pending payment row
+    const txnid = payU.generateTxnId(appId, paymentType);
+
+    await db.request()
+      .input('pmtId',  mssql.Int,      pmtId)
+      .input('txnid',  mssql.NVarChar, txnid)
+      .query(`UPDATE payments SET gateway_txnid = @txnid, gateway = 'payu' WHERE id = @pmtId AND status = 'pending'`);
+
+    const description    = paymentType === 'misc_fee' ? 'MiscFee' : 'ExamFee';
+    const safeProductinfo = description;
+    const safeFirstname   = ((pmt.student_name || '').split(' ')[0] || 'Student').replace(/[^a-zA-Z0-9 ]/g, '').trim() || 'Student';
+    const safeEmail       = (pmt.student_email || '').trim();
+    const rawPhone        = String(pmt.student_phone || '').replace(/\D/g, '');
+    const safePhone       = rawPhone.length >= 10 ? rawPhone.slice(-10) : rawPhone.padEnd(10, '0');
+
+    const { endpoint, fields } = payU.buildPaymentFields({
+      txnid,
+      amount,
+      productinfo: safeProductinfo,
+      firstname:   safeFirstname,
+      email:       safeEmail,
+      phone:       safePhone,
+      surl:        `${process.env.API_BASE_URL || 'http://localhost:5000'}/payments/payu-return`,
+      furl:        `${process.env.API_BASE_URL || 'http://localhost:5000'}/payments/payu-return`,
+      udf1:        String(appId),
+      udf2:        paymentType,
+      udf3:        '',
+      udf4:        '',
+      udf5:        '',
+    });
+
+    return res.json({
+      success: true,
+      data: {
+        endpoint,
+        fields,
+        amount_inr:     amount,
+        payment_type:   paymentType,
+        application_id: appId,
+        description,
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, 'initiate-misc-fee error');
+    return res.status(500).json({ success: false, message: 'Failed to initiate misc fee payment.' });
+  }
+});
+
 // ── POST /payments/payu-return ────────────────────────────────
 // PayU redirects the browser here after success OR failure.
 // Registered BEFORE auth middleware — PayU has no JWT.
@@ -920,6 +1150,8 @@ async function handlePayUReturn(req, res) {
       // await logActivity(appId, 'submitted', 'student', null);
       const regParam = result.regNum ? `&reg=${encodeURIComponent(result.regNum)}` : '';
       return res.redirect(frontendUrl(`/payment-result?status=success&app_id=${appId}&payment_type=application_fee${regParam}${viaParam}`));
+    } else if (payType === 'misc_fee' || payType === 'exam_fee') {
+      return res.redirect(frontendUrl(`/payment-result?status=success&app_id=${appId}&payment_type=${payType}`));
     } else {
       const { totalPaid, totalFee, firstPaid, fullyPaid } = result;
       if (firstPaid || fullyPaid) {

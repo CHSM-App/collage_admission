@@ -7,6 +7,7 @@ import MyApplications from './MyApplications.jsx'
 import StudentDocuments from './StudentDocuments.jsx'
 import ApplyForm from './ApplyForm.jsx'
 import AllReceipts from './AllReceipts.jsx'
+import StudentFeesPage from './StudentFeesPage.jsx'
 import StudentNotifications from './StudentNotifications.jsx'
 
 export default function StudentDashboard() {
@@ -21,6 +22,7 @@ export default function StudentDashboard() {
   if (section === 'applications') return <MyApplications />
   if (section === 'documents') return <StudentDocuments />
   if (section === 'receipts') return <AllReceipts />
+  if (section === 'fees') return <StudentFeesPage />
   if (section === 'notifications') return <StudentNotifications />
   if (section === 'apply' && applyPeriodId && applyCollegeId) {
     return <ApplyForm periodId={applyPeriodId} collegeId={applyCollegeId} />

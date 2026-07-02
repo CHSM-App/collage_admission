@@ -6,7 +6,7 @@ import { deleteApplication } from '../../../services/applicationService.js'
 import { useMyApplications } from '../hooks/useMyApplications.js'
 import { useSortableTable } from '../../../shared/hooks/useSortableTable.js'
 import SubjectSelection from './SubjectSelection.jsx'
-import CollegeFeePayment from './CollegeFeePayment.jsx'
+import StudentFeesMaster from './StudentFeesMaster.jsx'
 import PaymentReceipts from './PaymentReceipts.jsx'
 import ApplicationPrintView from './ApplicationPrintView.jsx'
 import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
@@ -67,10 +67,14 @@ export default function MyApplications() {
         <button onClick={() => setFeePayApp(null)} className="text-sm text-blue-600 hover:underline">
           ← Back to My Applications
         </button>
-        <CollegeFeePayment
+        <div>
+          <p className="text-sm font-semibold uppercase tracking-wide text-emerald-600">Student portal</p>
+          <h1 className="mt-1 text-2xl font-bold text-slate-950">Fee Details</h1>
+          <p className="text-sm text-slate-500 mt-0.5">{feePayApp.college_name} · {feePayApp.course_name} · {feePayApp.academic_year}</p>
+        </div>
+        <StudentFeesMaster
           application={feePayApp}
           onDone={() => { setFeePayApp(null); fetchApps() }}
-          onCancel={() => setFeePayApp(null)}
         />
       </section>
     )
@@ -249,6 +253,7 @@ export default function MyApplications() {
                               app={app}
                               navigate={navigate}
                               setFeePayApp={setFeePayApp}
+                              setReceiptsAppId={setReceiptsAppId}
                               setSelectSubjectsApp={setSelectSubjectsApp}
                               fetchApps={fetchApps}
                             />
@@ -349,6 +354,7 @@ function MobileCard({ app, expandedId, setExpandedId, navigate, setFeePayApp, se
             app={app}
             navigate={navigate}
             setFeePayApp={setFeePayApp}
+            setReceiptsAppId={setReceiptsAppId}
             setSelectSubjectsApp={setSelectSubjectsApp}
             fetchApps={fetchApps}
           />
@@ -372,7 +378,7 @@ function MobileCard({ app, expandedId, setExpandedId, navigate, setFeePayApp, se
 const btn = 'rounded-md border border-slate-300 bg-white px-4 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition'
 const btnPrimary = 'rounded-md bg-slate-800 px-4 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 transition'
 
-function AppDetail({ app, navigate, setFeePayApp, setSelectSubjectsApp, fetchApps }) {
+function AppDetail({ app, navigate, setFeePayApp, setReceiptsAppId, setSelectSubjectsApp, fetchApps }) {
   return (
     <div className="space-y-2">
       {app.status === 'correction_requested' && (
@@ -401,7 +407,7 @@ function AppDetail({ app, navigate, setFeePayApp, setSelectSubjectsApp, fetchApp
       {app.status === 'confirmed' && (
         <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-3 space-y-2">
           <p className="text-sm font-semibold text-slate-800">Documents verified! Please pay the college fee to confirm your admission.</p>
-          <button onClick={() => setFeePayApp(app)} className={btnPrimary}>Pay College Fee</button>
+          <button onClick={() => setFeePayApp(app)} className={btnPrimary}>View Fee &amp; Pay</button>
         </div>
       )}
 
@@ -422,7 +428,7 @@ function AppDetail({ app, navigate, setFeePayApp, setSelectSubjectsApp, fetchApp
             {hasMore && <p className="text-xs text-slate-500">Paid ₹{paid.toLocaleString('en-IN')} of ₹{total.toLocaleString('en-IN')} total.</p>}
             <div className="flex gap-2 flex-wrap">
               <button onClick={() => setFeePayApp(app)} className={btnPrimary}>
-                {hasMore && remaining > 0.01 ? 'Pay Remaining Fee' : 'View Fee & Receipts'}
+                {hasMore && remaining > 0.01 ? 'View Fee & Pay' : 'View Fee & Receipts'}
               </button>
               <button onClick={() => setSelectSubjectsApp(app)} className={btn}>Select Subjects</button>
             </div>
@@ -450,7 +456,7 @@ function AppDetail({ app, navigate, setFeePayApp, setSelectSubjectsApp, fetchApp
             )}
             <div className="flex gap-2 flex-wrap">
               {remaining > 0.01 && (
-                <button onClick={() => setFeePayApp(app)} className={btnPrimary}>Pay Remaining Fee</button>
+                <button onClick={() => setFeePayApp(app)} className={btnPrimary}>View Fee &amp; Pay</button>
               )}
               <button onClick={() => setSelectSubjectsApp(app)} className={remaining > 0.01 ? btn : btnPrimary}>Select Subjects</button>
             </div>
@@ -461,7 +467,10 @@ function AppDetail({ app, navigate, setFeePayApp, setSelectSubjectsApp, fetchApp
       {app.status === 'enrolled' && (
         <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-3 space-y-2 text-sm text-slate-700">
           <p className="font-semibold">Enrollment complete. Welcome to {app.college_name}!</p>
-          <button onClick={() => setSelectSubjectsApp(app)} className={btn}>View / Update Subjects</button>
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={() => setFeePayApp(app)} className={btn}>Fee Details</button>
+            <button onClick={() => setSelectSubjectsApp(app)} className={btn}>View / Update Subjects</button>
+          </div>
         </div>
       )}
 

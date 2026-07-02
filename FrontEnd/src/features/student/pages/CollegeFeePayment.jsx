@@ -3,10 +3,11 @@
  * - If an installment plan is set: shows current instalment amount (fixed, no input).
  * - If no installment plan: shows remaining balance with a free-entry amount input.
  */
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useCollegePayment } from '../../../shared/hooks/useCollegePayment.js'
 import Button from '../../../shared/components/Button.jsx'
 import PaymentReceipts from './PaymentReceipts.jsx'
+import { getMiscFeeStatus, initiateMiscFeePayment } from '../../../services/paymentService.js'
 
 export default function CollegeFeePayment({ application, onDone, onCancel }) {
   const [showReceipts, setShowReceipts] = useState(false)
@@ -21,6 +22,46 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
     payOnline,
     setPayError,
   } = useCollegePayment(application.id)
+
+  // Misc / Exam fee state
+  const [miscStatus, setMiscStatus]     = useState(null)
+  const [miscLoading, setMiscLoading]   = useState(true)
+  const [miscPaying, setMiscPaying]     = useState(null) // payment_id being paid
+  const [miscPayErr, setMiscPayErr]     = useState('')
+  const [showMiscPaid, setShowMiscPaid] = useState(false)
+
+  useEffect(() => {
+    getMiscFeeStatus(application.id)
+      .then(r => setMiscStatus(r.data.data))
+      .catch(() => setMiscStatus(null))
+      .finally(() => setMiscLoading(false))
+  }, [application.id])
+
+  async function handleMiscPay(paymentId) {
+    setMiscPayErr('')
+    setMiscPaying(paymentId)
+    try {
+      const r = await initiateMiscFeePayment({ application_id: application.id, payment_id: paymentId })
+      const { endpoint, fields } = r.data.data
+      // Build and submit form to PayU
+      const form = document.createElement('form')
+      form.method = 'POST'
+      form.action = endpoint
+      Object.entries(fields).forEach(([k, v]) => {
+        const input = document.createElement('input')
+        input.type = 'hidden'
+        input.name = k
+        input.value = v
+        form.appendChild(input)
+      })
+      document.body.appendChild(form)
+      form.submit()
+    } catch (e) {
+      const msg = e?.response?.data?.message || 'Failed to initiate payment.'
+      setMiscPayErr(msg)
+      setMiscPaying(null)
+    }
+  }
 
   const fs = feeStatus
 
@@ -110,6 +151,35 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
               </div>
             </div>
 
+            {/* Fee head breakdown */}
+            {fs.breakdown?.filter(h => (h.fees_type || '').toLowerCase() !== 'platform').length > 0 && (
+              <div className="rounded-lg border border-slate-200 overflow-hidden">
+                <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
+                  <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Fee Heads</p>
+                </div>
+                <table className="w-full text-xs">
+                  <tbody className="divide-y divide-slate-100">
+                    {fs.breakdown.filter(h => (h.fees_type || '').toLowerCase() !== 'platform').map(h => (
+                      <tr key={h.fees_code} className={h.status === 'paid' ? 'bg-emerald-50/40' : ''}>
+                        <td className="px-3 py-2 text-slate-700 font-medium">{h.fees_head}</td>
+                        <td className="px-3 py-2 text-right font-mono text-slate-800 font-semibold">
+                          ₹{Number(h.amount).toLocaleString('en-IN')}
+                        </td>
+                        <td className="px-3 py-2 text-right w-20">
+                          {h.status === 'paid'
+                            ? <span className="text-xs font-semibold text-emerald-700 bg-emerald-100 rounded-full px-2 py-0.5">Paid</span>
+                            : h.status === 'partial'
+                            ? <span className="text-xs font-semibold text-amber-700 bg-amber-100 rounded-full px-2 py-0.5">Partial</span>
+                            : <span className="text-xs font-semibold text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">Pending</span>
+                          }
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             {/* Installment plan summary */}
             {hasInstallments && !fullyPaid && (
               <InstallmentSummary installments={fs.installments} totalPaid={fs.total_paid} />
@@ -187,6 +257,82 @@ export default function CollegeFeePayment({ application, onDone, onCancel }) {
         {fullyPaid && (
           <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800">
             All fees have been paid. Your application will be processed for roll number assignment.
+          </div>
+        )}
+
+        {/* Misc / Exam Fees section */}
+        {!miscLoading && miscStatus && (miscStatus.pending?.length > 0 || miscStatus.paid?.length > 0) && (
+          <div className="border-t border-slate-100 pt-3 space-y-3">
+            {miscStatus.pending?.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-bold text-slate-700">Misc / Exam Fees Due</p>
+                {miscPayErr && (
+                  <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{miscPayErr}</p>
+                )}
+                {miscStatus.pending.map(fee => (
+                  <div key={fee.id} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
+                          {fee.payment_type === 'misc_fee' ? 'Misc Fee' : 'Exam Fee'}
+                        </p>
+                        {fee.fee_heads?.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {fee.fee_heads.map(h => (
+                              <span key={h.fees_code} className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700">{h.fees_head}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <p className="font-bold text-amber-900 whitespace-nowrap">₹{Number(fee.amount).toLocaleString('en-IN')}</p>
+                    </div>
+                    <button
+                      onClick={() => handleMiscPay(fee.id)}
+                      disabled={!!miscPaying}
+                      className="w-full rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 transition disabled:opacity-50"
+                    >
+                      {miscPaying === fee.id ? 'Redirecting…' : 'Pay Now'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {miscStatus.paid?.length > 0 && (
+              <div className="space-y-2">
+                <button
+                  onClick={() => setShowMiscPaid(v => !v)}
+                  className="flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900 transition"
+                >
+                  <span>{showMiscPaid ? '▼' : '▶'}</span>
+                  Misc / Exam Receipts ({miscStatus.paid.length})
+                </button>
+                {showMiscPaid && (
+                  <div className="space-y-2">
+                    {miscStatus.paid.map(fee => (
+                      <div key={fee.id} className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <p className="text-xs font-semibold text-emerald-800 uppercase tracking-wide">
+                              {fee.payment_type === 'misc_fee' ? 'Misc Fee' : 'Exam Fee'}
+                              <span className="ml-2 rounded-full bg-emerald-200 text-emerald-700 px-2 py-0.5 text-xs font-bold">Paid</span>
+                            </p>
+                            {fee.fee_heads?.length > 0 && (
+                              <div className="flex flex-wrap gap-1">
+                                {fee.fee_heads.map(h => (
+                                  <span key={h.fees_code} className="rounded bg-emerald-100 px-1.5 py-0.5 text-xs text-emerald-700">{h.fees_head}</span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <p className="font-bold text-emerald-700 whitespace-nowrap">₹{Number(fee.amount).toLocaleString('en-IN')}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

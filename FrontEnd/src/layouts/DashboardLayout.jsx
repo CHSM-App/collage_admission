@@ -6,7 +6,6 @@ import { DASHBOARD_PATHS } from '../app/routePaths.js'
 import Button from '../shared/components/Button.jsx'
 import { useAuth } from '../features/auth/hooks/useAuth.js'
 import { useNotifications } from '../features/student/hooks/useNotifications.js'
-import { studentHasPayments } from '../services/paymentService.js'
 
 const roleLabels = {
   student: 'Student Portal',
@@ -21,6 +20,8 @@ const sidebarItems = {
     { label: 'Browse & Apply', to: `${DASHBOARD_PATHS.student}?section=browse` },
     { label: 'My Applications',to: `${DASHBOARD_PATHS.student}?section=applications` },
     // { label: 'My Documents',   to: `${DASHBOARD_PATHS.student}?section=documents` },
+    { label: 'Fee Details',    to: `${DASHBOARD_PATHS.student}?section=fees` },
+    { label: 'Fee Receipts',   to: `${DASHBOARD_PATHS.student}?section=receipts` },
     { label: 'Notifications',  to: `${DASHBOARD_PATHS.student}?section=notifications` },
   ],
   college: [
@@ -39,6 +40,7 @@ const sidebarItems = {
     { label: 'Division Master',   to: `${DASHBOARD_PATHS.college}?section=master-division`,      perm: 'masters', group: 'masters' },
     { label: 'Fees Master',       to: `${DASHBOARD_PATHS.college}?section=master-fees`,          perm: 'masters', group: 'masters' },
     { label: 'Req. Documents',    to: `${DASHBOARD_PATHS.college}?section=master-documents`,     perm: 'masters', group: 'masters' },
+    { label: 'Category Master',   to: `${DASHBOARD_PATHS.college}?section=master-categories`,    perm: 'masters', group: 'masters' },
     { label: 'Certificates',      to: null, group: 'certificates' },
     { label: 'Certificates',      to: `${DASHBOARD_PATHS.college}?section=certificates`,         perm: 'certificates', group: 'certificates' },
   ],
@@ -56,7 +58,6 @@ export default function DashboardLayout() {
   const location = useLocation()
   const navigate  = useNavigate()
   const { user, role, logout } = useAuth()
-  const [hasPayments, setHasPayments] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [collapsedGroups, setCollapsedGroups] = useState(() => {
     try {
@@ -113,18 +114,8 @@ export default function DashboardLayout() {
     setSidebarOpen(false)
   }, [location.pathname, location.search])
 
-  useEffect(() => {
-    if (role === 'student' && user?.id) {
-      studentHasPayments(user.id)
-        .then(r => setHasPayments(r.data.data?.has_payments || false))
-        .catch(() => {})
-    }
-  }, [role, user?.id])
-
   const baseItems = sidebarItems[role] || []
-  let currentItems = role === 'student' && hasPayments
-    ? [...baseItems, { label: 'My Receipts', to: `${DASHBOARD_PATHS.student}?section=receipts` }]
-    : baseItems
+  let currentItems = baseItems
 
   // For staff: hide items they have no permission for at all
   if (role === 'college' && isStaff) {

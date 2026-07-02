@@ -232,7 +232,7 @@ router.get('/:collegeId/students/search', async (req, res) => {
 // ── Application Inbox ───────────────────────────────────────
 
 router.get('/:collegeId/applications', requirePerm('review_application'), async (req, res) => {
-  const { status, course_id, year_of_study, pending_link } = req.query;
+  const { status, course_id, year_of_study, pending_link, division } = req.query;
   const { page, limit, offset } = parsePage(req.query);
 
   try {
@@ -265,6 +265,10 @@ router.get('/:collegeId/applications', requirePerm('review_application'), async 
       where += ' AND a.year_of_study = @yr';
       extraInputs.push(r => r.input('yr', parseInt(year_of_study)));
     }
+    if (division) {
+      where += ' AND a.app_division = @div';
+      extraInputs.push(r => r.input('div', division));
+    }
     // Filter: only applications that have an active (unused, unexpired) payment link
     if (pending_link === '1') {
       where += ` AND EXISTS (
@@ -291,7 +295,7 @@ router.get('/:collegeId/applications', requirePerm('review_application'), async 
       makeRequest().query(`
         SELECT
           a.id, a.registration_number, a.year_of_study, a.academic_year,
-          a.status, a.submitted_at, a.roll_number, a.course_id,
+          a.status, a.submitted_at, a.roll_number, a.course_id, a.app_division,
           s.full_name AS student_name, s.email AS student_email, s.phone,
           COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name,
           CASE WHEN EXISTS (
@@ -613,7 +617,7 @@ async function computeFeeForApp(appId, collegeId, divisionOverride) {
   if (!r.recordset.length) return null;
   const a = r.recordset[0];
   const yearMap = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' };
-  return feeSvc.compute({
+  const result = await feeSvc.compute({
     collegeId,
     facultyMasterId: a.course_id,
     yearLevel:       yearMap[a.year_of_study] || null,
@@ -623,6 +627,21 @@ async function computeFeeForApp(appId, collegeId, divisionOverride) {
     academicYear:    a.academic_year || null,
     pool:            db,
   });
+
+  // Exclude Misc and ExamFees — those are collected separately
+  const regularBreakdown = result.breakdown.filter(h => {
+    const t = (h.fees_type || '').toLowerCase();
+    return t !== 'misc' && t !== 'examfees';
+  });
+  const regularTotal   = regularBreakdown.reduce((s, h) => s + (parseFloat(h.amount) || 0), 0);
+
+  return {
+    ...result,
+    breakdown:          regularBreakdown,
+    totalFee:           regularTotal,
+    studentPayable:     regularTotal,
+    reimbursableAmount: 0,
+  };
 }
 
 // GET /:collegeId/applications/:appId/computed-fee?division=A
@@ -694,8 +713,9 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
     if (appRes.recordset.length === 0) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
-    if (appRes.recordset[0].status !== 'doc_verified') {
-      return res.status(400).json({ success: false, message: 'Application must be in doc_verified status to confirm.' });
+    const CONFIRMABLE = ['doc_verified', 'scrutiny_accepted', 'doc_verification_pending'];
+    if (!CONFIRMABLE.includes(appRes.recordset[0].status)) {
+      return res.status(400).json({ success: false, message: 'Application must be accepted before it can be confirmed.' });
     }
 
     // Compute total fee from fees master
@@ -1078,6 +1098,358 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
   }
 });
 
+// ── Misc / Exam fee heads ────────────────────────────────────
+// GET /:collegeId/fees/misc-exam-heads?type=Misc|ExamFees
+router.get('/:collegeId/fees/misc-exam-heads', requirePerm('collect_fees'), async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId);
+  const { type } = req.query;
+
+  try {
+    let typeFilter = `fees_type IN ('Misc','ExamFees')`;
+    if (type === 'Misc')     typeFilter = `fees_type = 'Misc'`;
+    if (type === 'ExamFees') typeFilter = `fees_type = 'ExamFees'`;
+
+    // Misc/Exam heads have a single flat amount (fees_cat1_amount) — no per-category variation
+    const result = await db.request()
+      .input('cid', mssqlShared.Int, collegeId)
+      .query(`
+        SELECT fees_code, fees_head, short_name, fees_type, academic_year,
+               fees_cat1_amount AS amount
+        FROM fees_master
+        WHERE college_id = @cid
+          AND ${typeFilter}
+          AND is_active = 1
+        ORDER BY sequence_auto_fees, fees_head
+      `);
+
+    const data = result.recordset.map(row => ({
+      fees_code:    row.fees_code,
+      fees_head:    row.fees_head,
+      short_name:   row.short_name,
+      fees_type:    row.fees_type,
+      academic_year: row.academic_year,
+      amount:       parseFloat(row.amount) || 0,
+    }));
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    logger.error({ err }, 'misc-exam-heads error');
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── Create misc / exam fee for online payment ────────────────
+// POST /:collegeId/applications/:appId/create-misc-fee
+// body: { payment_type: 'misc_fee'|'exam_fee', fee_codes: [], note? }
+router.post('/:collegeId/applications/:appId/create-misc-fee', requirePerm('collect_fees'), async (req, res) => {
+  const { payment_type, fee_codes, note, amount: amountOverride } = req.body;
+  const appId     = parseInt(req.params.appId);
+  const collegeId = parseInt(req.params.collegeId);
+
+  if (!['misc_fee', 'exam_fee'].includes(payment_type)) {
+    return res.status(400).json({ success: false, message: 'payment_type must be misc_fee or exam_fee.' });
+  }
+  if (!Array.isArray(fee_codes) || fee_codes.length === 0) {
+    return res.status(400).json({ success: false, message: 'fee_codes must be a non-empty array.' });
+  }
+
+  try {
+    const appRes = await db.request()
+      .input('id',  mssqlShared.Int, appId)
+      .input('col', mssqlShared.Int, collegeId)
+      .query(`SELECT id, status FROM applications WHERE id = @id AND college_id = @col`);
+
+    if (!appRes.recordset.length) {
+      return res.status(404).json({ success: false, message: 'Application not found.' });
+    }
+    const app = appRes.recordset[0];
+    if (!['confirmed', 'fees_paid', 'roll_assigned', 'enrolled'].includes(app.status)) {
+      return res.status(400).json({ success: false, message: 'Application must be confirmed, fees_paid, roll_assigned, or enrolled.' });
+    }
+
+    // Fetch fee heads for the given fee_codes from fees_master
+    const feeCodesParam = fee_codes.map(c => parseInt(c)).filter(c => !isNaN(c));
+    if (feeCodesParam.length === 0) {
+      return res.status(400).json({ success: false, message: 'fee_codes contains no valid integers.' });
+    }
+    const feeCodesStr = feeCodesParam.join(',');
+    const headsRes = await db.request()
+      .input('cid', mssqlShared.Int, collegeId)
+      .query(`
+        SELECT fees_code, fees_head, fees_cat1_amount AS amount
+        FROM fees_master
+        WHERE college_id = @cid
+          AND fees_code IN (${feeCodesStr})
+          AND is_active = 1
+      `);
+
+    if (!headsRes.recordset.length) {
+      return res.status(400).json({ success: false, message: 'No matching fee heads found.' });
+    }
+
+    const feeHeads = headsRes.recordset.map(r => ({
+      fees_code: r.fees_code,
+      fees_head: r.fees_head,
+      amount:    parseFloat(r.amount) || 0,
+    }));
+    const autoAmount = feeHeads.reduce((s, h) => s + h.amount, 0);
+    const amount = amountOverride != null && parseFloat(amountOverride) > 0
+      ? parseFloat(amountOverride)
+      : autoAmount;
+
+    if (amount <= 0) {
+      return res.status(400).json({ success: false, message: 'Total amount must be greater than zero.' });
+    }
+
+    const notesJson = JSON.stringify({
+      fee_codes: feeCodesParam,
+      ...(note ? { note } : {}),
+    });
+
+    const actor  = String(req.user.staff_id || req.user.id);
+    const userId = req.user.staff_id || req.user.id;
+    // Use a placeholder txnid — will be replaced by PayU txnid when student pays
+    const pendingTxnid = `MISC-PENDING-${appId}-${Date.now()}`;
+
+    await db.request()
+      .input('appId',   mssqlShared.Int,      appId)
+      .input('ptype',   mssqlShared.NVarChar,  payment_type)
+      .input('amount',  mssqlShared.Decimal,   amount)
+      .input('txnid',   mssqlShared.NVarChar,  pendingTxnid)
+      .input('userId',  mssqlShared.Int,       userId)
+      .input('actor',   mssqlShared.NVarChar,  actor)
+      .input('notes',   mssqlShared.NVarChar,  notesJson)
+      .query(`
+        INSERT INTO payments
+          (application_id, payment_type, amount, status, gateway,
+           gateway_txnid, paid_by, paid_by_user_id, created_by, notes)
+        VALUES
+          (@appId, @ptype, @amount, 'pending', 'online',
+           @txnid, 'student', @userId, @actor, @notes)
+      `);
+
+    const idRes = await db.request().query(`SELECT SCOPE_IDENTITY() AS id`);
+    const paymentId = idRes.recordset[0]?.id;
+
+    return res.json({
+      success: true,
+      data: {
+        payment_id: paymentId,
+        amount,
+        fee_heads: feeHeads,
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, 'create-misc-fee error');
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── Record misc / exam fee cash payment ──────────────────────
+// POST /:collegeId/applications/:appId/record-misc-payment
+// body: { payment_type: 'misc_fee'|'exam_fee', amount, fee_codes?: [], note? }
+router.post('/:collegeId/applications/:appId/record-misc-payment', requirePerm('collect_fees'), async (req, res) => {
+  const { payment_type, amount, fee_codes, note } = req.body;
+  const amt = parseFloat(amount);
+
+  if (!['misc_fee', 'exam_fee'].includes(payment_type)) {
+    return res.status(400).json({ success: false, message: 'payment_type must be misc_fee or exam_fee.' });
+  }
+  if (!amt || amt <= 0) {
+    return res.status(400).json({ success: false, message: 'Amount must be a positive number.' });
+  }
+
+  const appId     = parseInt(req.params.appId);
+  const collegeId = parseInt(req.params.collegeId);
+
+  try {
+    const appRes = await db.request()
+      .input('id',  mssqlShared.Int, appId)
+      .input('col', mssqlShared.Int, collegeId)
+      .query(`SELECT id, status FROM applications WHERE id = @id AND college_id = @col`);
+
+    if (!appRes.recordset.length) {
+      return res.status(404).json({ success: false, message: 'Application not found.' });
+    }
+    const app = appRes.recordset[0];
+    if (!['confirmed', 'fees_paid', 'roll_assigned', 'enrolled'].includes(app.status)) {
+      return res.status(400).json({ success: false, message: 'Application must be confirmed, fees_paid, roll_assigned, or enrolled.' });
+    }
+
+    const actor  = String(req.user.staff_id || req.user.id);
+    const userId = req.user.staff_id || req.user.id;
+
+    // Build notes JSON if fee_codes provided
+    const notesJson = (() => {
+      const parts = {};
+      if (fee_codes && Array.isArray(fee_codes) && fee_codes.length) parts.fee_codes = fee_codes;
+      if (note) parts.note = note;
+      return Object.keys(parts).length ? JSON.stringify(parts) : null;
+    })();
+
+    // Check if payments table has a notes column
+    const colCheck = await db.request().query(`
+      SELECT COUNT(*) AS cnt
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_NAME = 'payments' AND COLUMN_NAME = 'notes'
+    `);
+    const hasNotes = colCheck.recordset[0].cnt > 0;
+
+    if (hasNotes && notesJson) {
+      await db.request()
+        .input('appId',   mssqlShared.Int,      appId)
+        .input('ptype',   mssqlShared.NVarChar,  payment_type)
+        .input('amount',  mssqlShared.Decimal,   amt)
+        .input('userId',  mssqlShared.Int,       userId)
+        .input('actor',   mssqlShared.NVarChar,  actor)
+        .input('notes',   mssqlShared.NVarChar,  notesJson)
+        .query(`
+          INSERT INTO payments
+            (application_id, payment_type, amount, status, gateway,
+             gateway_txnid, gateway_payment_id, completed_at, paid_by, paid_by_user_id, created_by, notes)
+          VALUES
+            (@appId, @ptype, @amount, 'success', 'cash',
+             CONCAT('CASH-MISC-', CAST(@appId AS NVARCHAR), '-', CAST(CHECKSUM(NEWID()) AS NVARCHAR)),
+             CONCAT('CASH-MISC-', FORMAT(GETDATE(),'yyyyMMddHHmmss')),
+             GETDATE(), 'college', @userId, @actor, @notes)
+        `);
+    } else {
+      await db.request()
+        .input('appId',   mssqlShared.Int,      appId)
+        .input('ptype',   mssqlShared.NVarChar,  payment_type)
+        .input('amount',  mssqlShared.Decimal,   amt)
+        .input('userId',  mssqlShared.Int,       userId)
+        .input('actor',   mssqlShared.NVarChar,  actor)
+        .query(`
+          INSERT INTO payments
+            (application_id, payment_type, amount, status, gateway,
+             gateway_txnid, gateway_payment_id, completed_at, paid_by, paid_by_user_id, created_by)
+          VALUES
+            (@appId, @ptype, @amount, 'success', 'cash',
+             CONCAT('CASH-MISC-', CAST(@appId AS NVARCHAR), '-', CAST(CHECKSUM(NEWID()) AS NVARCHAR)),
+             CONCAT('CASH-MISC-', FORMAT(GETDATE(),'yyyyMMddHHmmss')),
+             GETDATE(), 'college', @userId, @actor)
+        `);
+    }
+
+    return res.json({ success: true, message: 'Payment recorded.', data: { amount: amt } });
+  } catch (err) {
+    logger.error({ err }, 'record-misc-payment error');
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── Misc / Exam fee receipts list ────────────────────────────
+// GET /:collegeId/misc-exam-receipts?type=misc_fee|exam_fee&q=&page=&limit=
+router.get('/:collegeId/misc-exam-receipts', requirePerm('collect_fees'), async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId);
+  const { type, q } = req.query;
+  const { page, limit, offset } = parsePage(req.query);
+
+  try {
+    const pool3 = await db;
+    const extraInputs3 = [];
+
+    let typeFilter = `p.payment_type IN ('misc_fee','exam_fee')`;
+    if (type === 'misc_fee')  typeFilter = `p.payment_type = 'misc_fee'`;
+    if (type === 'exam_fee')  typeFilter = `p.payment_type = 'exam_fee'`;
+
+    let whereQ = '';
+    if (q) {
+      whereQ = ` AND (s.full_name LIKE @q OR s.phone LIKE @q OR a.registration_number LIKE @q)`;
+      extraInputs3.push(r => r.input('q', `%${q.trim()}%`));
+    }
+
+    // Check if notes column exists (cached once per process ideally, but simple check here)
+    const colCheck3 = await db.request().query(`
+      SELECT COUNT(*) AS cnt
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_NAME = 'payments' AND COLUMN_NAME = 'notes'
+    `);
+    const hasNotes3 = colCheck3.recordset[0].cnt > 0;
+    const notesSelect = hasNotes3 ? ', p.notes' : ', NULL AS notes';
+
+    const joins3 = `
+      FROM payments p
+      JOIN applications a ON a.id = p.application_id
+      JOIN students s ON s.id = a.student_id
+      LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+    `;
+    const where3 = `
+      WHERE a.college_id = @col
+        AND ${typeFilter}
+        ${whereQ}
+    `;
+
+    function makeRequest3() {
+      const r = pool3.request().input('col', collegeId);
+      extraInputs3.forEach(fn => fn(r));
+      return r;
+    }
+
+    const [countRes3, dataRes3] = await Promise.all([
+      makeRequest3().query(`SELECT COUNT(*) AS total ${joins3} ${where3}`),
+      makeRequest3().query(`
+        SELECT
+          p.id           AS payment_id,
+          a.id           AS application_id,
+          a.registration_number,
+          a.year_of_study,
+          s.full_name    AS student_name,
+          s.phone        AS student_phone,
+          COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name,
+          p.payment_type,
+          p.amount,
+          p.status,
+          p.completed_at,
+          p.gateway
+          ${notesSelect}
+        ${joins3} ${where3}
+        ORDER BY p.completed_at DESC
+        ${paginateQuery(offset, limit)}
+      `),
+    ]);
+
+    // Resolve fee_codes from notes JSON → fee head names
+    const rows3 = dataRes3.recordset;
+    const allFeeCodes = new Set();
+    rows3.forEach(r => {
+      try {
+        const parsed = r.notes ? JSON.parse(r.notes) : {};
+        if (Array.isArray(parsed.fee_codes)) parsed.fee_codes.forEach(c => allFeeCodes.add(parseInt(c)));
+      } catch { /* ignore */ }
+    });
+
+    let feeHeadMap = {}; // fees_code → { fees_head, short_name }
+    if (allFeeCodes.size > 0) {
+      const codesArr = [...allFeeCodes].join(',');
+      const fhRes = await db.request()
+        .input('cid', mssqlShared.Int, collegeId)
+        .query(`SELECT fees_code, fees_head, short_name FROM fees_master WHERE college_id=@cid AND fees_code IN (${codesArr})`);
+      fhRes.recordset.forEach(h => { feeHeadMap[h.fees_code] = h; });
+    }
+
+    const enrichedRows = rows3.map(r => {
+      let fee_heads = [];
+      try {
+        const parsed = r.notes ? JSON.parse(r.notes) : {};
+        if (Array.isArray(parsed.fee_codes)) {
+          fee_heads = parsed.fee_codes
+            .map(c => feeHeadMap[parseInt(c)])
+            .filter(Boolean)
+            .map(h => ({ fees_code: h.fees_code, fees_head: h.fees_head, short_name: h.short_name }));
+        }
+      } catch { /* ignore */ }
+      return { ...r, fee_heads };
+    });
+
+    return res.json(paginatedResponse(enrichedRows, countRes3.recordset[0].total, page, limit));
+  } catch (err) {
+    logger.error({ err }, 'misc-exam-receipts error');
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
 // ── Generate roll numbers (batch) ───────────────────────────
 router.post('/:collegeId/roll-numbers/generate', requirePerm('assign_subjects'), async (req, res) => {
   const { course_id, year_of_study } = req.body;
@@ -1191,6 +1563,7 @@ router.get('/:collegeId/fee-receipts', requirePerm('collect_fees'), async (req, 
       WHERE a.college_id = @col
         AND a.status NOT IN ('draft','submitted','under_review','correction_requested','correction_done',
                              'scrutiny_accepted','doc_verification_pending','rejected','cancelled')
+        AND (a.fee_total_amount > 0 OR ISNULL(psum.total_paid, 0) > 0)
     `;
     const pool2 = await db;
     const collegeId2 = parseInt(req.params.collegeId);
@@ -1236,6 +1609,8 @@ router.get('/:collegeId/fee-receipts', requirePerm('collect_fees'), async (req, 
           a.status AS application_status,
           a.roll_number,
           a.fee_total_amount,
+          a.app_category,
+          a.app_special_status,
           s.full_name  AS student_name,
           s.phone      AS student_phone,
           COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name,
@@ -1554,12 +1929,14 @@ router.get('/:collegeId/reports/fees-by-head', requirePerm('collect_fees'), asyn
         // Fallback: if classwise INNER JOIN returned nothing, fetch fees_master heads
         // directly for this AY (proportional split using master amounts).
         if (breakdown.length === 0 && pmt.app_academic_year) {
+          const fbSlab = feeResult?.feesCategorySlab || 1;
           const fbRes = await db.request()
             .input('cid', mssqlShared.Int, collegeId)
             .input('ay',  mssqlShared.NVarChar, pmt.app_academic_year)
             .query(`
               SELECT fees_code, fees_head, short_name, fees_type, is_refundable,
-                     fees_cat1_amount AS amount
+                     fees_cat1_amount, fees_cat2_amount, fees_cat3_amount, fees_cat4_amount,
+                     fees_cat5_amount, fees_cat6_amount, fees_cat7_amount, fees_cat8_amount
               FROM fees_master
               WHERE college_id = @cid AND academic_year = @ay AND is_active = 1
               ORDER BY sequence_auto_fees
@@ -1570,7 +1947,7 @@ router.get('/:collegeId/reports/fees-by-head', requirePerm('collect_fees'), asyn
             short_name:   r.short_name,
             fees_type:    r.fees_type,
             is_refundable: !!r.is_refundable,
-            amount:       parseFloat(r.amount) || 0,
+            amount:       parseFloat(r[`fees_cat${fbSlab}_amount`] || r.fees_cat1_amount || 0),
           }));
         }
 

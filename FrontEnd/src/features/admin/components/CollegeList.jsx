@@ -12,6 +12,7 @@ import DocumentsMaster from '../../college/pages/masters/DocumentsMaster.jsx'
 import BankMaster      from '../../college/pages/masters/BankMaster.jsx'
 import ClassMaster     from '../../college/pages/masters/ClassMaster.jsx'
 import FeesMaster      from '../../college/pages/masters/FeesMaster.jsx'
+import CategoryMaster  from '../../college/pages/masters/CategoryMaster.jsx'
 
 const TABS = [
   { key: 'roles',      label: 'Roles & Staff' },
@@ -23,6 +24,7 @@ const TABS = [
   { key: 'documents',  label: 'Documents' },
   { key: 'bank',       label: 'Bank' },
   { key: 'fees',       label: 'Fees' },
+  { key: 'categories', label: 'Categories' },
 ]
 
 const LIMIT = 20
@@ -200,7 +202,8 @@ export default function CollegeList() {
           {tab === 'division'  && <DivisionMaster   collegeId={selected.id} />}
           {tab === 'documents' && <DocumentsMaster  collegeId={selected.id} />}
           {tab === 'bank'      && <BankMaster       collegeId={selected.id} />}
-          {tab === 'fees'      && <FeesMaster       collegeId={selected.id} />}
+          {tab === 'fees'       && <FeesMaster      collegeId={selected.id} />}
+          {tab === 'categories' && <CategoryMaster  collegeId={selected.id} />}
         </div>
       </div>
     )

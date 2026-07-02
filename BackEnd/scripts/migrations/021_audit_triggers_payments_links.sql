@@ -71,7 +71,7 @@ END
 GO
 
 -- Recreate payments triggers with PayU column list
-CREATE TRIGGER trg_payments_arc_ins ON payments AFTER INSERT AS
+CREATE OR ALTER TRIGGER trg_payments_arc_ins ON payments AFTER INSERT AS
 BEGIN
   SET NOCOUNT ON;
   BEGIN TRY
@@ -93,7 +93,7 @@ BEGIN
 END
 GO
 
-CREATE TRIGGER trg_payments_arc_upd ON payments AFTER UPDATE AS
+CREATE OR ALTER TRIGGER trg_payments_arc_upd ON payments AFTER UPDATE AS
 BEGIN
   SET NOCOUNT ON;
   BEGIN TRY
@@ -115,7 +115,7 @@ BEGIN
 END
 GO
 
-CREATE TRIGGER trg_payments_arc_del ON payments AFTER DELETE AS
+CREATE OR ALTER TRIGGER trg_payments_arc_del ON payments AFTER DELETE AS
 BEGIN
   SET NOCOUNT ON;
   BEGIN TRY
@@ -148,7 +148,6 @@ IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'payme
     id                  INT,
     token               NVARCHAR(100),
     application_id      INT,
-    college_id          INT,
     payment_type        NVARCHAR(30),
     amount              DECIMAL(10,2),
     gateway_txnid       NVARCHAR(100),
@@ -165,17 +164,15 @@ IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'payme
   );
 GO
 
-IF OBJECT_ID('dbo.trg_payment_link_tokens_arc_ins','TR') IS NOT NULL DROP TRIGGER dbo.trg_payment_link_tokens_arc_ins;
-GO
-CREATE TRIGGER trg_payment_link_tokens_arc_ins ON payment_link_tokens AFTER INSERT AS
+CREATE OR ALTER TRIGGER trg_payment_link_tokens_arc_ins ON payment_link_tokens AFTER INSERT AS
 BEGIN
   SET NOCOUNT ON;
   BEGIN TRY
     INSERT INTO [payment_link_tokens$Arc]
-      (id, token, application_id, college_id, payment_type, amount, gateway_txnid, used, expires_at, created_at,
+      (id, token, application_id, payment_type, amount, gateway_txnid, used, expires_at, created_at,
        created_by, action_type, action_by, machine_mac_address, comments)
     SELECT
-      i.id, i.token, i.application_id, i.college_id, i.payment_type, i.amount, i.gateway_txnid, i.used, i.expires_at, i.created_at,
+      i.id, i.token, i.application_id, i.payment_type, i.amount, i.gateway_txnid, i.used, i.expires_at, i.created_at,
       i.created_by,
       'INSERT',
       CONVERT(NVARCHAR(150), COALESCE(i.created_by, SESSION_CONTEXT(N'app_user_id'))),
@@ -187,21 +184,19 @@ BEGIN
 END
 GO
 
-IF OBJECT_ID('dbo.trg_payment_link_tokens_arc_upd','TR') IS NOT NULL DROP TRIGGER dbo.trg_payment_link_tokens_arc_upd;
-GO
 -- UPDATE trigger fires when:
 --   a) gateway_txnid is stored on first page open
 --   b) used=1 is set after successful payment
 -- Both changes are captured here with the post-update state.
-CREATE TRIGGER trg_payment_link_tokens_arc_upd ON payment_link_tokens AFTER UPDATE AS
+CREATE OR ALTER TRIGGER trg_payment_link_tokens_arc_upd ON payment_link_tokens AFTER UPDATE AS
 BEGIN
   SET NOCOUNT ON;
   BEGIN TRY
     INSERT INTO [payment_link_tokens$Arc]
-      (id, token, application_id, college_id, payment_type, amount, gateway_txnid, used, expires_at, created_at,
+      (id, token, application_id, payment_type, amount, gateway_txnid, used, expires_at, created_at,
        created_by, action_type, action_by, machine_mac_address, comments)
     SELECT
-      i.id, i.token, i.application_id, i.college_id, i.payment_type, i.amount, i.gateway_txnid, i.used, i.expires_at, i.created_at,
+      i.id, i.token, i.application_id, i.payment_type, i.amount, i.gateway_txnid, i.used, i.expires_at, i.created_at,
       i.created_by,
       CASE
         WHEN d.used = 0 AND i.used = 1           THEN 'USED'     -- link consumed after payment
@@ -219,17 +214,15 @@ BEGIN
 END
 GO
 
-IF OBJECT_ID('dbo.trg_payment_link_tokens_arc_del','TR') IS NOT NULL DROP TRIGGER dbo.trg_payment_link_tokens_arc_del;
-GO
-CREATE TRIGGER trg_payment_link_tokens_arc_del ON payment_link_tokens AFTER DELETE AS
+CREATE OR ALTER TRIGGER trg_payment_link_tokens_arc_del ON payment_link_tokens AFTER DELETE AS
 BEGIN
   SET NOCOUNT ON;
   BEGIN TRY
     INSERT INTO [payment_link_tokens$Arc]
-      (id, token, application_id, college_id, payment_type, amount, gateway_txnid, used, expires_at, created_at,
+      (id, token, application_id, payment_type, amount, gateway_txnid, used, expires_at, created_at,
        created_by, action_type, action_by, machine_mac_address, comments)
     SELECT
-      d.id, d.token, d.application_id, d.college_id, d.payment_type, d.amount, d.gateway_txnid, d.used, d.expires_at, d.created_at,
+      d.id, d.token, d.application_id, d.payment_type, d.amount, d.gateway_txnid, d.used, d.expires_at, d.created_at,
       d.created_by,
       'DELETE',
       CONVERT(NVARCHAR(150), SESSION_CONTEXT(N'app_user_id')),
@@ -264,9 +257,7 @@ IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'appli
   );
 GO
 
-IF OBJECT_ID('dbo.trg_activity_log_arc_ins','TR') IS NOT NULL DROP TRIGGER dbo.trg_activity_log_arc_ins;
-GO
-CREATE TRIGGER trg_activity_log_arc_ins ON application_activity_log AFTER INSERT AS
+CREATE OR ALTER TRIGGER trg_activity_log_arc_ins ON application_activity_log AFTER INSERT AS
 BEGIN
   SET NOCOUNT ON;
   BEGIN TRY
@@ -285,9 +276,7 @@ GO
 -- Also add a guard trigger: prevent DELETE from activity log
 -- (activity log must never be pruned — it is a legal audit trail)
 -- ============================================================
-IF OBJECT_ID('dbo.trg_activity_log_no_delete','TR') IS NOT NULL DROP TRIGGER dbo.trg_activity_log_no_delete;
-GO
-CREATE TRIGGER trg_activity_log_no_delete ON application_activity_log INSTEAD OF DELETE AS
+CREATE OR ALTER TRIGGER trg_activity_log_no_delete ON application_activity_log INSTEAD OF DELETE AS
 BEGIN
   SET NOCOUNT ON;
   RAISERROR('Deleting from application_activity_log is not permitted. This is a permanent audit trail.', 16, 1);

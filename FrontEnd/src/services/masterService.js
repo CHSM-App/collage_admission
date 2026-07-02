@@ -267,3 +267,34 @@ export const updateRequiredDocument = (collegeId, docId, data) =>
 
 export const deleteRequiredDocument = (collegeId, docId) =>
   api.delete(`masters/${collegeId}/required-documents/${docId}`)
+
+// ── Category Master ───────────────────────────────────────────
+export const getCategoryMaster = (collegeId) =>
+  api.get(`masters/${collegeId}/category-master`)
+
+export const createCaste = (collegeId, data) =>
+  api.post(`masters/${collegeId}/category-castes`, data)
+
+export const updateCaste = (collegeId, id, data) =>
+  api.patch(`masters/${collegeId}/category-castes/${id}`, data)
+
+export const deleteCaste = (collegeId, id) =>
+  api.delete(`masters/${collegeId}/category-castes/${id}`)
+
+export const createSpecialStatus = (collegeId, data) =>
+  api.post(`masters/${collegeId}/category-special-statuses`, data)
+
+export const updateSpecialStatus = (collegeId, id, data) =>
+  api.patch(`masters/${collegeId}/category-special-statuses/${id}`, data)
+
+export const deleteSpecialStatus = (collegeId, id) =>
+  api.delete(`masters/${collegeId}/category-special-statuses/${id}`)
+
+export const createFeesCategory = (collegeId, data) =>
+  api.post(`masters/${collegeId}/fees-categories`, data)
+
+export const updateFeesCategory = (collegeId, id, data) =>
+  api.patch(`masters/${collegeId}/fees-categories/${id}`, data)
+
+export const deleteFeesCategory = (collegeId, id) =>
+  api.delete(`masters/${collegeId}/fees-categories/${id}`)

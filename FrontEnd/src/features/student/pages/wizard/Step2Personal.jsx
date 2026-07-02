@@ -1,35 +1,10 @@
 import { useEffect, useState, useRef } from 'react'
 import FormField from '../../../../shared/components/FormField.jsx'
 import { StepHeader, StepFooter } from './Step1Context.jsx'
-import { getFaculty, getDivisions, computeFees } from '../../../../services/masterService.js'
-
-// ── Fee category determination (client-side preview, same logic as backend) ──
-const BCC_CASTES    = ['SC', 'ST', 'DT/VJ', 'NT(A)', 'NT(B)', 'NT(C)', 'SBC']
-const OBC_CASTES    = ['OBC']
-
-function determineFeesCategory(caste, specialStatus) {
-  if (BCC_CASTES.includes(caste)) {
-    return { category: 'BCC', reason: `BCC assigned — ${caste} category qualifies for full government fee reimbursement.` }
-  }
-  if (specialStatus) {
-    return { category: 'Other', reason: `Other assigned — special status "${specialStatus}" qualifies for concession/scheme benefit.` }
-  }
-  if (OBC_CASTES.includes(caste)) {
-    return { category: 'Other', reason: 'Other assigned — OBC category may qualify for non-creamy-layer concession.' }
-  }
-  return {
-    category: 'Paying',
-    reason: caste
-      ? `Paying assigned — ${caste} with no special status, no concession scheme applies.`
-      : 'Paying assigned by default — no caste category or special status selected.',
-  }
-}
+import { getFaculty, getDivisions, computeFees, getCategoryMaster } from '../../../../services/masterService.js'
 
 const YEAR_LEVEL_MAP = { 1: 'FY', 2: 'SY', 3: 'TY' }
 const SEX_OPTIONS    = [{ value: 'Male', label: 'Male' }, { value: 'Female', label: 'Female' }, { value: 'Other', label: 'Other' }]
-const CASTE_OPTIONS  = ['SC', 'ST', 'NT(A)', 'NT(B)', 'NT(C)', 'DT/VJ', 'OBC', 'SBC', 'Gen.']
-const SPECIAL_OPTIONS = ['EBC', 'PTC', 'STC', 'Ex-Service', 'FF', 'PH', 'C.Govt.', 'S.Govt.', 'Widows']
-const FEES_OPTIONS   = ['Paying', 'Other', 'BCC']
 const FUNDING_LABELS = { Granted: 'Granted', NonGranted: 'Non-Granted', Both: 'Both' }
 const FUNDING_COLORS = {
   Granted:    'bg-green-50 text-green-700 border-green-200',
@@ -43,13 +18,54 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
   const [overrideRemark, setOverrideRemark] = useState(data.fees_category_override_remark || '')
   const [localError, setLocalError]         = useState('')
 
+  // Category master (dynamic, from backend)
+  const [categoryMaster, setCategoryMaster] = useState(null)
+
   // Masters data
-  const [divisions, setDivisions]       = useState([])    // from division_master
-  const [degreeCourse, setDegreeCourse] = useState(null)  // from faculty_master
-  const [feeResult, setFeeResult]       = useState(null)  // from fees/compute
+  const [divisions, setDivisions]       = useState([])
+  const [degreeCourse, setDegreeCourse] = useState(null)
+  const [feeResult, setFeeResult]       = useState(null)
   const [feeLoading, setFeeLoading]     = useState(false)
 
   const feeDebounce = useRef(null)
+
+  // Derived options from master (fall back to empty until loaded)
+  const casteOptions   = categoryMaster ? categoryMaster.castes.filter(c => c.is_active).map(c => c.caste_name) : []
+  const specialOptions = categoryMaster ? categoryMaster.specialStatuses.filter(s => s.is_active).map(s => s.status_name) : []
+  const feesOptions    = categoryMaster ? categoryMaster.feesCategories.filter(f => f.is_active).map(f => f.category_name) : []
+
+  // Dynamic determineFeesCategory using master mappings
+  function determineFeesCategory(casteName, specialStatus) {
+    if (!categoryMaster) return { category: '', reason: '' }
+    const { castes, specialStatuses, feesCategories, casteMappings, statusMappings } = categoryMaster
+
+    const casteRow  = castes.find(c => c.caste_name === casteName)
+    const casteMap  = casteRow ? casteMappings.find(m => m.caste_id === casteRow.id) : null
+    const fcFromCaste = casteMap ? feesCategories.find(f => f.id === casteMap.fees_category_id) : null
+
+    const statusRow = specialStatus ? specialStatuses.find(s => s.status_name === specialStatus) : null
+    const statusMap = statusRow ? statusMappings.find(m => m.special_status_id === statusRow.id) : null
+    const fcFromStatus = statusMap ? feesCategories.find(f => f.id === statusMap.fees_category_id) : null
+
+    // Special status overrides caste; fallback to caste category
+    const fc = fcFromStatus || fcFromCaste
+    if (!fc) {
+      return { category: feesOptions[0] || '', reason: 'No category mapping found.' }
+    }
+    return { category: fc.category_name, reason: `${fc.category_name} assigned.` }
+  }
+
+  // Special status only enabled for castes marked is_gen_type
+  const selectedCasteRow      = categoryMaster?.castes?.find(c => c.caste_name === data.category)
+  const specialStatusDisabled = categoryMaster ? !selectedCasteRow?.is_gen_type : data.category !== 'Gen.'
+
+  // ── Load category master for this college ──
+  useEffect(() => {
+    if (!data.college_id) return
+    getCategoryMaster(data.college_id)
+      .then(r => setCategoryMaster(r.data.data))
+      .catch(() => {})
+  }, [data.college_id])
 
   // ── Load divisions + degree course for this college+course+year ──
   useEffect(() => {
@@ -76,12 +92,12 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
       .catch(() => {})
   }, [data.college_id, data.course_id, data.year_of_study])
 
-  // ── Clear special_status when caste is not Gen. ──
+  // ── Clear special_status when selected caste doesn't allow it ──
   useEffect(() => {
-    if (data.category !== 'Gen.' && data.special_status) {
+    if (specialStatusDisabled && data.special_status) {
       onChange({ target: { name: 'special_status', value: '' } })
     }
-  }, [data.category])
+  }, [data.category, categoryMaster])
 
   // ── Auto-determine fees_category from caste+special_status ──
   useEffect(() => {
@@ -134,7 +150,9 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
   function cancelOverride() {
     setOverrideMode(false)
     setOverrideRemark('')
-    const result = determineFeesCategory(data.category, data.special_status)
+    const result = categoryMaster
+      ? determineFeesCategory(data.category, data.special_status)
+      : { category: '' }
     onChange({ target: { name: 'fees_category', value: result.category } })
     onChange({ target: { name: 'fees_category_override', value: false } })
     onChange({ target: { name: 'fees_category_override_remark', value: '' } })
@@ -236,28 +254,32 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
 
         {/* Caste Category */}
         <FormField label={<span>Caste / Community Category <span className="text-red-500">*</span></span>}>
-          <RadioGroup
-            name="category"
-            options={CASTE_OPTIONS}
-            value={data.category}
-            onChange={v => onChange({ target: { name: 'category', value: v } })}
-          />
-          {!data.category && <p className="mt-1 text-xs text-slate-400">This field is mandatory — please select one.</p>}
+          {!categoryMaster ? (
+            <p className="text-xs text-slate-400 mt-1">Loading categories…</p>
+          ) : (
+            <RadioGroup
+              name="category"
+              options={casteOptions}
+              value={data.category}
+              onChange={v => onChange({ target: { name: 'category', value: v } })}
+            />
+          )}
+          {categoryMaster && !data.category && <p className="mt-1 text-xs text-slate-400">This field is mandatory — please select one.</p>}
           {e.category && <p className="mt-1 text-xs font-medium text-red-600">{e.category}</p>}
         </FormField>
 
         {/* Special Status */}
         <FormField
           label="Special Status (Optional)"
-          hint={data.category !== 'Gen.' ? 'Special status is only applicable for Gen. category.' : 'Select only if applicable — may qualify for additional concession.'}
+          hint={specialStatusDisabled ? 'Special status is only applicable for General (Gen.) category.' : 'Select only if applicable — may qualify for additional concession.'}
         >
           <RadioGroup
             name="special_status"
-            options={SPECIAL_OPTIONS}
+            options={specialOptions}
             value={data.special_status}
             onChange={v => onChange({ target: { name: 'special_status', value: v } })}
             clearable
-            disabled={data.category !== 'Gen.'}
+            disabled={specialStatusDisabled}
           />
         </FormField>
 
@@ -296,7 +318,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
             )}
             <RadioGroup
               name="fees_category"
-              options={FEES_OPTIONS}
+              options={feesOptions}
               value={data.fees_category}
               onChange={v => overrideMode && onChange({ target: { name: 'fees_category', value: v } })}
               disabled={!overrideMode}
@@ -354,19 +376,14 @@ function FeeBreakdown({ result, loading }) {
       <div className="px-4 py-2.5 bg-slate-800 flex items-center justify-between">
         <p className="text-xs font-bold text-white uppercase tracking-wide">Fee Breakdown</p>
         <div className="flex items-center gap-2 text-xs text-slate-300">
-          <span>Cat-{result.feesCategorySlab}</span>
-          <span>·</span>
-          <span className={`font-semibold ${result.paymentMode === 'BCC' ? 'text-green-300' : result.paymentMode === 'Other' ? 'text-amber-300' : 'text-white'}`}>
-            {result.paymentMode}
-          </span>
+          <span>Category {result.feesCategorySlab}</span>
         </div>
       </div>
 
       {/* Reason lines */}
-      {(result.slabReason || result.paymentModeReason) && (
+      {result.slabReason && (
         <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 space-y-0.5">
-          {result.slabReason      && <p className="text-xs text-slate-500">{result.slabReason}</p>}
-          {result.paymentModeReason && <p className="text-xs text-slate-500">{result.paymentModeReason}</p>}
+          <p className="text-xs text-slate-500">{result.slabReason}</p>
         </div>
       )}
 
@@ -376,7 +393,6 @@ function FeeBreakdown({ result, loading }) {
             <th className="px-4 py-2 text-left">Fee Head</th>
             <th className="px-4 py-2 text-center w-20">Type</th>
             <th className="px-4 py-2 text-right w-28">Amount</th>
-            <th className="px-4 py-2 text-center w-20">Refund.</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-50">
@@ -389,11 +405,6 @@ function FeeBreakdown({ result, loading }) {
                 <span className="text-xs text-slate-500">{row.fees_type}</span>
               </td>
               <td className="px-4 py-2 text-right font-mono text-slate-800">{fmt(row.amount)}</td>
-              <td className="px-4 py-2 text-center text-xs">
-                {row.is_refundable
-                  ? <span className="text-green-600 font-medium">Reimb.</span>
-                  : <span className="text-slate-300">—</span>}
-              </td>
             </tr>
           ))}
         </tbody>
@@ -401,22 +412,7 @@ function FeeBreakdown({ result, loading }) {
           <tr className="bg-slate-50">
             <td colSpan={2} className="px-4 py-2.5 text-sm font-semibold text-slate-700">Total Fees</td>
             <td className="px-4 py-2.5 text-right font-mono font-bold text-slate-900">{fmt(result.totalFee)}</td>
-            <td />
           </tr>
-          {result.reimbursableAmount > 0 && (
-            <>
-              <tr>
-                <td colSpan={2} className="px-4 py-1.5 text-xs text-green-700">Government Reimbursable (BCC)</td>
-                <td className="px-4 py-1.5 text-right font-mono text-xs text-green-700">− {fmt(result.reimbursableAmount)}</td>
-                <td />
-              </tr>
-              <tr className="bg-green-50">
-                <td colSpan={2} className="px-4 py-2.5 text-sm font-semibold text-green-800">Student Payable</td>
-                <td className="px-4 py-2.5 text-right font-mono font-bold text-green-900">{fmt(result.studentPayable)}</td>
-                <td />
-              </tr>
-            </>
-          )}
         </tfoot>
       </table>
     </div>

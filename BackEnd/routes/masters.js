@@ -23,7 +23,7 @@ const router   = express.Router()
 const db       = require('./db')
 const mssql    = require('mssql')
 const feeSvc   = require('../services/FeeDeterminationService')
-const { authenticate, requireCollegeAccess, requirePerm } = require('../middleware/auth')
+const { authenticate, requireCollegeAccess, requirePerm, requireWrite } = require('../middleware/auth')
 const logger   = require('../config/logger')
 
 // All routes require authentication
@@ -988,6 +988,10 @@ router.post('/:collegeId/fees/classwise/save', requirePerm('masters'), async (re
         .input('a2',    mssql.Decimal,  row.cat2_amount != null ? parseFloat(row.cat2_amount) : null)
         .input('a3',    mssql.Decimal,  row.cat3_amount != null ? parseFloat(row.cat3_amount) : null)
         .input('a4',    mssql.Decimal,  row.cat4_amount != null ? parseFloat(row.cat4_amount) : null)
+        .input('a5',    mssql.Decimal,  row.cat5_amount != null ? parseFloat(row.cat5_amount) : null)
+        .input('a6',    mssql.Decimal,  row.cat6_amount != null ? parseFloat(row.cat6_amount) : null)
+        .input('a7',    mssql.Decimal,  row.cat7_amount != null ? parseFloat(row.cat7_amount) : null)
+        .input('a8',    mssql.Decimal,  row.cat8_amount != null ? parseFloat(row.cat8_amount) : null)
         .input('actor', mssql.NVarChar, actor)
         .query(`
           MERGE classwise_fees AS target
@@ -996,10 +1000,14 @@ router.post('/:collegeId/fees/classwise/save', requirePerm('masters'), async (re
           ON target.college_id=src.college_id AND target.faculty_master_id=src.faculty_master_id
              AND target.year_level=src.year_level AND target.fees_code=src.fees_code
              AND target.student_type=src.student_type AND target.academic_year=src.academic_year
-          WHEN MATCHED THEN UPDATE SET cat1_amount=@a1,cat2_amount=@a2,cat3_amount=@a3,cat4_amount=@a4,updated_by=@actor
+          WHEN MATCHED THEN UPDATE SET
+            cat1_amount=@a1,cat2_amount=@a2,cat3_amount=@a3,cat4_amount=@a4,
+            cat5_amount=@a5,cat6_amount=@a6,cat7_amount=@a7,cat8_amount=@a8,
+            updated_by=@actor
           WHEN NOT MATCHED THEN INSERT
-            (college_id,faculty_master_id,year_level,fees_code,student_type,academic_year,cat1_amount,cat2_amount,cat3_amount,cat4_amount,created_by)
-          VALUES (@cid,@fid,@yl,@fc,@st,@ay,@a1,@a2,@a3,@a4,@actor);
+            (college_id,faculty_master_id,year_level,fees_code,student_type,academic_year,
+             cat1_amount,cat2_amount,cat3_amount,cat4_amount,cat5_amount,cat6_amount,cat7_amount,cat8_amount,created_by)
+          VALUES (@cid,@fid,@yl,@fc,@st,@ay,@a1,@a2,@a3,@a4,@a5,@a6,@a7,@a8,@actor);
         `)
     }
     res.json({ success: true })
@@ -1325,6 +1333,373 @@ router.delete('/:collegeId/class/:id', requirePerm('masters'), async (req, res) 
       .query(`DELETE FROM class_master WHERE id=@id AND college_id=@cid`)
     res.json({ success: true })
   } catch (e) { logger.error({ err: e }, 'delete class master'); res.status(500).json({ success: false, message: e.message }) }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// CATEGORY MASTER — castes, special statuses, fees categories
+// ═══════════════════════════════════════════════════════════════
+
+// ── Auto-seed defaults for a college that has no category master yet ──
+async function seedCategoryDefaults(collegeId) {
+  const castes = [
+    { name: 'SC',    order: 1, is_gen: 0 },
+    { name: 'ST',    order: 2, is_gen: 0 },
+    { name: 'NT(A)', order: 3, is_gen: 0 },
+    { name: 'NT(B)', order: 4, is_gen: 0 },
+    { name: 'NT(C)', order: 5, is_gen: 0 },
+    { name: 'DT/VJ', order: 6, is_gen: 0 },
+    { name: 'OBC',   order: 7, is_gen: 0 },
+    { name: 'SBC',   order: 8, is_gen: 0 },
+    { name: 'Gen.',  order: 9, is_gen: 1 },
+  ]
+  const statuses = [
+    { name: 'EBC',        order: 1 },
+    { name: 'PTC',        order: 2 },
+    { name: 'STC',        order: 3 },
+    { name: 'Ex-Service', order: 4 },
+    { name: 'FF',         order: 5 },
+    { name: 'PH',         order: 6 },
+    { name: 'C.Govt.',    order: 7 },
+    { name: 'S.Govt.',    order: 8 },
+    { name: 'Widows',     order: 9 },
+  ]
+  // Slab mapping to match existing fees_master columns:
+  //   cat1 = Paying (Open/General), cat2 = Other (EBC/OBC concession),
+  //   cat3 = BCC (SC/ST reimbursable), cat4 = Special (FF/PH/Widows/Govt)
+  const feesCats = [
+    { name: 'Paying',  slab: 1, order: 1 },
+    { name: 'Other',   slab: 2, order: 2 },
+    { name: 'BCC',     slab: 3, order: 3 },
+    { name: 'Special', slab: 4, order: 4 },
+  ]
+
+  // Insert castes
+  const casteIds = {}
+  for (const c of castes) {
+    const r = await db.request()
+      .input('col',  mssql.Int,      collegeId)
+      .input('name', mssql.NVarChar, c.name)
+      .input('ord',  mssql.Int,      c.order)
+      .input('gen',  mssql.Bit,      c.is_gen)
+      .query(`
+        IF NOT EXISTS (SELECT 1 FROM category_castes WHERE college_id=@col AND caste_name=@name)
+          INSERT INTO category_castes (college_id, caste_name, is_gen_type, display_order) VALUES (@col, @name, @gen, @ord)
+        SELECT id FROM category_castes WHERE college_id=@col AND caste_name=@name
+      `)
+    casteIds[c.name] = r.recordset[0].id
+  }
+
+  // Insert statuses
+  const statusIds = {}
+  for (const s of statuses) {
+    const r = await db.request()
+      .input('col',  mssql.Int,      collegeId)
+      .input('name', mssql.NVarChar, s.name)
+      .input('ord',  mssql.Int,      s.order)
+      .query(`
+        IF NOT EXISTS (SELECT 1 FROM category_special_statuses WHERE college_id=@col AND status_name=@name)
+          INSERT INTO category_special_statuses (college_id, status_name, display_order) VALUES (@col, @name, @ord)
+        SELECT id FROM category_special_statuses WHERE college_id=@col AND status_name=@name
+      `)
+    statusIds[s.name] = r.recordset[0].id
+  }
+
+  // Insert fees categories + mappings
+  for (const fc of feesCats) {
+    const r = await db.request()
+      .input('col',  mssql.Int,      collegeId)
+      .input('name', mssql.NVarChar, fc.name)
+      .input('slab', mssql.Int,      fc.slab)
+      .input('ord',  mssql.Int,      fc.order)
+      .query(`
+        IF NOT EXISTS (SELECT 1 FROM fees_categories WHERE college_id=@col AND category_name=@name)
+          INSERT INTO fees_categories (college_id, category_name, slab_index, display_order)
+          VALUES (@col, @name, @slab, @ord)
+        SELECT id FROM fees_categories WHERE college_id=@col AND category_name=@name
+      `)
+    const fcId = r.recordset[0].id
+
+    if (fc.name === 'BCC') {
+      for (const cn of ['SC', 'ST', 'NT(A)', 'NT(B)', 'NT(C)', 'DT/VJ', 'SBC']) {
+        if (casteIds[cn]) await db.request()
+          .input('fc', mssql.Int, fcId).input('c', mssql.Int, casteIds[cn])
+          .query(`IF NOT EXISTS (SELECT 1 FROM fees_category_castes WHERE fees_category_id=@fc AND caste_id=@c)
+                  INSERT INTO fees_category_castes VALUES (@fc, @c)`)
+      }
+    } else if (fc.name === 'Other') {
+      if (casteIds['OBC']) await db.request()
+        .input('fc', mssql.Int, fcId).input('c', mssql.Int, casteIds['OBC'])
+        .query(`IF NOT EXISTS (SELECT 1 FROM fees_category_castes WHERE fees_category_id=@fc AND caste_id=@c)
+                INSERT INTO fees_category_castes VALUES (@fc, @c)`)
+      for (const sn of ['EBC', 'PTC', 'STC', 'Ex-Service']) {
+        if (statusIds[sn]) await db.request()
+          .input('fc', mssql.Int, fcId).input('s', mssql.Int, statusIds[sn])
+          .query(`IF NOT EXISTS (SELECT 1 FROM fees_category_special_statuses WHERE fees_category_id=@fc AND special_status_id=@s)
+                  INSERT INTO fees_category_special_statuses VALUES (@fc, @s)`)
+      }
+    } else if (fc.name === 'Special') {
+      for (const sn of ['FF', 'PH', 'C.Govt.', 'S.Govt.', 'Widows']) {
+        if (statusIds[sn]) await db.request()
+          .input('fc', mssql.Int, fcId).input('s', mssql.Int, statusIds[sn])
+          .query(`IF NOT EXISTS (SELECT 1 FROM fees_category_special_statuses WHERE fees_category_id=@fc AND special_status_id=@s)
+                  INSERT INTO fees_category_special_statuses VALUES (@fc, @s)`)
+      }
+    } else if (fc.name === 'Paying') {
+      if (casteIds['Gen.']) await db.request()
+        .input('fc', mssql.Int, fcId).input('c', mssql.Int, casteIds['Gen.'])
+        .query(`IF NOT EXISTS (SELECT 1 FROM fees_category_castes WHERE fees_category_id=@fc AND caste_id=@c)
+                INSERT INTO fees_category_castes VALUES (@fc, @c)`)
+    }
+  }
+}
+
+// ── Internal helper: load full category master for a college ──
+async function getCategoryMaster(collegeId) {
+  const [castesRes, statusesRes, feesCatsRes, casteMapsRes, statusMapsRes] = await Promise.all([
+    db.request().input('col', mssql.Int, collegeId)
+      .query('SELECT * FROM category_castes WHERE college_id=@col ORDER BY display_order, caste_name'),
+    db.request().input('col', mssql.Int, collegeId)
+      .query('SELECT * FROM category_special_statuses WHERE college_id=@col ORDER BY display_order, status_name'),
+    db.request().input('col', mssql.Int, collegeId)
+      .query('SELECT * FROM fees_categories WHERE college_id=@col ORDER BY display_order, slab_index'),
+    db.request().input('col', mssql.Int, collegeId)
+      .query(`SELECT fcc.fees_category_id, fcc.caste_id
+              FROM fees_category_castes fcc
+              JOIN fees_categories fc ON fc.id = fcc.fees_category_id
+              WHERE fc.college_id = @col`),
+    db.request().input('col', mssql.Int, collegeId)
+      .query(`SELECT fcs.fees_category_id, fcs.special_status_id
+              FROM fees_category_special_statuses fcs
+              JOIN fees_categories fc ON fc.id = fcs.fees_category_id
+              WHERE fc.college_id = @col`),
+  ])
+  return {
+    castes:          castesRes.recordset,
+    specialStatuses: statusesRes.recordset,
+    feesCategories:  feesCatsRes.recordset,
+    casteMappings:   casteMapsRes.recordset,
+    statusMappings:  statusMapsRes.recordset,
+  }
+}
+
+// GET /masters/:collegeId/category-master — returns full master (auto-seeds if empty)
+// No college-role check needed — students need this to render caste/fees category options.
+router.get('/:collegeId/category-master', async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId)
+  try {
+    const check = await db.request().input('col', mssql.Int, collegeId)
+      .query('SELECT COUNT(*) AS cnt FROM category_castes WHERE college_id=@col')
+    if (check.recordset[0].cnt === 0) await seedCategoryDefaults(collegeId)
+    const data = await getCategoryMaster(collegeId)
+    res.json({ success: true, data })
+  } catch (err) {
+    logger.error({ err }, 'category-master GET')
+    res.status(500).json({ success: false, message: 'Server error.' })
+  }
+})
+
+// ── Castes CRUD ───────────────────────────────────────────────
+
+// POST /masters/:collegeId/category-castes
+router.post('/:collegeId/category-castes', requireCollegeAccess, requireWrite('masters'), async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId)
+  const { caste_name, is_gen_type = false, display_order = 99 } = req.body
+  if (!caste_name?.trim()) return res.status(400).json({ success: false, message: 'caste_name required.' })
+  try {
+    const r = await db.request()
+      .input('col',  mssql.Int,      collegeId)
+      .input('name', mssql.NVarChar, caste_name.trim())
+      .input('gen',  mssql.Bit,      is_gen_type ? 1 : 0)
+      .input('ord',  mssql.Int,      display_order)
+      .query('INSERT INTO category_castes (college_id, caste_name, is_gen_type, display_order) OUTPUT INSERTED.* VALUES (@col, @name, @gen, @ord)')
+    res.json({ success: true, data: r.recordset[0] })
+  } catch (err) {
+    if (err.number === 2627) return res.status(400).json({ success: false, message: 'Caste already exists.' })
+    logger.error({ err }, 'category-castes POST')
+    res.status(500).json({ success: false, message: 'Server error.' })
+  }
+})
+
+// PATCH /masters/:collegeId/category-castes/:id
+router.patch('/:collegeId/category-castes/:id', requireCollegeAccess, requireWrite('masters'), async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId)
+  const id = parseInt(req.params.id)
+  const { caste_name, is_gen_type, display_order, is_active } = req.body
+  try {
+    await db.request()
+      .input('id',   mssql.Int,      id)
+      .input('col',  mssql.Int,      collegeId)
+      .input('name', mssql.NVarChar, caste_name?.trim() ?? null)
+      .input('gen',  mssql.Bit,      is_gen_type != null ? (is_gen_type ? 1 : 0) : null)
+      .input('ord',  mssql.Int,      display_order ?? null)
+      .input('act',  mssql.Bit,      is_active != null ? (is_active ? 1 : 0) : null)
+      .query(`UPDATE category_castes SET
+        caste_name    = ISNULL(@name, caste_name),
+        is_gen_type   = ISNULL(@gen,  is_gen_type),
+        display_order = ISNULL(@ord,  display_order),
+        is_active     = ISNULL(@act,  is_active)
+        WHERE id=@id AND college_id=@col`)
+    res.json({ success: true })
+  } catch (err) {
+    if (err.number === 2627) return res.status(400).json({ success: false, message: 'Caste name already exists.' })
+    logger.error({ err }, 'category-castes PATCH')
+    res.status(500).json({ success: false, message: 'Server error.' })
+  }
+})
+
+// DELETE /masters/:collegeId/category-castes/:id — soft delete
+router.delete('/:collegeId/category-castes/:id', requireCollegeAccess, requireWrite('masters'), async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId)
+  const id = parseInt(req.params.id)
+  try {
+    await db.request().input('id', mssql.Int, id).input('col', mssql.Int, collegeId)
+      .query('UPDATE category_castes SET is_active=0 WHERE id=@id AND college_id=@col')
+    res.json({ success: true })
+  } catch (err) {
+    logger.error({ err }, 'category-castes DELETE')
+    res.status(500).json({ success: false, message: 'Server error.' })
+  }
+})
+
+// ── Special Statuses CRUD ─────────────────────────────────────
+
+// POST /masters/:collegeId/category-special-statuses
+router.post('/:collegeId/category-special-statuses', requireCollegeAccess, requireWrite('masters'), async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId)
+  const { status_name, display_order = 99 } = req.body
+  if (!status_name?.trim()) return res.status(400).json({ success: false, message: 'status_name required.' })
+  try {
+    const r = await db.request()
+      .input('col',  mssql.Int,      collegeId)
+      .input('name', mssql.NVarChar, status_name.trim())
+      .input('ord',  mssql.Int,      display_order)
+      .query('INSERT INTO category_special_statuses (college_id, status_name, display_order) OUTPUT INSERTED.* VALUES (@col, @name, @ord)')
+    res.json({ success: true, data: r.recordset[0] })
+  } catch (err) {
+    if (err.number === 2627) return res.status(400).json({ success: false, message: 'Status already exists.' })
+    logger.error({ err }, 'category-special-statuses POST')
+    res.status(500).json({ success: false, message: 'Server error.' })
+  }
+})
+
+// PATCH /masters/:collegeId/category-special-statuses/:id
+router.patch('/:collegeId/category-special-statuses/:id', requireCollegeAccess, requireWrite('masters'), async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId)
+  const id = parseInt(req.params.id)
+  const { status_name, display_order, is_active } = req.body
+  try {
+    await db.request()
+      .input('id',   mssql.Int,      id)
+      .input('col',  mssql.Int,      collegeId)
+      .input('name', mssql.NVarChar, status_name?.trim() ?? null)
+      .input('ord',  mssql.Int,      display_order ?? null)
+      .input('act',  mssql.Bit,      is_active != null ? (is_active ? 1 : 0) : null)
+      .query(`UPDATE category_special_statuses SET
+        status_name   = ISNULL(@name, status_name),
+        display_order = ISNULL(@ord,  display_order),
+        is_active     = ISNULL(@act,  is_active)
+        WHERE id=@id AND college_id=@col`)
+    res.json({ success: true })
+  } catch (err) {
+    if (err.number === 2627) return res.status(400).json({ success: false, message: 'Status name already exists.' })
+    logger.error({ err }, 'category-special-statuses PATCH')
+    res.status(500).json({ success: false, message: 'Server error.' })
+  }
+})
+
+// DELETE /masters/:collegeId/category-special-statuses/:id — soft delete
+router.delete('/:collegeId/category-special-statuses/:id', requireCollegeAccess, requireWrite('masters'), async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId)
+  const id = parseInt(req.params.id)
+  try {
+    await db.request().input('id', mssql.Int, id).input('col', mssql.Int, collegeId)
+      .query('UPDATE category_special_statuses SET is_active=0 WHERE id=@id AND college_id=@col')
+    res.json({ success: true })
+  } catch (err) {
+    logger.error({ err }, 'category-special-statuses DELETE')
+    res.status(500).json({ success: false, message: 'Server error.' })
+  }
+})
+
+// ── Fees Categories CRUD ──────────────────────────────────────
+
+// POST /masters/:collegeId/fees-categories
+router.post('/:collegeId/fees-categories', requireCollegeAccess, requireWrite('masters'), async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId)
+  const { category_name, slab_index, display_order = 99, caste_ids = [], special_status_ids = [] } = req.body
+  if (!category_name?.trim()) return res.status(400).json({ success: false, message: 'category_name required.' })
+  if (!slab_index || slab_index < 1 || slab_index > 8) return res.status(400).json({ success: false, message: 'slab_index must be 1–8.' })
+  try {
+    const r = await db.request()
+      .input('col',  mssql.Int,      collegeId)
+      .input('name', mssql.NVarChar, category_name.trim())
+      .input('slab', mssql.Int,      slab_index)
+      .input('ord',  mssql.Int,      display_order)
+      .query('INSERT INTO fees_categories (college_id, category_name, slab_index, display_order) OUTPUT INSERTED.id VALUES (@col, @name, @slab, @ord)')
+    const fcId = r.recordset[0].id
+    for (const cid of caste_ids) await db.request().input('fc', mssql.Int, fcId).input('c', mssql.Int, cid)
+      .query('INSERT INTO fees_category_castes VALUES (@fc, @c)')
+    for (const sid of special_status_ids) await db.request().input('fc', mssql.Int, fcId).input('s', mssql.Int, sid)
+      .query('INSERT INTO fees_category_special_statuses VALUES (@fc, @s)')
+    res.json({ success: true, data: { id: fcId } })
+  } catch (err) {
+    if (err.number === 2627) return res.status(400).json({ success: false, message: 'Category name or slab already exists.' })
+    logger.error({ err }, 'fees-categories POST')
+    res.status(500).json({ success: false, message: 'Server error.' })
+  }
+})
+
+// PATCH /masters/:collegeId/fees-categories/:id — update + replace mappings
+router.patch('/:collegeId/fees-categories/:id', requireCollegeAccess, requireWrite('masters'), async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId)
+  const id = parseInt(req.params.id)
+  const { category_name, slab_index, display_order, is_active, caste_ids, special_status_ids } = req.body
+  try {
+    await db.request()
+      .input('id',   mssql.Int,      id)
+      .input('col',  mssql.Int,      collegeId)
+      .input('name', mssql.NVarChar, category_name?.trim() ?? null)
+      .input('slab', mssql.Int,      slab_index ?? null)
+      .input('ord',  mssql.Int,      display_order ?? null)
+      .input('act',  mssql.Bit,      is_active != null ? (is_active ? 1 : 0) : null)
+      .query(`UPDATE fees_categories SET
+        category_name  = ISNULL(@name, category_name),
+        slab_index     = ISNULL(@slab, slab_index),
+        display_order  = ISNULL(@ord,  display_order),
+        is_active      = ISNULL(@act,  is_active)
+        WHERE id=@id AND college_id=@col`)
+    if (Array.isArray(caste_ids)) {
+      await db.request().input('fc', mssql.Int, id)
+        .query('DELETE FROM fees_category_castes WHERE fees_category_id=@fc')
+      for (const cid of caste_ids) await db.request().input('fc', mssql.Int, id).input('c', mssql.Int, cid)
+        .query('INSERT INTO fees_category_castes VALUES (@fc, @c)')
+    }
+    if (Array.isArray(special_status_ids)) {
+      await db.request().input('fc', mssql.Int, id)
+        .query('DELETE FROM fees_category_special_statuses WHERE fees_category_id=@fc')
+      for (const sid of special_status_ids) await db.request().input('fc', mssql.Int, id).input('s', mssql.Int, sid)
+        .query('INSERT INTO fees_category_special_statuses VALUES (@fc, @s)')
+    }
+    res.json({ success: true })
+  } catch (err) {
+    if (err.number === 2627) return res.status(400).json({ success: false, message: 'Category name or slab already exists.' })
+    logger.error({ err }, 'fees-categories PATCH')
+    res.status(500).json({ success: false, message: 'Server error.' })
+  }
+})
+
+// DELETE /masters/:collegeId/fees-categories/:id — soft delete
+router.delete('/:collegeId/fees-categories/:id', requireCollegeAccess, requireWrite('masters'), async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId)
+  const id = parseInt(req.params.id)
+  try {
+    await db.request().input('id', mssql.Int, id).input('col', mssql.Int, collegeId)
+      .query('UPDATE fees_categories SET is_active=0 WHERE id=@id AND college_id=@col')
+    res.json({ success: true })
+  } catch (err) {
+    logger.error({ err }, 'fees-categories DELETE')
+    res.status(500).json({ success: false, message: 'Server error.' })
+  }
 })
 
 module.exports = router
