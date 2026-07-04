@@ -909,17 +909,9 @@ router.put('/:collegeId/fees/:id', requirePerm('masters'), async (req, res) => {
   } catch (e) { logger.error({ err: e }, 'update fees master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
-router.delete('/:collegeId/fees/:id', requirePerm('masters'), async (req, res) => {
-  try {
-    await db.request()
-      .input('id',  mssql.Int, parseInt(req.params.id))
-      .input('cid', mssql.Int, cid(req))
-      .query(`UPDATE fees_master SET is_active=0, modified_on=GETDATE() WHERE fees_code=@id AND college_id=@cid`)
-    res.json({ success: true })
-  } catch (e) { logger.error({ err: e }, 'delete fees master'); res.status(500).json({ success: false, message: e.message }) }
-})
-
 // ── Classwise Fees ───────────────────────────────────────────
+// NOTE: These specific routes MUST be registered before /:collegeId/fees/:id
+// to prevent Express from matching 'classwise' as the :id parameter.
 
 // GET /masters/:collegeId/fees/classwise?faculty_id=&year_level=&student_type=&academic_year=
 router.get('/:collegeId/fees/classwise', requireCollegeAccess, async (req, res) => {
@@ -950,7 +942,7 @@ router.delete('/:collegeId/fees/classwise', requirePerm('masters'), async (req, 
   if (!faculty_master_id || !year_level || !student_type || !fees_code || !academic_year)
     return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, student_type, fees_code, academic_year required.' })
   try {
-    await db.request()
+    const result = await db.request()
       .input('cid', mssql.Int,      cid(req))
       .input('fid', mssql.Int,      parseInt(faculty_master_id))
       .input('yl',  mssql.NVarChar, year_level)
@@ -962,8 +954,18 @@ router.delete('/:collegeId/fees/classwise', requirePerm('masters'), async (req, 
         WHERE college_id=@cid AND faculty_master_id=@fid
           AND year_level=@yl AND student_type=@st AND fees_code=@fc AND academic_year=@ay
       `)
-    res.json({ success: true })
+    res.json({ success: true, rowsAffected: result.rowsAffected })
   } catch (e) { logger.error({ err: e }, 'delete classwise fee'); res.status(500).json({ success: false, message: e.message }) }
+})
+
+router.delete('/:collegeId/fees/:id', requirePerm('masters'), async (req, res) => {
+  try {
+    await db.request()
+      .input('id',  mssql.Int, parseInt(req.params.id))
+      .input('cid', mssql.Int, cid(req))
+      .query(`UPDATE fees_master SET is_active=0, modified_on=GETDATE() WHERE fees_code=@id AND college_id=@cid`)
+    res.json({ success: true })
+  } catch (e) { logger.error({ err: e }, 'delete fees master'); res.status(500).json({ success: false, message: e.message }) }
 })
 
 // POST /masters/:collegeId/fees/classwise/save — upsert classwise fees

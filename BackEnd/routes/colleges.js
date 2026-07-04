@@ -164,7 +164,9 @@ router.get('/by-code/:code', async (req, res) => {
         SELECT
           ap.id, ap.year_of_study, ap.academic_year,
           ap.start_date, ap.end_date,
-          ap.total_seats, ap.filled_seats, ap.is_active,
+          ap.total_seats,
+          (SELECT COUNT(*) FROM applications a WHERE a.admission_period_id = ap.id AND a.status <> 'draft') AS filled_seats,
+          ap.is_active,
           fm.code_no AS course_id,
           CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name,
           fm.duration_years,
@@ -176,7 +178,7 @@ router.get('/by-code/:code', async (req, res) => {
           AND ap.is_disabled = 0
           AND ap.start_date <= @today
           AND ap.end_date   >= @today
-          AND ap.filled_seats < ap.total_seats
+          AND (SELECT COUNT(*) FROM applications a WHERE a.admission_period_id = ap.id AND a.status <> 'draft') < ap.total_seats
         ORDER BY fm.degree_course_name, ap.year_of_study
       `);
 
@@ -237,7 +239,9 @@ router.get('/:id/admission-periods', async (req, res) => {
         SELECT
           ap.id, ap.year_of_study, ap.academic_year,
           ap.start_date, ap.end_date,
-          ap.total_seats, ap.filled_seats, ap.is_active,
+          ap.total_seats,
+          (SELECT COUNT(*) FROM applications a WHERE a.admission_period_id = ap.id AND a.status <> 'draft') AS filled_seats,
+          ap.is_active,
           fm.code_no AS course_id,
           CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name,
           fm.duration_years,
@@ -248,7 +252,7 @@ router.get('/:id/admission-periods', async (req, res) => {
           AND ap.is_active  = 1
           AND ap.start_date <= @today
           AND ap.end_date   >= @today
-          AND ap.filled_seats < ap.total_seats
+          AND (SELECT COUNT(*) FROM applications a WHERE a.admission_period_id = ap.id AND a.status <> 'draft') < ap.total_seats
         ORDER BY fm.degree_course_name, ap.year_of_study
       `);
 

@@ -101,6 +101,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
 
   // ── Auto-determine fees_category from caste+special_status ──
   useEffect(() => {
+    if (!categoryMaster) return  // wait until master is loaded before overwriting
     const result = determineFeesCategory(data.category, data.special_status)
     setDetermined(result)
     if (!overrideMode) {
@@ -108,7 +109,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
       onChange({ target: { name: 'fees_category_override', value: false } })
       onChange({ target: { name: 'fees_category_override_remark', value: '' } })
     }
-  }, [data.category, data.special_status, overrideMode])
+  }, [data.category, data.special_status, overrideMode, categoryMaster])
 
   // Keep remark in sync
   useEffect(() => {

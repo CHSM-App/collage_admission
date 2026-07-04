@@ -226,7 +226,8 @@ export default function ApplicationDetail({ collegeId, appId }) {
         <Row label="Gender"        value={d.app_sex} />
         <Row label="Mobile"        value={d.app_mobile} />
         <Row label="Email"         value={d.app_email} />
-        <Row label="Category"      value={d.app_category} />
+        <Row label="Category"       value={d.app_category} />
+        <Row label="Special Status" value={d.app_special_status} />
         <Row
           label="Address"
           value={[d.app_address, d.app_taluka, d.app_district, d.app_state].filter(Boolean).join(', ')}
@@ -528,7 +529,7 @@ const ACTION_META = {
 }
 
 function ActivityTimeline({ app }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(true)
   const activity = app.activity || []
 
   const entries = activity.map(a => {
@@ -651,9 +652,9 @@ function ExamDetailsSection({ exams, yearOfStudy }) {
       {entries.length === 0 ? (
         <p className="text-sm text-slate-500 col-span-2">No exam details filled.</p>
       ) : (
-        <div className="col-span-2 overflow-x-auto">
-          <div className="rounded-lg border-2 border-slate-400 overflow-hidden">
-            <table className="w-full text-xs border-collapse">
+        <div className="col-span-2 -mx-4 px-4 overflow-x-auto">
+          <div className="rounded-lg border-2 border-slate-400 overflow-hidden min-w-max">
+            <table className="text-xs border-collapse">
               <thead className="bg-slate-100 border-b-2 border-slate-400">
                 <tr>
                   {['Exam','Institute','Board/Univ.','Month & Year','Seat No.','Marks','Out of','%','Class/Grade','Remark'].map(h => (
@@ -665,15 +666,15 @@ function ExamDetailsSection({ exams, yearOfStudy }) {
                 {entries.map(([type, r]) => (
                   <tr key={type} className="even:bg-slate-50 hover:bg-blue-50 transition">
                     <td className="border border-slate-200 px-2 py-1 font-semibold text-slate-700 whitespace-nowrap">{EXAM_LABEL[type] || type}</td>
-                    <td className="border border-slate-200 px-2 py-1">{r.institute || '—'}</td>
-                    <td className="border border-slate-200 px-2 py-1">{r.board || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.institute || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.board || '—'}</td>
                     <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.month_year || '—'}</td>
-                    <td className="border border-slate-200 px-2 py-1">{r.seat_no || '—'}</td>
-                    <td className="border border-slate-200 px-2 py-1">{r.marks_obtained || '—'}</td>
-                    <td className="border border-slate-200 px-2 py-1">{r.marks_max || '—'}</td>
-                    <td className="border border-slate-200 px-2 py-1">{r.percentage ? `${r.percentage}%` : '—'}</td>
-                    <td className="border border-slate-200 px-2 py-1">{r.class_grade || '—'}</td>
-                    <td className="border border-slate-200 px-2 py-1">{r.remark || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.seat_no || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.marks_obtained || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.marks_max || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.percentage ? `${r.percentage}%` : '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.class_grade || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.remark || '—'}</td>
                   </tr>
                 ))}
               </tbody>

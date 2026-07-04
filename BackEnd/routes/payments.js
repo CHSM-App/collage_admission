@@ -65,16 +65,16 @@ router.use('/initiate', paymentLimiter);
 
 // ── Shared helpers ────────────────────────────────────────────
 
-// async function logActivity(appId, action, actorRole, note = null) {
-//   try {
-//     await db.request()
-//       .input('appId',     mssql.Int,      parseInt(appId))
-//       .input('action',    mssql.NVarChar, action)
-//       .input('actorRole', mssql.NVarChar, actorRole)
-//       .input('note',      mssql.NVarChar, note || null)
-//       .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
-//   } catch (e) { logger.warn({ err: e }, 'logActivity failed'); }
-// }
+async function logActivity(appId, action, actorRole, note = null) {
+  try {
+    await db.request()
+      .input('appId',     mssql.Int,      parseInt(appId))
+      .input('action',    mssql.NVarChar, action)
+      .input('actorRole', mssql.NVarChar, actorRole)
+      .input('note',      mssql.NVarChar, note || null)
+      .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
+  } catch (e) { logger.warn({ err: e }, 'logActivity failed'); }
+}
 
 async function getStudentForNotification(appId) {
   try {
@@ -1166,7 +1166,7 @@ async function handlePayUReturn(req, res) {
 
     // Post-commit side effects
     if (payType === 'application_fee') {
-      // await logActivity(appId, 'submitted', 'student', null);
+      await logActivity(appId, 'submitted', 'student', null);
       const regParam = result.regNum ? `&reg=${encodeURIComponent(result.regNum)}` : '';
       return res.redirect(frontendUrl(`/payment-result?status=success&app_id=${appId}&payment_type=application_fee${regParam}${viaParam}`));
     } else if (payType === 'misc_fee' || payType === 'exam_fee') {
@@ -1174,7 +1174,7 @@ async function handlePayUReturn(req, res) {
     } else {
       const { totalPaid, totalFee, firstPaid, fullyPaid } = result;
       if (firstPaid || fullyPaid) {
-        // await logActivity(appId, 'fees_paid', 'student', `₹${totalPaid?.toLocaleString('en-IN')} paid`);
+        await logActivity(appId, 'fees_paid', 'student', `₹${totalPaid?.toLocaleString('en-IN')} paid`);
         if (firstPaid) getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
       }
       return res.redirect(frontendUrl(`/payment-result?status=success&app_id=${appId}&payment_type=college_fee&fully_paid=${fullyPaid ? '1' : '0'}${viaParam}`));
@@ -1254,9 +1254,9 @@ async function handlePayUWebhook(req, res) {
 
     // Side effects
     if (payType === 'application_fee') {
-      // await logActivity(appId, 'submitted', 'student', 'PayU webhook');
+      await logActivity(appId, 'submitted', 'student', 'PayU webhook');
     } else if (result.firstPaid || result.fullyPaid) {
-      // await logActivity(appId, 'fees_paid', 'student', `PayU webhook: ₹${result.totalPaid?.toLocaleString('en-IN')} paid`);
+      await logActivity(appId, 'fees_paid', 'student', `PayU webhook: ₹${result.totalPaid?.toLocaleString('en-IN')} paid`);
       if (result.firstPaid) getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
     }
 
@@ -1313,7 +1313,7 @@ router.post('/cash/:collegeId/applications/:appId', async (req, res) => {
       throw e;
     }
 
-    // await logActivity(appId, 'fees_paid', 'college', `Cash ₹${amount.toLocaleString('en-IN')}`);
+    await logActivity(appId, 'fees_paid', 'college', `Cash ₹${amount.toLocaleString('en-IN')}`);
     return res.json({ success: true, message: `Cash payment of ₹${amount.toLocaleString('en-IN')} recorded.` });
   } catch (err) {
     logger.error({ err }, 'cash payment error');
@@ -1453,8 +1453,8 @@ router.post('/send-payment-link', authenticate, async (req, res) => {
     const sample    = `${app.college_name},${app.registration_number || appId},${link}`;
     await whatsapp.sendTemplateMessage(normPhone, '590', sample, 'payment_link', appId);
 
-    // await logActivity(appId, 'payment_link_sent', 'college',
-    //   `₹${amount.toLocaleString('en-IN')} ${payment_type} link sent to ${phone}`);
+    await logActivity(appId, 'payment_link_sent', 'college',
+      `₹${amount.toLocaleString('en-IN')} ${payment_type} link sent to ${phone}`);
 
     return res.json({ success: true, message: 'Payment link sent via WhatsApp.', link });
   } catch (err) {
@@ -1523,8 +1523,8 @@ async function handlePayViaToken(req, res) {
           VALUES (@appId, @ptype, @amount, 'pending', 'payu', @txnid, 'student')
         `);
 
-      // await logActivity(tok.application_id, 'payment_link_opened', 'student',
-      //   `₹${amount.toLocaleString('en-IN')} ${tok.payment_type} link opened`);
+      await logActivity(tok.application_id, 'payment_link_opened', 'student',
+        `₹${amount.toLocaleString('en-IN')} ${tok.payment_type} link opened`);
     }
 
     // Token is NOT marked used here — payu-return/webhook marks it used after payment succeeds.

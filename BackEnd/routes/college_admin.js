@@ -35,21 +35,21 @@ router.use(authenticate);
 router.param('collegeId', (req, res, next) => requireCollegeAccess(req, res, next));
 
 // ── Activity log helper ─────────────────────────────────────
-// async function logActivity(appId, action, actorRole, note = null) {
-//   try {
-//     await db.request()
-//       .input('appId',     mssqlShared.Int,      parseInt(appId))
-//       .input('action',    mssqlShared.NVarChar,  action)
-//       .input('actorRole', mssqlShared.NVarChar,  actorRole)
-//       .input('note',      mssqlShared.NVarChar,  note || null)
-//       .query(`
-//         INSERT INTO application_activity_log (application_id, action, actor_role, note)
-//         VALUES (@appId, @action, @actorRole, @note)
-//       `);
-//   } catch (e) {
-//     logger.warn({ err: e }, 'logActivity failed');
-//   }
-// }
+async function logActivity(appId, action, actorRole, note = null) {
+  try {
+    await db.request()
+      .input('appId',     mssqlShared.Int,      parseInt(appId))
+      .input('action',    mssqlShared.NVarChar,  action)
+      .input('actorRole', mssqlShared.NVarChar,  actorRole)
+      .input('note',      mssqlShared.NVarChar,  note || null)
+      .query(`
+        INSERT INTO application_activity_log (application_id, action, actor_role, note)
+        VALUES (@appId, @action, @actorRole, @note)
+      `);
+  } catch (e) {
+    logger.warn({ err: e }, 'logActivity failed');
+  }
+}
 
 // ── WhatsApp student info helper ────────────────────────────
 async function getStudentForNotification(appId) {
@@ -97,7 +97,8 @@ router.get('/:collegeId/admission-periods', async (req, res) => {
       .input('today', today)
       .query(`
         SELECT ap.id, ap.year_of_study, ap.academic_year,
-               ap.start_date, ap.end_date, ap.total_seats, ap.filled_seats,
+               ap.start_date, ap.end_date, ap.total_seats,
+               (SELECT COUNT(*) FROM applications a WHERE a.admission_period_id = ap.id AND a.status <> 'draft') AS filled_seats,
                ap.is_active, ap.is_disabled,
                fm.code_no AS course_id,
                CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name
@@ -506,7 +507,7 @@ router.post('/:collegeId/applications/:appId/request-correction', requireWrite('
         WHERE id = @id
       `);
 
-    // await logActivity(req.params.appId, 'correction_requested', 'college', note.trim());
+    await logActivity(req.params.appId, 'correction_requested', 'college', note.trim());
     getStudentForNotification(req.params.appId).then(s => s && whatsapp.notifyCorrectionRequested(s));
 
     return res.json({ success: true, message: 'Correction requested. Student has been notified.' });
@@ -556,7 +557,7 @@ router.post('/:collegeId/applications/:appId/approve', requireWrite('review_appl
       throw txErr;
     }
 
-    // await logActivity(req.params.appId, 'accepted', 'college', null);
+    await logActivity(req.params.appId, 'accepted', 'college', null);
     getStudentForNotification(req.params.appId).then(s => s && whatsapp.notifyApplicationAccepted(s));
 
     return res.json({ success: true, message: 'Application accepted. Student has been notified to visit the college.' });
@@ -593,7 +594,7 @@ router.post('/:collegeId/applications/:appId/reject', requireWrite('review_appli
         WHERE id = @id
       `);
 
-    // await logActivity(req.params.appId, 'rejected', 'college', reason || null);
+    await logActivity(req.params.appId, 'rejected', 'college', reason || null);
     getStudentForNotification(req.params.appId).then(s => s && whatsapp.notifyApplicationRejected(s));
 
     return res.json({ success: true, message: 'Application rejected.' });
@@ -795,7 +796,7 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
     await saveInstallments(parseInt(req.params.appId), validInstallments, actor, null);
 
     const instSummary = validInstallments.map(i => `Inst-${i.installment_no}: ₹${i.amount}`).join(', ');
-    // await logActivity(req.params.appId, 'confirmed', 'college', `Total fee: ₹${total}. Installments: ${instSummary}`);
+    await logActivity(req.params.appId, 'confirmed', 'college', `Total fee: ₹${total}. Installments: ${instSummary}`);
 
     return res.json({ success: true, message: 'Admission confirmed. Student can now pay the college fee.' });
   } catch (err) {
@@ -904,7 +905,7 @@ router.post('/:collegeId/applications/:appId/cancel', requireWrite('review_appli
       throw txErr;
     }
 
-    // await logActivity(req.params.appId, 'cancelled', 'college', reason || null);
+    await logActivity(req.params.appId, 'cancelled', 'college', reason || null);
 
     return res.json({ success: true, message: 'Application cancelled and seat freed.' });
   } catch (err) {
@@ -992,7 +993,7 @@ router.post('/:collegeId/applications/:appId/record-application-fee', requirePer
       throw e;
     }
 
-    // await logActivity(appId, 'submitted', 'college', `Cash application fee: ₹${fee.toLocaleString('en-IN')}`);
+    await logActivity(appId, 'submitted', 'college', `Cash application fee: ₹${fee.toLocaleString('en-IN')}`);
 
     return res.json({ success: true, message: `Application fee collected and application submitted.`, amount: fee, registration_number: regNum });
   } catch (err) {
@@ -1097,13 +1098,13 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
 
     const noteText = note ? ` — ${note}` : '';
     if (fullyPaid) {
-      // await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${newTotalPaid.toLocaleString('en-IN')} (full)${noteText}`);
+      await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${newTotalPaid.toLocaleString('en-IN')} (full)${noteText}`);
       if (firstPaid) getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
     } else if (firstPaid) {
-      //  await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${newTotalPaid.toLocaleString('en-IN')} paid, ₹${newRemaining.toLocaleString('en-IN')} remaining${noteText}`);
+      await logActivity(appId, 'fees_paid', 'college', `Cash: ₹${newTotalPaid.toLocaleString('en-IN')} paid, ₹${newRemaining.toLocaleString('en-IN')} remaining${noteText}`);
       getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));
     } else {
-      // await logActivity(appId, 'fee_instalment_paid', 'college', `Cash: ₹${amt.toLocaleString('en-IN')}, ₹${newRemaining.toLocaleString('en-IN')} remaining${noteText}`);
+      await logActivity(appId, 'fee_instalment_paid', 'college', `Cash: ₹${amt.toLocaleString('en-IN')}, ₹${newRemaining.toLocaleString('en-IN')} remaining${noteText}`);
     }
 
     return res.json({
@@ -1532,7 +1533,7 @@ router.post('/:collegeId/roll-numbers/generate', requirePerm('assign_subjects'),
             SET roll_number = @roll, status = 'roll_assigned', updated_at = GETDATE(), updated_by = @actor
             WHERE id = @id
           `);
-        // await logActivity(app.id, 'roll_assigned', 'college', `Roll number: ${nextRoll}`);
+        await logActivity(app.id, 'roll_assigned', 'college', `Roll number: ${nextRoll}`);
         assignedRolls.push({ id: app.id, roll: String(nextRoll) });
         nextRoll++;
       }

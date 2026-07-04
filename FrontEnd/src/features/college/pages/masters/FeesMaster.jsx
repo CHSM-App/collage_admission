@@ -1,5 +1,5 @@
-import { useEffect, useState, useMemo } from 'react'
-import { getFeesList, createFees, updateFees, deleteFees, getBankLedgers, getFaculty, getClasswiseFees, saveClasswiseFees, deleteClasswiseFee, getCategoryMaster, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
+import { useEffect, useState, useMemo, useRef } from 'react'
+import { getFeesList, createFees, updateFees, deleteFees, getBankLedgers, getFaculty, getClasswiseFees, getClasswiseFeesLive, saveClasswiseFees, deleteClasswiseFee, getCategoryMaster, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 import { useToast } from '../../../../context/ToastContext.jsx'
@@ -99,6 +99,7 @@ export default function FeesMaster({ collegeId }) {
   const [cwSaving, setCwSaving]       = useState(false)
   const [cwError, setCwError]         = useState('')
   const [cwSuccess, setCwSuccess]     = useState('')
+  const cwSavingRef = useRef(false)
 
   const CW_STUDENT_TYPES = ['Grand', 'NonGrand', 'Outsider']
   const CW_STUDENT_TYPE_LABEL = { Grand: 'Grant', NonGrand: 'Non-Grant', Outsider: 'Outsider' }
@@ -239,41 +240,71 @@ export default function FeesMaster({ collegeId }) {
   }, [cwSelFacRow, cwYearLevels, cwSelYear])
 
   const cwHeadRows = useMemo(() => allRows.filter(r => r.is_active && r.academic_year === cwSelAY), [allRows, cwSelAY])
+  // Track a load key to explicitly trigger classwise reload only on filter changes, not on allRows background refresh
+  const [cwLoadKey, setCwLoadKey] = useState(0)
+  const cwLoadKeyRef = useRef(0)
+
+  // Trigger a classwise reload when filters change (but NOT when allRows changes due to background refresh)
+  useEffect(() => {
+    if (activeTab !== 'classwise' || !cwSelFac) return
+    cwLoadKeyRef.current += 1
+    setCwLoadKey(cwLoadKeyRef.current)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, cwSelFac, cwSelYear, cwSelType, cwSelAY])
+
+  // Also trigger reload when feesCategories first loads (if on classwise tab)
+  const prevFeesCategories = useRef(null)
+  useEffect(() => {
+    if (feesCategories === prevFeesCategories.current) return
+    prevFeesCategories.current = feesCategories
+    if (activeTab !== 'classwise' || !cwSelFac) return
+    cwLoadKeyRef.current += 1
+    setCwLoadKey(cwLoadKeyRef.current)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feesCategories])
 
   useEffect(() => {
     if (activeTab !== 'classwise' || !cwSelFac) return
+    if (cwSavingRef.current) return  // don't overwrite cwRows while save is in progress
+    const headRows = allRows.filter(r => r.is_active && r.academic_year === cwSelAY)
+    const cats = (feesCategories && feesCategories.length > 0) ? feesCategories : DEFAULT_CATS
     setCwError(''); setCwSuccess('')
     getClasswiseFees(collegeId, cwSelFac, cwSelYear, cwSelType, cwSelAY)
       .then(cwRes => {
+        if (cwSavingRef.current) return  // save started while fetch was in flight
         const existing = cwRes.data.data || []
-        const merged = cwHeadRows.map(r => {
+        const merged = headRows.map(r => {
           const ov = existing.find(e => e.fees_code === r.fees_code)
           const catAmounts = {}
-          effectiveCats.forEach(c => {
+          cats.forEach(c => {
             catAmounts[`cat${c.slab_index}_amount`] = ov?.[`cat${c.slab_index}_amount`] ?? ''
           })
           return {
-            fees_code:  r.fees_code,
-            fees_head:  r.fees_head,
-            short_name: r.short_name,
-            fees_type:  r.fees_type,
-            selected:   !!ov,
+            fees_code:    r.fees_code,
+            fees_head:    r.fees_head,
+            short_name:   r.short_name,
+            fees_type:    r.fees_type,
+            selected:     !!ov,
+            _existsInDb:  !!ov,
             ...catAmounts,
           }
         })
         setCwRows(merged)
       }).catch(() => setCwError('Failed to load classwise fees.'))
-  }, [activeTab, cwSelFac, cwSelYear, cwSelType, cwSelAY, cwHeadRows, feesCategories])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cwLoadKey])
 
   function updateCw(feesCode, field, val) {
     setCwRows(rs => rs.map(r => r.fees_code === feesCode ? { ...r, [field]: val } : r))
   }
 
   async function saveCw() {
+    cwSavingRef.current = true
     setCwSaving(true); setCwError(''); setCwSuccess('')
     try {
-      const selected   = cwRows.filter(r => r.selected)
-      const deselected = cwRows.filter(r => !r.selected)
+      const selected = cwRows.filter(r => r.selected)
+      const toDelete = cwRows.filter(r => !r.selected && r._existsInDb)
+
       if (selected.length) {
         await saveClasswiseFees(collegeId, {
           faculty_master_id: cwSelFac,
@@ -290,7 +321,8 @@ export default function FeesMaster({ collegeId }) {
           }),
         })
       }
-      for (const r of deselected) {
+
+      for (const r of toDelete) {
         await deleteClasswiseFee(collegeId, {
           faculty_master_id: cwSelFac,
           year_level:        cwSelYear,
@@ -299,9 +331,28 @@ export default function FeesMaster({ collegeId }) {
           fees_code:         r.fees_code,
         })
       }
+
+      // Re-fetch from server to get ground truth, then update rows.
+      // Keep cwSavingRef.current = true until after setCwRows so the useEffect
+      // re-render triggered by state change doesn't race and overwrite our result.
+      const cwRes = await getClasswiseFeesLive(collegeId, cwSelFac, cwSelYear, cwSelType, cwSelAY)
+      const existing = cwRes.data.data || []
+      setCwRows(prev => prev.map(r => {
+        const ov = existing.find(e => e.fees_code === r.fees_code)
+        const catAmounts = {}
+        effectiveCats.forEach(c => {
+          catAmounts[`cat${c.slab_index}_amount`] = ov?.[`cat${c.slab_index}_amount`] ?? ''
+        })
+        return { ...r, selected: !!ov, _existsInDb: !!ov, ...catAmounts }
+      }))
       setCwSuccess('Saved successfully.')
     } catch (e) { setCwError(e?.response?.data?.message || 'Save failed.') }
-    finally { setCwSaving(false) }
+    finally {
+      setCwSaving(false)
+      // Release the save guard after current render cycle so the useEffect
+      // triggered by setCwRows above doesn't overwrite the fresh data.
+      setTimeout(() => { cwSavingRef.current = false }, 0)
+    }
   }
 
   return (
@@ -356,21 +407,21 @@ export default function FeesMaster({ collegeId }) {
           {loading ? <SkeletonTable rows={4} cols={4} /> : (
             <>
               <div className="hidden sm:block overflow-x-auto border border-slate-300">
-                <table className="w-full text-sm border-collapse">
-                  <thead className="bg-slate-50 text-xs font-bold text-slate-600 uppercase tracking-wide border-b border-slate-300">
-                    <tr>
-                      {rw && <th className="px-2 py-1 w-8 border-r border-slate-200" />}
-                      <FMTh col="sequence_auto_fees" label="Seq"      align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-8" />
-                      <FMTh col="fees_head"          label="Fees Head" align="left"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} />
-                      <FMTh col="short_name"         label="Short"    align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
-                      <FMTh col="fees_type"          label="Type"     align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
-                      <th className="px-3 py-1 text-center w-20 border-r border-slate-200">Refund.</th>
-                      <FMTh col="is_active"          label="Status"   align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-16" />
-                      <th className="px-3 py-1 w-20 border-r border-slate-200" />
-                    </tr>
-                  </thead>
-                  <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-                    <SortableContext items={dragRows.map(r => r.fees_code)} strategy={verticalListSortingStrategy}>
+                <DndContext sensors={dndSensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                  <SortableContext items={dragRows.map(r => r.fees_code)} strategy={verticalListSortingStrategy}>
+                    <table className="w-full text-sm border-collapse">
+                      <thead className="bg-slate-50 text-xs font-bold text-slate-600 uppercase tracking-wide border-b border-slate-300">
+                        <tr>
+                          {rw && <th className="px-2 py-1 w-8 border-r border-slate-200" />}
+                          <FMTh col="sequence_auto_fees" label="Seq"      align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-8" />
+                          <FMTh col="fees_head"          label="Fees Head" align="left"  sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} />
+                          <FMTh col="short_name"         label="Short"    align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
+                          <FMTh col="fees_type"          label="Type"     align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-20" />
+                          <th className="px-3 py-1 text-center w-20 border-r border-slate-200">Refund.</th>
+                          <FMTh col="is_active"          label="Status"   align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSortFM} className="w-16" />
+                          <th className="px-3 py-1 w-20 border-r border-slate-200" />
+                        </tr>
+                      </thead>
                       <tbody className="divide-y divide-slate-200">
                         {dragRows.length === 0 && (
                           <tr><td colSpan={rw ? 8 : 7} className="px-4 py-8 text-center text-slate-500">
@@ -381,9 +432,9 @@ export default function FeesMaster({ collegeId }) {
                           <SortableFMRow key={r.fees_code} row={r} rw={rw} onEdit={openEdit} onDelete={softDelete} dragging={dragging} />
                         ))}
                       </tbody>
-                    </SortableContext>
-                  </DndContext>
-                </table>
+                    </table>
+                  </SortableContext>
+                </DndContext>
               </div>
 
               {/* Mobile card list */}
@@ -488,7 +539,7 @@ export default function FeesMaster({ collegeId }) {
                       <th className="px-3 py-1 text-left border-r border-slate-200">Fee Head</th>
                       {effectiveCats.map(c => (
                         <th key={c.slab_index} className="px-3 py-1 text-center whitespace-nowrap border-r border-slate-200">
-                          {c.category_name || `Cat-${c.slab_index}`}
+                          {`Cat ${c.slab_index}`}
                         </th>
                       ))}
                     </tr>
@@ -536,7 +587,7 @@ export default function FeesMaster({ collegeId }) {
                       }, 0)
                     return (
                       <div key={c.slab_index} className="flex items-center gap-1.5">
-                        <span className="text-xs text-slate-400">{c.category_name || `Cat-${c.slab_index}`}:</span>
+                        <span className="text-xs text-slate-400">{`Cat ${c.slab_index}`}:</span>
                         <span className="text-xs font-bold font-mono text-slate-800">₹{total.toLocaleString('en-IN')}</span>
                       </div>
                     )
@@ -562,7 +613,7 @@ export default function FeesMaster({ collegeId }) {
                     const all = [...casteNames, ...statusNames]
                     return (
                       <span key={c.slab_index} className="text-xs text-slate-400">
-                        <span className="font-semibold text-slate-600">{c.category_name || `Cat-${c.slab_index}`}:</span>{' '}
+                        <span className="font-semibold text-slate-600">{`Cat ${c.slab_index}`}:</span>{' '}
                         {all.length > 0 ? all.join(', ') : <span className="italic">—</span>}
                       </span>
                     )

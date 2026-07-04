@@ -26,16 +26,16 @@ const logger   = require('../config/logger');
 // All application form routes require authentication
 router.use(authenticate);
 
-// async function logActivity(appId, action, actorRole, note = null) {
-//   try {
-//     await db.request()
-//       .input('appId',     mssql.Int,     parseInt(appId))
-//       .input('action',    mssql.NVarChar, action)
-//       .input('actorRole', mssql.NVarChar, actorRole)
-//       .input('note',      mssql.NVarChar, note || null)
-//       .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
-//   } catch (e) { logger.warn({ err: e }, 'logActivity failed'); }
-// }
+async function logActivity(appId, action, actorRole, note = null) {
+  try {
+    await db.request()
+      .input('appId',     mssql.Int,     parseInt(appId))
+      .input('action',    mssql.NVarChar, action)
+      .input('actorRole', mssql.NVarChar, actorRole)
+      .input('note',      mssql.NVarChar, note || null)
+      .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
+  } catch (e) { logger.warn({ err: e }, 'logActivity failed'); }
+}
 
 const MIN_AGE_FOR_FY = 16; // years
 
@@ -96,8 +96,10 @@ router.post('/applications/init', async (req, res) => {
     const period = await db.request()
       .input('pid', mssql.Int, parseInt(admission_period_id))
       .query(`
-        SELECT id, year_of_study, course_id, total_seats, filled_seats, is_active, end_date
-        FROM admission_periods WHERE id = @pid
+        SELECT id, year_of_study, course_id, total_seats,
+          (SELECT COUNT(*) FROM applications a WHERE a.admission_period_id = ap.id AND a.status <> 'draft') AS filled_seats,
+          is_active, end_date
+        FROM admission_periods ap WHERE id = @pid
       `);
 
     if (!period.recordset.length || !period.recordset[0].is_active) {
@@ -1083,7 +1085,7 @@ router.post('/applications/:id/resubmit', async (req, res) => {
         WHERE id = @id
       `);
 
-    // await logActivity(appId, 'correction_resubmitted', 'student', null);
+    await logActivity(appId, 'correction_resubmitted', 'student', null);
 
     return res.json({ success: true, message: 'Application resubmitted successfully.' });
   } catch (err) {
@@ -1252,7 +1254,7 @@ router.post('/applications/:id/subject-selections', async (req, res) => {
 
     // Log subject selection activity
     const subjectNote = `Semester ${semInt}: ${subjects.length} subject${subjects.length !== 1 ? 's' : ''} selected`;
-    // await logActivity(appId, 'subject_selected', 'student', subjectNote);
+    await logActivity(appId, 'subject_selected', 'student', subjectNote);
 
     // Update status to enrolled if roll_assigned and both sems have subjects
     if (appRes.recordset[0].status === 'roll_assigned') {
@@ -1264,7 +1266,7 @@ router.post('/applications/:id/subject-selections', async (req, res) => {
           .input('id', mssql.Int, appId)
           .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
           .query(`UPDATE applications SET status = 'enrolled', updated_at = GETDATE(), updated_by = @actor, status_updated_at = GETDATE() WHERE id = @id`);
-        // await logActivity(appId, 'enrolled', 'student', 'Subject selection completed');
+        await logActivity(appId, 'enrolled', 'student', 'Subject selection completed');
       }
     }
 

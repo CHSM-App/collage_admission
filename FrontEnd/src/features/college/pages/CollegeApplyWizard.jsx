@@ -50,7 +50,7 @@ const initialState = {
     surname:'', first_name:'', middle_name:'', mother_name:'',
     sex:'', mobile:'', email:'',
     address:'', taluka:'', district:'', state:'',
-    category:'', fees_category:'',
+    category:'', special_status:'', fees_category:'', fees_category_override: false, fees_category_override_remark:'',
     // Step 2 (other)
     birth_date:'', birth_place:'', birth_taluka:'', birth_district:'', birth_state:'',
     nationality:'Indian', marital_status:'', religion:'', caste:'', mother_tongue:'',
@@ -806,8 +806,11 @@ function buildAutofill(app, lastApp, profile) {
     taluka:       ap('taluka')      || '',
     district:     ap('district')    || '',
     state:        ap('state')       || '',
-    category:     ap('category')    || profile.category   || '',
-    fees_category:ap('fees_category')|| '',
+    category:       ap('category')       || profile.category   || '',
+    special_status: ap('special_status') || '',
+    fees_category:                app.fees_category                || '',
+    fees_category_override:       !!app.fees_category_override,
+    fees_category_override_remark:app.fees_category_override_remark || '',
 
     birth_date:         formatDate(ap('birth_date')) || formatDate(profile.birth_date) || '',
     birth_place:        ap('birth_place')      || profile.birth_place    || '',

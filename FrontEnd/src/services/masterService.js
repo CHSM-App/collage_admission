@@ -241,6 +241,12 @@ export const deleteClasswiseFee = (collegeId, data) =>
   api.delete(`masters/${collegeId}/fees/classwise`, { data })
     .then(r => { invalidate(`classwiseFees:${collegeId}:`); return r })
 
+export const getClasswiseFeesLive = (collegeId, facultyId, yearLevel, studentType = 'Grand', academicYear) => {
+  const key = `classwiseFees:${collegeId}:${facultyId}:${yearLevel}:${studentType}:${academicYear || ''}`
+  return api.get(`masters/${collegeId}/fees/classwise?faculty_id=${facultyId}&year_level=${yearLevel}&student_type=${studentType}${academicYear ? `&academic_year=${encodeURIComponent(academicYear)}` : ''}`)
+    .then(r => { _cache.set(key, { data: r, ts: Date.now() }); return r })
+}
+
 // ─── Fees configured check (not cached — always live) ─────────
 
 export const checkFeesConfigured = (collegeId, facultyMasterId, yearLevel, academicYear) =>

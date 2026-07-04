@@ -408,7 +408,7 @@ function FeesCatsTab({ master, collegeId, rw, onReload, toast }) {
                   <select value={form.slab_index} onChange={e => setForm(f => ({ ...f, slab_index: parseInt(e.target.value) }))} className={inp}>
                     <option value="">— Select index —</option>
                     {SLAB_OPTIONS.map(s => (
-                      <option key={s} value={s} disabled={usedSlabs.includes(s)}>{s}{usedSlabs.includes(s) ? ' (in use)' : ''}</option>
+                      <option key={s} value={s} disabled={usedSlabs.includes(s)}>Cat-{s}{usedSlabs.includes(s) ? ' (in use)' : ''}</option>
                     ))}
                   </select>
                 </F>

@@ -44,16 +44,16 @@ const applicationMutationLimiter = rateLimit({
 router.use('/subjects', applicationMutationLimiter);
 router.post('/',        applicationMutationLimiter);
 
-// async function logActivity(appId, action, actorRole, note = null) {
-//   try {
-//     await db.request()
-//       .input('appId',     mssql.Int,     parseInt(appId))
-//       .input('action',    mssql.NVarChar, action)
-//       .input('actorRole', mssql.NVarChar, actorRole)
-//       .input('note',      mssql.NVarChar, note || null)
-//       .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
-//   } catch (e) { logger.warn({ err: e }, 'logActivity failed'); }
-// }
+async function logActivity(appId, action, actorRole, note = null) {
+  try {
+    await db.request()
+      .input('appId',     mssql.Int,     parseInt(appId))
+      .input('action',    mssql.NVarChar, action)
+      .input('actorRole', mssql.NVarChar, actorRole)
+      .input('note',      mssql.NVarChar, note || null)
+      .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
+  } catch (e) { logger.warn({ err: e }, 'logActivity failed'); }
+}
 
 // ── Helper: generate registration number ────────────────────
 async function generateRegNumber(collegeId, courseId, year, academicYear) {
@@ -123,7 +123,8 @@ router.get('/', async (req, res) => {
           ISNULL(psum.amount_paid, 0) AS amount_paid,
           c.id   AS college_id,   c.name  AS college_name,  c.city AS college_city,
           a.course_id,    COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
-          COALESCE(c.application_fee, 0) AS application_fee, ap.total_seats, ap.filled_seats
+          COALESCE(c.application_fee, 0) AS application_fee, ap.total_seats,
+          (SELECT COUNT(*) FROM applications ax WHERE ax.admission_period_id = ap.id AND ax.status <> 'draft') AS filled_seats
         ${joins} ${where}
         ORDER BY a.created_at DESC
         ${paginateQuery(offset, limit)}
@@ -149,7 +150,8 @@ router.get('/:id', async (req, res) => {
           s.phone, s.dob, s.gender, s.address, s.city, s.category,
           c.name  AS college_name,  c.city   AS college_city,
           COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
-          COALESCE(c.application_fee, 0) AS application_fee, ap.total_seats, ap.filled_seats,
+          COALESCE(c.application_fee, 0) AS application_fee, ap.total_seats,
+          (SELECT COUNT(*) FROM applications ax WHERE ax.admission_period_id = ap.id AND ax.status <> 'draft') AS filled_seats,
           ap.start_date, ap.end_date
         FROM applications a
         JOIN students       s  ON s.id       = a.student_id
@@ -226,8 +228,10 @@ router.post('/', createApplicationValidators, validate, async (req, res) => {
     const period = await db.request()
       .input('pid', parseInt(admission_period_id))
       .query(`
-        SELECT id, total_seats, filled_seats, is_active, end_date
-        FROM admission_periods WHERE id = @pid
+        SELECT id, total_seats,
+          (SELECT COUNT(*) FROM applications a WHERE a.admission_period_id = ap.id AND a.status <> 'draft') AS filled_seats,
+          is_active, end_date
+        FROM admission_periods ap WHERE id = @pid
       `);
 
     if (period.recordset.length === 0) {
@@ -394,7 +398,7 @@ router.post('/:id/submit', async (req, res) => {
       throw txErr;
     }
 
-    // await logActivity(appId, 'submitted', 'student', null);
+    await logActivity(appId, 'submitted', 'student', null);
 
     return res.json({
       success: true,
@@ -484,7 +488,7 @@ router.post('/:id/pay-college-fee', async (req, res) => {
       throw txErr;
     }
 
-    // await logActivity(appId, 'fees_paid', 'student', null);
+    await logActivity(appId, 'fees_paid', 'student', null);
 
     return res.json({ success: true, message: 'College fee paid successfully.' });
   } catch (err) {
@@ -592,7 +596,7 @@ router.post('/:id/subjects', async (req, res) => {
       throw txErr;
     }
 
-    // await logActivity(appId, 'enrolled', 'student', null);
+    await logActivity(appId, 'enrolled', 'student', null);
 
     return res.json({ success: true, message: 'Subjects selected. Enrollment complete.' });
   } catch (err) {
