@@ -10,6 +10,7 @@ const ALLOWED_EXTS  = ['pdf', 'jpg', 'jpeg', 'png']
 export default function Step5Documents({
   data, errors, globalError, saving, appId, studentId,
   onBack, onNext, onDocumentsChange, extraFooter, readOnly,
+  skipMandatoryCheck,   // college entry: bypass mandatory doc enforcement
 }) {
   const required = data.required_documents || []
   const linked   = data.linked_documents   || []
@@ -109,9 +110,11 @@ export default function Step5Documents({
     }
   }
 
-  const missingMandatory = required
-    .filter(rd => rd.is_mandatory && !linkedMap[rd.document_type_id])
-    .map(rd => rd.document_name)
+  const missingMandatory = skipMandatoryCheck
+    ? []
+    : required
+        .filter(rd => rd.is_mandatory && !linkedMap[rd.document_type_id])
+        .map(rd => rd.document_name)
 
   function handleNext() {
     if (missingMandatory.length > 0) return

@@ -221,7 +221,9 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
     .map(row => {
       const cwCol   = `cw_cat${slab}`
       const baseCol = `fees_cat${slab}_amount`
-      const amount  = row[cwCol] != null ? parseFloat(row[cwCol]) : parseFloat(row[baseCol] || 0)
+      const cwVal   = row[cwCol]
+      const baseVal = row[baseCol]
+      const amount  = cwVal != null ? parseFloat(String(cwVal)) : parseFloat(String(baseVal ?? 0))
       return {
         fees_code:    row.fees_code,
         fees_head:    row.fees_head,
@@ -265,14 +267,14 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
       const cwSlabAmount = row[`cw_cat${slab}`]
       const cwFallback = cwSlabAmount != null ? cwSlabAmount
         : [1,2,3,4,5,6,7,8].reduce((found, n) => found != null ? found : row[`cw_cat${n}`], null)
-      const amount = cwFallback != null ? parseFloat(cwFallback) : 0
+      const amount = cwFallback != null ? parseFloat(String(cwFallback)) : 0
 
-      // If this fee head already exists in the breakdown (fetched with Grand/NonGrand type,
-      // amount=0 because there's no classwise row for that type), replace its amount with
-      // the outsider amount. Otherwise append as a new entry.
+      // If this fee head already exists in the breakdown (fetched with Grand/NonGrand type),
+      // only override its amount with the outsider amount when the outsider amount is non-zero.
+      // If outsider classwise row has all nulls (amount=0), keep the fees_master base amount.
       const existing = breakdown.find(h => h.fees_code === row.fees_code)
       if (existing) {
-        existing.amount = amount
+        if (amount > 0) existing.amount = amount
         existing.is_outsider = true
       } else {
         breakdown.push({

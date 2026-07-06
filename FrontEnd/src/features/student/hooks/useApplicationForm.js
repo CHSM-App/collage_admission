@@ -115,7 +115,7 @@ function buildAutofill(app, lastApp, profile, user) {
     taluka:       appPrefix('taluka')     || '',
     district:     appPrefix('district')   || '',
     state:        appPrefix('state')      || '',
-    category:        appPrefix('category')       || profile.category || '',
+    category:        appPrefix('category')       || '',
     special_status:  appPrefix('special_status') || '',
     fees_category:   app.fees_category           || '',
     fees_category_override:        app.fees_category_override        || false,
