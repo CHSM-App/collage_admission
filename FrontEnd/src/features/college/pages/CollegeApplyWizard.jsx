@@ -447,6 +447,7 @@ export default function CollegeApplyWizard() {
               onSubmit={handleFinalSubmit}
               onSaveAndReturn={() => navigate(`/college/dashboard?section=app&app_id=${applicationId}`)}
               onProceedToFees={handleProceedToFees}
+              onAddNew={() => navigate('/college/dashboard?section=add-application')}
               submitted={registrationNumber !== null}
               registrationNumber={registrationNumber}
               appFee={appFee}
@@ -477,6 +478,7 @@ export default function CollegeApplyWizard() {
               onBack={() => goStep(5)}
               onGoToInbox={() => navigate('/college/dashboard?section=inbox')}
               onGoToDetail={() => navigate(`/college/dashboard?section=app&app_id=${applicationId}`)}
+              onAddNew={() => navigate('/college/dashboard?section=add-application')}
             />
           )}
         </div>
@@ -505,7 +507,7 @@ function CollegeReviewStep({
   submitted, registrationNumber, appFee,
   feeCollected, linkSent, feeMode, setFeeMode, feeError, setFeeError,
   feeCollecting, onlinePaying, linkSending, linkPhone, setLinkPhone,
-  onCollectCash, onPayOnline, onSendLink,
+  onCollectCash, onPayOnline, onSendLink, onAddNew,
 }) {
   const d = data
   const linkedMap = Object.fromEntries((d.linked_documents || []).map(doc => [doc.document_type_id, doc]))
@@ -734,9 +736,12 @@ function CollegeReviewStep({
 
             {/* Proceed to Step 6 — shown once app fee is handled */}
             {appFeeHandled && (
-              <Button onClick={onProceedToFees} className="w-full">
-                Proceed to Division &amp; Fee Collection →
-              </Button>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <Button onClick={onAddNew} variant="secondary">+ Add New Application</Button>
+                <Button onClick={onProceedToFees} className="sm:ml-auto">
+                  Proceed to Division &amp; Fee Collection →
+                </Button>
+              </div>
             )}
           </div>
         )}
@@ -767,7 +772,7 @@ function CollegeReviewStep({
 }
 
 // ── Step 6: Division, Fee Computation, Installment Plan & College Fee Collection ──
-function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy, onBack, onGoToInbox, onGoToDetail }) {
+function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy, onBack, onGoToInbox, onGoToDetail, onAddNew }) {
   const YEAR_MAP = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 
   const [divisions,      setDivisions]      = useState([])
@@ -852,6 +857,7 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
       collegeId={collegeId}
       onGoToInbox={onGoToInbox}
       onGoToDetail={onGoToDetail}
+      onAddNew={onAddNew}
     />
   ) : null
 
@@ -1014,7 +1020,7 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
 }
 
 // ── College fee payment section (after admission confirmed) ──────────────────
-function CollegeFeePaySection({ applicationId, collegeId, onGoToInbox, onGoToDetail }) {
+function CollegeFeePaySection({ applicationId, collegeId, onGoToInbox, onGoToDetail, onAddNew }) {
   const [payMode,     setPayMode]     = useState(null)
   const [amount,      setAmount]      = useState('')
   const [note,        setNote]        = useState('')
@@ -1295,6 +1301,7 @@ function CollegeFeePaySection({ applicationId, collegeId, onGoToInbox, onGoToDet
         {/* Navigation */}
         <div className="flex gap-2 pt-2">
           <Button onClick={onGoToDetail} variant="secondary">View Application Detail</Button>
+          <Button onClick={onAddNew} variant="secondary">+ Add New Application</Button>
           <Button onClick={onGoToInbox} className="ml-auto">Go to Inbox →</Button>
         </div>
       </div>
