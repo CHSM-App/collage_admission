@@ -2,8 +2,8 @@ name: Publish frontend and backend on tag
 
 on:
   push:
-    tags:
-      - '*'
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -47,7 +47,7 @@ jobs:
           publish_branch: ${{ env.DEPLOY_BRANCH }}
           publish_dir: ./${{ env.FRONTEND_DIR }}/dist
           force_orphan: true
-          commit_message: Build from tag ${{ github.ref_name }}
+          commit_message: Build from ${{ github.sha }}
 
       - name: Push backend to backend branch
         uses: peaceiris/actions-gh-pages@v4
@@ -56,4 +56,4 @@ jobs:
           publish_branch: ${{ env.BACKEND_BRANCH }}
           publish_dir: ./${{ env.BACKEND_DIR }}
           force_orphan: true
-          commit_message: Publish backend from tag ${{ github.ref_name }}
+          commit_message: Publish backend from ${{ github.sha }}

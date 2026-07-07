@@ -985,7 +985,7 @@ router.post('/initiate', initiateValidators, validate, async (req, res) => {
       furl:        `${process.env.API_BASE_URL || 'http://localhost:5000'}/payments/payu-return`,
       udf1:        String(application_id),
       udf2:        payment_type,
-      udf3:        '',
+      udf3:        isCollege && payment_type === 'application_fee' ? 'college' : '',
       udf4:        '',
       udf5:        '',
     });
@@ -1110,6 +1110,7 @@ async function handlePayUReturn(req, res) {
   const status    = (p.status || '').toLowerCase();
   const appId     = parseInt(p.udf1 || '0');
   const payType   = p.udf2 || '';
+  const origin    = p.udf3 || '';
 
   const ok = payU.verifyResponseHash(p);
 
@@ -1154,7 +1155,8 @@ async function handlePayUReturn(req, res) {
 
     if (result.alreadyProcessed) {
       // Webhook already committed — just redirect to success
-      return res.redirect(frontendUrl(`/payment-result?status=success&app_id=${appId}&payment_type=${payType}`));
+      const originParam = origin === 'college' && payType === 'application_fee' ? '&origin=college' : '';
+      return res.redirect(frontendUrl(`/payment-result?status=success&app_id=${appId}&payment_type=${payType}${originParam}`));
     }
 
     // Check if payment came via a payment link (to suppress dashboard button on result page)
@@ -1166,9 +1168,10 @@ async function handlePayUReturn(req, res) {
 
     // Post-commit side effects
     if (payType === 'application_fee') {
-      await logActivity(appId, 'submitted', 'student', null);
-      const regParam = result.regNum ? `&reg=${encodeURIComponent(result.regNum)}` : '';
-      return res.redirect(frontendUrl(`/payment-result?status=success&app_id=${appId}&payment_type=application_fee${regParam}${viaParam}`));
+      await logActivity(appId, 'submitted', origin === 'college' ? 'college' : 'student', null);
+      const regParam    = result.regNum ? `&reg=${encodeURIComponent(result.regNum)}` : '';
+      const originParam = origin === 'college' ? '&origin=college' : '';
+      return res.redirect(frontendUrl(`/payment-result?status=success&app_id=${appId}&payment_type=application_fee${regParam}${originParam}${viaParam}`));
     } else if (payType === 'misc_fee' || payType === 'exam_fee') {
       return res.redirect(frontendUrl(`/payment-result?status=success&app_id=${appId}&payment_type=${payType}`));
     } else {

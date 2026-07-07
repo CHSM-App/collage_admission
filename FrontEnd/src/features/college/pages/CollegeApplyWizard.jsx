@@ -194,7 +194,9 @@ export default function CollegeApplyWizard() {
         // Map DB current_step (1=Context,2=Personal,...) to college wizard step (1=Personal,...)
         const dbStep    = app.current_step || 2
         const wizStep   = Math.max(1, dbStep - 1)  // offset: college wizard has no Context step
-        dispatch({ type: 'INIT_APP', applicationId: appId, studentId, currentStep: wizStep, appStatus: app.status })
+        // After application fee is paid (status=submitted), jump straight to the Fees step (6)
+        const startStep = app.status === 'submitted' ? 6 : wizStep
+        dispatch({ type: 'INIT_APP', applicationId: appId, studentId, currentStep: startStep, appStatus: app.status })
       } catch (err) {
         dispatch({ type: 'SET_GLOBAL_ERR', message: err?.response?.data?.message || 'Failed to load application.' })
         dispatch({ type: 'SET_LOADING', value: false })
@@ -310,7 +312,7 @@ export default function CollegeApplyWizard() {
     setOnlinePaying(true)
     try {
       const res = await initiatePayment({ application_id: state.applicationId, payment_type: 'application_fee' })
-      const { endpoint, fields } = res.data
+      const { endpoint, fields } = res.data.data
       const form = document.createElement('form')
       form.method = 'POST'
       form.action = endpoint

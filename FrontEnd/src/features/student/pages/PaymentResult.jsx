@@ -11,6 +11,7 @@
  *
  * This component reads those params and shows the appropriate screen.
  */
+import { useEffect } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import Button from '../../../shared/components/Button.jsx'
 
@@ -18,10 +19,20 @@ export default function PaymentResult() {
   const [params]  = useSearchParams()
   const navigate  = useNavigate()
 
-  const status  = params.get('status')   // 'success' | 'failed' | 'error' | 'pending'
-  const reg     = params.get('reg')      // registration number (application_fee only)
-  const reason  = params.get('msg') || params.get('reason')   // failure/error message
-  const viaLink = params.get('via') === 'link'  // payment came from a WhatsApp payment link
+  const status      = params.get('status')   // 'success' | 'failed' | 'error' | 'pending'
+  const reg         = params.get('reg')      // registration number (application_fee only)
+  const reason      = params.get('msg') || params.get('reason')   // failure/error message
+  const viaLink     = params.get('via') === 'link'  // payment came from a WhatsApp payment link
+  const appId       = params.get('app_id')
+  const paymentType = params.get('payment_type')
+  const origin      = params.get('origin')   // 'college' when initiated from CollegeApplyWizard
+
+  // After a college-initiated application fee payment, redirect back to the wizard (step 6 — Fees).
+  useEffect(() => {
+    if (status === 'success' && paymentType === 'application_fee' && origin === 'college' && appId) {
+      navigate(`/college/apply/${appId}`, { replace: true })
+    }
+  }, [status, paymentType, origin, appId, navigate])
 
   if (status === 'error') {
     return (
