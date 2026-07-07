@@ -396,6 +396,7 @@ export default function CollegeApplyWizard() {
           {currentStep === 1 && (
             <Step2Personal
               {...stepProps}
+              isCollege
               appId={applicationId}
               onBack={() => navigate('/college/dashboard?section=inbox')}
               onNext={(body) => saveAndNext('personal-details', body, 2)}

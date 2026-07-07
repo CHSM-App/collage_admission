@@ -1055,7 +1055,7 @@ router.get('/:collegeId/fees/configured', requireCollegeAccess, async (req, res)
     return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, academic_year required.' })
   try {
     // Fees are "configured" if there is at least one active fee head for this academic_year
-    // AND at least one classwise_fees row for this program+year_level+academic_year
+    // AND at least one classwise_fees row with a non-zero amount for this program+year_level+academic_year
     const headsRes = await db.request()
       .input('cid', mssql.Int,      cid(req))
       .input('ay',  mssql.NVarChar, academic_year)
@@ -1074,6 +1074,12 @@ router.get('/:collegeId/fees/configured', requireCollegeAccess, async (req, res)
         FROM classwise_fees
         WHERE college_id=@cid AND faculty_master_id=@fid
           AND year_level=@yl AND academic_year=@ay
+          AND (
+            ISNULL(cat1_amount,0) > 0 OR ISNULL(cat2_amount,0) > 0 OR
+            ISNULL(cat3_amount,0) > 0 OR ISNULL(cat4_amount,0) > 0 OR
+            ISNULL(cat5_amount,0) > 0 OR ISNULL(cat6_amount,0) > 0 OR
+            ISNULL(cat7_amount,0) > 0 OR ISNULL(cat8_amount,0) > 0
+          )
       `)
     const headCount = headsRes.recordset[0].head_count
     const cwCount   = cwRes.recordset[0].cw_count

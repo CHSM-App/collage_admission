@@ -27,7 +27,10 @@ const { authenticate, requireCollegeAccess, requirePerm, requireWrite } = requir
 const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
 const whatsapp = require('../services/whatsapp');
 const logger = require('../config/logger');
-const feeSvc = require('../services/FeeDeterminationService');
+const feeSvc   = require('../services/FeeDeterminationService');
+const rcptSvc  = require('../services/ReceiptNumberService');
+
+const YEAR_LEVEL_MAP = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' };
 
 // All routes require authentication. College ownership is enforced via router.param
 // so that req.params.collegeId is available when the check runs.
@@ -962,16 +965,19 @@ router.post('/:collegeId/applications/:appId/record-application-fee', requirePer
     const tx   = pool.transaction();
     await tx.begin();
     try {
+      const receiptNo = await rcptSvc.next({ tx, pool, collegeId, paymentType: 'application_fee' });
+
       await tx.request()
-        .input('appId',  mssqlShared.Int,      appId)
-        .input('amount', mssqlShared.Decimal,   fee)
-        .input('userId', mssqlShared.Int,       userId || null)
-        .input('actor',  mssqlShared.NVarChar,  actor)
+        .input('appId',     mssqlShared.Int,      appId)
+        .input('amount',    mssqlShared.Decimal,   fee)
+        .input('userId',    mssqlShared.Int,       userId || null)
+        .input('actor',     mssqlShared.NVarChar,  actor)
+        .input('receiptNo', mssqlShared.NVarChar,  receiptNo)
         .query(`
-          INSERT INTO payments (application_id, payment_type, amount, status, gateway, gateway_txnid, completed_at, paid_by, paid_by_user_id, created_by)
+          INSERT INTO payments (application_id, payment_type, amount, status, gateway, gateway_txnid, completed_at, paid_by, paid_by_user_id, created_by, receipt_no)
           VALUES (@appId, 'application_fee', @amount, 'success', 'cash',
             CONCAT('CASH-', FORMAT(GETDATE(),'yyyyMMddHHmmss')),
-            GETDATE(), 'college', @userId, @actor)
+            GETDATE(), 'college', @userId, @actor, @receiptNo)
         `);
 
       await tx.request()
@@ -1021,7 +1027,8 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
       .input('id',  mssqlShared.Int, appId)
       .input('col', mssqlShared.Int, collegeId)
       .query(`
-        SELECT id, status, fee_total_amount, fee_pay_now_amount
+        SELECT id, status, fee_total_amount, fee_pay_now_amount,
+               app_division, course_id, year_of_study
         FROM applications
         WHERE id = @id AND college_id = @col
       `);
@@ -1064,19 +1071,30 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
     const tx   = pool.transaction();
     await tx.begin();
     try {
-      const actor = String(req.user.staff_id || req.user.id);
+      const actor     = String(req.user.staff_id || req.user.id);
+      const receiptNo = await rcptSvc.next({
+        tx,
+        pool,
+        collegeId,
+        paymentType:     'college_fee',
+        divisionLetter:  app.app_division || null,
+        facultyMasterId: app.course_id,
+        yearLevel:       YEAR_LEVEL_MAP[app.year_of_study] || 'FY',
+      });
+
       await tx.request()
-        .input('appId',  mssqlShared.Int,      appId)
-        .input('amount', mssqlShared.Decimal,   amt)
-        .input('userId', mssqlShared.Int,       req.user.staff_id || req.user.id)
-        .input('actor',  mssqlShared.NVarChar,  actor)
+        .input('appId',     mssqlShared.Int,      appId)
+        .input('amount',    mssqlShared.Decimal,   amt)
+        .input('userId',    mssqlShared.Int,       req.user.staff_id || req.user.id)
+        .input('actor',     mssqlShared.NVarChar,  actor)
+        .input('receiptNo', mssqlShared.NVarChar,  receiptNo)
         .query(`
           INSERT INTO payments (application_id, payment_type, amount, status, gateway,
-            gateway_txnid, gateway_payment_id, completed_at, paid_by, paid_by_user_id, created_by)
+            gateway_txnid, gateway_payment_id, completed_at, paid_by, paid_by_user_id, created_by, receipt_no)
           VALUES (@appId, 'college_fee', @amount, 'success', 'cash',
             CONCAT('CASH-', CAST(@appId AS NVARCHAR), '-', CAST(CHECKSUM(NEWID()) AS NVARCHAR)),
             CONCAT('CASH-', FORMAT(GETDATE(),'yyyyMMddHHmmss')),
-            GETDATE(), 'college', @userId, @actor)
+            GETDATE(), 'college', @userId, @actor, @receiptNo)
         `);
 
       if (firstPaid) {

@@ -12,7 +12,7 @@ const FUNDING_COLORS = {
   Both:       'bg-blue-50 text-blue-700 border-blue-200',
 }
 
-export default function Step2Personal({ data, errors, globalError, saving, onChange, onBack, onNext, readOnly }) {
+export default function Step2Personal({ data, errors, globalError, saving, onChange, onBack, onNext, readOnly, isCollege }) {
   const [determined, setDetermined]         = useState({ category: '', reason: '' })
   const [overrideMode, setOverrideMode]     = useState(!!data.fees_category_override)
   const [overrideRemark, setOverrideRemark] = useState(data.fees_category_override_remark || '')
@@ -232,11 +232,11 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
           <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-400">Residential Address</p>
           <div className="space-y-3">
             <FormField label="Address" name="address" type="textarea" rows={2} value={data.address}
-              onChange={onChange} error={e.address} required placeholder="House no., Street, Area…" />
+              onChange={onChange} error={e.address} required={!isCollege} placeholder="House no., Street, Area…" />
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <FormField label="Taluka"   name="taluka"   value={data.taluka}   onChange={onChange} error={e.taluka}   required placeholder="Vengurla" />
-              <FormField label="District" name="district" value={data.district} onChange={onChange} error={e.district} required placeholder="Sindhudurg" />
-              <FormField label="State"    name="state"    value={data.state}    onChange={onChange} error={e.state}    required placeholder="Maharashtra" />
+              <FormField label="Taluka"   name="taluka"   value={data.taluka}   onChange={onChange} error={e.taluka}   required={!isCollege} placeholder="Vengurla" />
+              <FormField label="District" name="district" value={data.district} onChange={onChange} error={e.district} required={!isCollege} placeholder="Sindhudurg" />
+              <FormField label="State"    name="state"    value={data.state}    onChange={onChange} error={e.state}    required={!isCollege} placeholder="Maharashtra" />
             </div>
           </div>
         </div>

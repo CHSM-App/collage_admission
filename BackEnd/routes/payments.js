@@ -31,6 +31,9 @@ const logger    = require('../config/logger');
 const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const auditLog  = require('../middleware/auditLog');
+const rcptSvc   = require('../services/ReceiptNumberService');
+
+const YEAR_LEVEL_MAP = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' };
 
 function validate(req, res, next) {
   const errors = validationResult(req);
@@ -193,6 +196,7 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
       .query(`
         SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study, a.academic_year,
                a.admission_period_id, a.fee_total_amount, a.fee_pay_now_amount,
+               a.app_division,
                COALESCE(c.application_fee, 0) AS application_fee
         FROM applications a
         JOIN admission_periods ap ON ap.id = a.admission_period_id
@@ -204,24 +208,40 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
 
   if (!app) throw new Error(`Application ${appId} not found`);
 
-  // misc_fee / exam_fee — simply mark the payment as success, no application status change
+  // misc_fee / exam_fee — mark success and assign receipt number
   if (paymentType === 'misc_fee' || paymentType === 'exam_fee') {
-    const dup = await db.request()
-      .input('txnid', mssql.NVarChar, txnid)
-      .query(`SELECT id FROM payments WHERE gateway_txnid = @txnid AND status = 'success'`);
-    if (dup.recordset.length > 0) return { alreadyProcessed: true };
+    const pool = await db;
+    const tx   = pool.transaction();
+    await tx.begin();
+    try {
+      const dup = await tx.request()
+        .input('txnid', mssql.NVarChar, txnid)
+        .query(`SELECT id FROM payments WHERE gateway_txnid = @txnid AND status = 'success'`);
+      if (dup.recordset.length > 0) {
+        await tx.rollback();
+        return { alreadyProcessed: true };
+      }
 
-    await db.request()
-      .input('txnid', mssql.NVarChar, txnid)
-      .input('gpid',  mssql.NVarChar, gatewayPaymentId || null)
-      .input('appId', mssql.Int,      appId)
-      .input('actor', mssql.NVarChar, actorStr)
-      .query(`
-        UPDATE payments
-        SET status = 'success', gateway_payment_id = @gpid, completed_at = GETDATE(), updated_by = @actor
-        WHERE gateway_txnid = @txnid AND application_id = @appId AND status = 'pending'
-      `);
+      const receiptNo = await rcptSvc.next({ tx, pool, collegeId: app.college_id, paymentType });
 
+      await tx.request()
+        .input('txnid',     mssql.NVarChar, txnid)
+        .input('gpid',      mssql.NVarChar, gatewayPaymentId || null)
+        .input('appId',     mssql.Int,      appId)
+        .input('actor',     mssql.NVarChar, actorStr)
+        .input('receiptNo', mssql.NVarChar, receiptNo)
+        .query(`
+          UPDATE payments
+          SET status = 'success', gateway_payment_id = @gpid, completed_at = GETDATE(),
+              updated_by = @actor, receipt_no = @receiptNo
+          WHERE gateway_txnid = @txnid AND application_id = @appId AND status = 'pending'
+        `);
+
+      await tx.commit();
+    } catch (e) {
+      await tx.rollback();
+      throw e;
+    }
     return { alreadyProcessed: false };
   }
 
@@ -243,16 +263,20 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
           app.college_id, app.course_id, app.year_of_study, app.academic_year, tx.request()
         );
 
+        const receiptNoAF = await rcptSvc.next({ tx, pool, collegeId: app.college_id, paymentType: 'application_fee' });
+
         await tx.request()
-          .input('appId',  mssql.Int,      appId)
-          .input('ptype',  mssql.NVarChar, 'application_fee')
-          .input('amount', mssql.Decimal,  app.application_fee)
-          .input('txnid',  mssql.NVarChar, txnid)
-          .input('gpid',   mssql.NVarChar, gatewayPaymentId || null)
-          .input('actor',  mssql.NVarChar, actorStr)
+          .input('appId',     mssql.Int,      appId)
+          .input('ptype',     mssql.NVarChar, 'application_fee')
+          .input('amount',    mssql.Decimal,  app.application_fee)
+          .input('txnid',     mssql.NVarChar, txnid)
+          .input('gpid',      mssql.NVarChar, gatewayPaymentId || null)
+          .input('actor',     mssql.NVarChar, actorStr)
+          .input('receiptNo', mssql.NVarChar, receiptNoAF)
           .query(`
             UPDATE payments
-            SET status = 'success', gateway_payment_id = @gpid, completed_at = GETDATE(), updated_by = @actor
+            SET status = 'success', gateway_payment_id = @gpid, completed_at = GETDATE(),
+                updated_by = @actor, receipt_no = @receiptNo
             WHERE gateway_txnid = @txnid AND application_id = @appId AND status = 'pending'
           `);
 
@@ -328,14 +352,26 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
       alreadyProcessed = true;
       await tx.rollback();
     } else {
+      const receiptNoCF = await rcptSvc.next({
+        tx,
+        pool,
+        collegeId:       app.college_id,
+        paymentType:     'college_fee',
+        divisionLetter:  app.app_division || null,
+        facultyMasterId: app.course_id,
+        yearLevel:       YEAR_LEVEL_MAP[app.year_of_study] || 'FY',
+      });
+
       await tx.request()
-        .input('txnid', mssql.NVarChar, txnid)
-        .input('gpid',  mssql.NVarChar, gatewayPaymentId || null)
-        .input('appId', mssql.Int,      appId)
-        .input('actor', mssql.NVarChar, actorStr)
+        .input('txnid',     mssql.NVarChar, txnid)
+        .input('gpid',      mssql.NVarChar, gatewayPaymentId || null)
+        .input('appId',     mssql.Int,      appId)
+        .input('actor',     mssql.NVarChar, actorStr)
+        .input('receiptNo', mssql.NVarChar, receiptNoCF)
         .query(`
           UPDATE payments
-          SET status = 'success', gateway_payment_id = @gpid, completed_at = GETDATE(), updated_by = @actor
+          SET status = 'success', gateway_payment_id = @gpid, completed_at = GETDATE(),
+              updated_by = @actor, receipt_no = @receiptNo
           WHERE gateway_txnid = @txnid AND application_id = @appId AND status = 'pending'
         `);
 
@@ -537,7 +573,7 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
     const paidRes = await db.request()
       .input('appId', mssql.Int, appId)
       .query(`
-        SELECT p.id, p.payment_type, p.amount, p.gateway, p.gateway_txnid, p.gateway_payment_id, p.completed_at,
+        SELECT p.id, p.payment_type, p.amount, p.gateway, p.gateway_txnid, p.gateway_payment_id, p.completed_at, p.receipt_no,
                CASE WHEN plt.id IS NOT NULL THEN 1 ELSE 0 END AS via_payment_link
         FROM payments p
         LEFT JOIN payment_link_tokens plt ON plt.gateway_txnid = p.gateway_txnid AND plt.gateway_txnid IS NOT NULL
@@ -715,7 +751,7 @@ router.get('/receipts/:applicationId', async (req, res) => {
     const pmtRes = await db.request()
       .input('appId', mssql.Int, appId)
       .query(`
-        SELECT p.id, p.payment_type, p.amount, p.status, p.gateway, p.gateway_txnid, p.gateway_payment_id, p.completed_at, p.notes,
+        SELECT p.id, p.payment_type, p.amount, p.status, p.gateway, p.gateway_txnid, p.gateway_payment_id, p.completed_at, p.notes, p.receipt_no,
                CASE WHEN plt.id IS NOT NULL THEN 1 ELSE 0 END AS via_payment_link
         FROM payments p
         LEFT JOIN payment_link_tokens plt ON plt.gateway_txnid = p.gateway_txnid AND plt.gateway_txnid IS NOT NULL
@@ -1282,21 +1318,38 @@ router.post('/cash/:collegeId/applications/:appId', async (req, res) => {
   }
 
   try {
+    // Fetch division info needed for receipt series
+    const appInfoRes = await db.request()
+      .input('id', mssql.Int, appId)
+      .query(`SELECT app_division, course_id, year_of_study FROM applications WHERE id=@id`);
+    const appInfo = appInfoRes.recordset[0] || {};
+
     const pool = await db;
     const tx   = pool.transaction();
     await tx.begin();
     try {
+      const receiptNo = await rcptSvc.next({
+        tx,
+        pool,
+        collegeId:       parseInt(collegeId),
+        paymentType:     'college_fee',
+        divisionLetter:  appInfo.app_division || null,
+        facultyMasterId: appInfo.course_id,
+        yearLevel:       YEAR_LEVEL_MAP[appInfo.year_of_study] || 'FY',
+      });
+
       await tx.request()
-        .input('appId',  mssql.Int,      appId)
-        .input('ptype',  mssql.NVarChar, 'college_fee')
-        .input('amount', mssql.Decimal(10, 2), amount)
-        .input('actor',  mssql.NVarChar, actorStr)
-        .input('userId', mssql.Int,      req.user.staff_id || req.user.id)
+        .input('appId',     mssql.Int,      appId)
+        .input('ptype',     mssql.NVarChar, 'college_fee')
+        .input('amount',    mssql.Decimal(10, 2), amount)
+        .input('actor',     mssql.NVarChar, actorStr)
+        .input('userId',    mssql.Int,      req.user.staff_id || req.user.id)
+        .input('receiptNo', mssql.NVarChar, receiptNo)
         .query(`
           INSERT INTO payments
-            (application_id, payment_type, amount, status, gateway, paid_by, paid_by_user_id, completed_at, created_by)
+            (application_id, payment_type, amount, status, gateway, paid_by, paid_by_user_id, completed_at, created_by, receipt_no)
           VALUES
-            (@appId, @ptype, @amount, 'success', 'cash', 'college', @userId, GETDATE(), @actor)
+            (@appId, @ptype, @amount, 'success', 'cash', 'college', @userId, GETDATE(), @actor, @receiptNo)
         `);
 
       await tx.request()
