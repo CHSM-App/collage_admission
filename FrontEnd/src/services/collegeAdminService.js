@@ -47,6 +47,12 @@ export const generateRollNumbers = (collegeId, data) =>
 export const searchStudents = (collegeId, query) =>
   api.get(`college-admin/${collegeId}/students/search?q=${encodeURIComponent(query)}`)
 
+export const sendTransferOtp = (collegeId, mobile) =>
+  api.post(`college-admin/${collegeId}/students/transfer-otp`, { mobile })
+
+export const verifyTransferOtp = (collegeId, mobile, otp) =>
+  api.post(`college-admin/${collegeId}/students/transfer-verify`, { mobile, otp })
+
 export const exportApplications = (collegeId, params) =>
   api.get(`college-admin/${collegeId}/applications/export?${params}`)
 

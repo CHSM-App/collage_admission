@@ -13,6 +13,7 @@ const db        = require('./db');
 const whatsapp  = require('../services/whatsapp');
 const mssql     = require('mssql');
 const logger    = require('../config/logger');
+const { saveOtp, verifyAndConsumeOtp } = require('../services/otpService');
 const { body, validationResult } = require('express-validator');
 const auditLog = require('../middleware/auditLog');
 
@@ -35,53 +36,7 @@ function validatePassword(password) {
   return null;
 }
 
-// ── DB OTP helpers ───────────────────────────────────────────
-
-async function saveOtp(normPhone, otp, purpose, pendingData) {
-  const hash      = await bcrypt.hash(otp, 8);           // lighter cost — OTPs are short-lived
-  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-  // Invalidate any previous unused OTP for same phone+purpose
-  await db.request()
-    .input('phone',   mssql.NVarChar, normPhone)
-    .input('purpose', mssql.NVarChar, purpose)
-    .query(`UPDATE otp_store SET used = 1 WHERE phone = @phone AND purpose = @purpose AND used = 0`);
-  await db.request()
-    .input('phone',       mssql.NVarChar,  normPhone)
-    .input('hash',        mssql.NVarChar,  hash)
-    .input('purpose',     mssql.NVarChar,  purpose)
-    .input('pendingData', mssql.NVarChar,  pendingData ? JSON.stringify(pendingData) : null)
-    .input('expiresAt',   mssql.DateTime2, expiresAt)
-    .query(`
-      INSERT INTO otp_store (phone, otp_hash, purpose, pending_data, expires_at)
-      VALUES (@phone, @hash, @purpose, @pendingData, @expiresAt)
-    `);
-}
-
-async function verifyAndConsumeOtp(normPhone, otp, purpose) {
-  const result = await db.request()
-    .input('phone',   mssql.NVarChar, normPhone)
-    .input('purpose', mssql.NVarChar, purpose)
-    .query(`
-      SELECT TOP 1 id, otp_hash, pending_data, expires_at
-      FROM otp_store
-      WHERE phone = @phone AND purpose = @purpose AND used = 0
-      ORDER BY created_at DESC
-    `);
-
-  const row = result.recordset[0];
-  if (!row) return { valid: false, reason: 'No OTP found for this number. Please request a new one.' };
-  if (new Date() > new Date(row.expires_at)) {
-    await db.request().input('id', mssql.Int, row.id).query('UPDATE otp_store SET used = 1 WHERE id = @id');
-    return { valid: false, reason: 'OTP has expired. Please request a new one.' };
-  }
-
-  const match = await bcrypt.compare(String(otp).trim(), row.otp_hash);
-  if (!match) return { valid: false, reason: 'Incorrect OTP. Please try again.' };
-
-  // Mark used
-  await db.request().input('id', mssql.Int, row.id).query('UPDATE otp_store SET used = 1 WHERE id = @id');
-  return { valid: true, pendingData: row.pending_data ? JSON.parse(row.pending_data) : null };
-}
+// OTP helpers imported from ../services/otpService
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const IS_PROD    = process.env.NODE_ENV === 'production';
@@ -525,10 +480,45 @@ router.post('/register/student', registerLimiter, async (req, res) => {
 
     if (exists.recordset.length > 0) {
       const dup = exists.recordset[0];
-      if (dup.email === email) {
+      if (dup.email.toLowerCase() === email.toLowerCase()) {
         return res.status(409).json({ message: 'An account with this email already exists.' });
       }
-      return res.status(409).json({ message: 'An account with this phone number already exists.' });
+
+      // Phone collision — check if confirmed somewhere
+      const confirmedCheck = await db.request()
+        .input('studentId', mssql.Int, dup.id)
+        .query(`
+          SELECT TOP 1 college_id FROM applications
+          WHERE student_id = @studentId
+            AND status IN ('confirmed','fees_paid','roll_assigned','enrolled')
+        `);
+
+      if (confirmedCheck.recordset.length > 0) {
+        // Confirmed elsewhere — trigger transfer OTP
+        const rawPhone = phone ? phone.trim() : null;
+        if (rawPhone) {
+          try {
+            const normPhone = whatsapp.normalisePhone(rawPhone);
+            const otp = String(Math.floor(100000 + Math.random() * 900000));
+            await whatsapp.sendOtp(normPhone, otp);
+            await saveOtp(normPhone, otp, 'student_transfer', { phone: rawPhone });
+          } catch (otpErr) {
+            logger.warn({ err: otpErr }, 'Could not send transfer OTP during registration');
+          }
+        }
+        return res.status(409).json({
+          transfer_required: true,
+          student_id: dup.id,
+          message: 'This student has a confirmed admission at another college. An OTP has been sent to their WhatsApp to verify the transfer.',
+        });
+      }
+
+      // Phone exists but not confirmed anywhere — reuse existing student silently
+      return res.status(200).json({
+        message: 'Existing student account found.',
+        role: 'student',
+        user: { id: dup.id, name: dup.full_name, email: dup.email },
+      });
     }
 
     const hash = await bcrypt.hash(effectivePassword, 10);

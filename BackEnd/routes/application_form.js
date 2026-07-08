@@ -584,10 +584,13 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
   else if (!validateMobile(mobile)) errors.mobile = 'Mobile must be 10 digits starting with 6-9.';
   if (!email)         errors.email         = 'Email is required.';
   else if (!validateEmail(email)) errors.email = 'Invalid email format.';
-  if (!address)       errors.address       = 'Residential address is required.';
-  if (!taluka)        errors.taluka        = 'Taluka is required.';
-  if (!district)      errors.district      = 'District is required.';
-  if (!state)         errors.state         = 'State is required.';
+  const isCollegeStaff = req.user && req.user.role === 'college';
+  if (!isCollegeStaff) {
+    if (!address)  errors.address  = 'Residential address is required.';
+    if (!taluka)   errors.taluka   = 'Taluka is required.';
+    if (!district) errors.district = 'District is required.';
+    if (!state)    errors.state    = 'State is required.';
+  }
   if (!fees_category) errors.fees_category = 'Fees category is required.';
 
   if (Object.keys(errors).length) {

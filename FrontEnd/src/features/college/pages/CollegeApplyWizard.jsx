@@ -476,6 +476,7 @@ export default function CollegeApplyWizard() {
               collegeId={collegeId}
               courseId={data.course_id}
               yearOfStudy={data.year_of_study}
+              appDivision={data.app_division}
               onBack={() => goStep(5)}
               onGoToInbox={() => navigate('/college/dashboard?section=inbox')}
               onGoToDetail={() => navigate(`/college/dashboard?section=app&app_id=${applicationId}`)}
@@ -738,7 +739,6 @@ function CollegeReviewStep({
             {/* Proceed to Step 6 — shown once app fee is handled */}
             {appFeeHandled && (
               <div className="flex flex-col sm:flex-row gap-2">
-                <Button onClick={onAddNew} variant="secondary">+ Add New Application</Button>
                 <Button onClick={onProceedToFees} className="sm:ml-auto">
                   Proceed to Division &amp; Fee Collection →
                 </Button>
@@ -773,11 +773,11 @@ function CollegeReviewStep({
 }
 
 // ── Step 6: Division, Fee Computation, Installment Plan & College Fee Collection ──
-function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy, onBack, onGoToInbox, onGoToDetail, onAddNew }) {
+function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy, appDivision, onBack, onGoToInbox, onGoToDetail, onAddNew }) {
   const YEAR_MAP = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 
   const [divisions,      setDivisions]      = useState([])
-  const [division,       setDivision]       = useState('')
+  const [division,       setDivision]       = useState(appDivision || '')
   const [feeTotal,       setFeeTotal]       = useState(null)
   const [feeBreakdown,   setFeeBreakdown]   = useState([])
   const [feeStudentType, setFeeStudentType] = useState(null)
@@ -801,11 +801,13 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
       .catch(() => {})
   }, [collegeId, courseId, yearOfStudy])
 
+  // Sync division from prop whenever it arrives (appDivision loads async with form data)
+  useEffect(() => {
+    if (appDivision && !division) setDivision(appDivision)
+  }, [appDivision])
+
   // Recompute fee whenever division changes
   useEffect(() => {
-    if (divisions.length > 0 && !division) {
-      setFeeTotal(null); setFeeBreakdown([]); return
-    }
     setFeeLoading(true)
     getComputedFee(collegeId, applicationId, division || undefined)
       .then(r => {
@@ -818,12 +820,11 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
       .finally(() => setFeeLoading(false))
   }, [collegeId, applicationId, division, divisions.length])
 
-  async function handleConfirm() {
+  async function handleConfirm({ addNew = false } = {}) {
     setConfirmError('')
     const validInst = installments.filter(i => i.amount !== '' && parseFloat(i.amount) > 0)
-    if (validInst.length === 0) { setConfirmError('Enter at least one installment amount.'); return }
     const instTotal = validInst.reduce((s, i) => s + parseFloat(i.amount), 0)
-    if (feeTotal != null && instTotal > feeTotal + 0.01) {
+    if (validInst.length > 0 && feeTotal != null && instTotal > feeTotal + 0.01) {
       setConfirmError(`Installment total (₹${instTotal.toLocaleString('en-IN')}) cannot exceed fee total (₹${feeTotal.toLocaleString('en-IN')}).`)
       return
     }
@@ -843,7 +844,11 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
         division:              division || null,
         document_ids_verified: [],
       })
-      setConfirmed(true)
+      if (addNew) {
+        onAddNew()
+      } else {
+        setConfirmed(true)
+      }
     } catch (err) {
       setConfirmError(err?.response?.data?.message || 'Failed to confirm admission.')
     } finally {
@@ -865,9 +870,9 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
   return (
     <div>
       <div className="border-b border-slate-100 px-5 py-5">
-        <h2 className="text-base font-bold text-slate-950">Division &amp; Fee Collection</h2>
+        <h2 className="text-base font-bold text-slate-950">Fee &amp; Admission Confirmation</h2>
         <p className="mt-1 text-sm text-slate-500">
-          Student has been notified to visit the college. Once the student visits and documents are verified in person, set the fee and confirm admission.
+          Review the fee breakdown below. Optionally set an installment plan, then confirm admission to proceed to fee collection.
         </p>
       </div>
 
@@ -875,46 +880,8 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
 
         {!confirmed && (
           <>
-            {/* ── Division picker ───────────────────────────────── */}
-            {divisions.length > 0 && (
-              <div>
-                <p className="text-sm font-semibold text-slate-700 mb-2">Division</p>
-                <div className="flex flex-wrap gap-2 items-center">
-                  {divisions.map(div => (
-                    <button
-                      key={div.division_letter}
-                      type="button"
-                      onClick={() => setDivision(div.division_letter)}
-                      className={`rounded-lg border-2 px-4 py-2 text-sm font-semibold transition ${
-                        division === div.division_letter
-                          ? 'border-slate-900 bg-slate-900 text-white'
-                          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'
-                      }`}
-                    >
-                      <span className="block">Div {div.division_letter}</span>
-                      {div.grant_type && (
-                        <span className={`block text-xs font-normal mt-0.5 ${division === div.division_letter ? 'text-slate-300' : 'text-slate-400'}`}>
-                          {div.grant_type}
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                  {division && (
-                    <button
-                      type="button"
-                      onClick={() => setDivision('')}
-                      className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1"
-                    >
-                      <span>✕</span> clear
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
             {/* ── Fee breakdown ─────────────────────────────────── */}
-            {(divisions.length === 0 || division) && (
-              <>
+            <>
                 {feeLoading ? (
                   <div className="py-4 text-center text-sm text-slate-400">Computing fees…</div>
                 ) : feeTotal != null ? (
@@ -964,14 +931,14 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
                 )}
 
                 {/* ── Installment plan ─────────────────────────── */}
-                {feeTotal != null && !feeLoading && (
+                {/* {feeTotal != null && !feeLoading && (
                   <CollegeInstallmentInput
                     installments={installments}
                     onChange={setInstallments}
                     feeTotal={feeTotal}
                     onError={setConfirmError}
                   />
-                )}
+                )} */}
 
                 {/* ── Confirm error ─────────────────────────────── */}
                 {confirmError && (
@@ -980,28 +947,29 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
                   </div>
                 )}
 
-                {/* ── Action buttons ────────────────────────────── */}
-                <div className="flex flex-col-reverse sm:flex-row gap-3 pt-1">
-                  <Button variant="secondary" onClick={onBack}>← Back</Button>
-                  {feeTotal != null && (
-                    <Button
-                      onClick={handleConfirm}
-                      loading={confirming}
-                      className="sm:ml-auto"
-                    >
-                      Proceed →
-                    </Button>
-                  )}
-                </div>
-              </>
-            )}
+            </>
 
-            {/* If divisions exist but none selected, show prompt */}
-            {divisions.length > 0 && !division && (
-              <div className="flex flex-col-reverse sm:flex-row gap-3 pt-1">
-                <Button variant="secondary" onClick={onBack}>← Back</Button>
+            {/* ── Navigation buttons ─────────────────────────────── */}
+            <div className="flex flex-col-reverse sm:flex-row gap-3 pt-2">
+              <Button variant="secondary" onClick={onBack}>← Back</Button>
+              <div className="flex flex-col sm:flex-row gap-3 sm:ml-auto">
+                <Button
+                  variant="secondary"
+                  onClick={() => handleConfirm({ addNew: true })}
+                  loading={confirming}
+                  disabled={feeLoading || feeTotal == null}
+                >
+                  Confirm &amp; Add New Application
+                </Button>
+                <Button
+                  onClick={() => handleConfirm({ addNew: false })}
+                  loading={confirming}
+                  disabled={feeLoading || feeTotal == null}
+                >
+                  Confirm &amp; Collect Fee →
+                </Button>
               </div>
-            )}
+            </div>
           </>
         )}
 
@@ -1334,9 +1302,9 @@ function CollegeInstallmentInput({ installments, onChange, feeTotal, onError }) 
   return (
     <div className="space-y-3">
       <div>
-        <p className="text-sm font-semibold text-slate-700 mb-0.5">Installment Plan</p>
+        <p className="text-sm font-semibold text-slate-700 mb-0.5">Installment Plan <span className="text-xs font-normal text-slate-400">(Optional)</span></p>
         <p className="text-xs text-slate-500">
-          Fill installments the student <em>must</em> pay in order. Leave trailing rows empty for free payment.
+          Leave all rows empty to let the student pay the full amount freely. Fill installments to enforce a payment schedule.
         </p>
       </div>
       <div className="rounded-lg border border-slate-200 overflow-hidden">
@@ -1453,6 +1421,7 @@ function buildAutofill(app, lastApp, profile) {
     state:        ap('state')       || '',
     category:       ap('category')       || '',
     special_status: ap('special_status') || '',
+    app_division:                 app.app_division                 || '',
     fees_category:                app.fees_category                || '',
     fees_category_override:       !!app.fees_category_override,
     fees_category_override_remark:app.fees_category_override_remark || '',

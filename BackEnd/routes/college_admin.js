@@ -29,6 +29,7 @@ const whatsapp = require('../services/whatsapp');
 const logger = require('../config/logger');
 const feeSvc   = require('../services/FeeDeterminationService');
 const rcptSvc  = require('../services/ReceiptNumberService');
+const { saveOtp, verifyAndConsumeOtp } = require('../services/otpService');
 
 const YEAR_LEVEL_MAP = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' };
 
@@ -211,24 +212,145 @@ router.delete('/:collegeId/admission-periods/:periodId', requirePerm('manage_adm
   }
 });
 
+// ── Internal helper: send transfer OTP via WhatsApp ──────────
+async function sendTransferOtp(rawPhone) {
+  const normPhone = whatsapp.normalisePhone(rawPhone);
+  const otp = String(Math.floor(100000 + Math.random() * 900000));
+  await whatsapp.sendOtp(normPhone, otp);
+  await saveOtp(normPhone, otp, 'student_transfer', { phone: rawPhone });
+}
+
 // ── Student search (for college-side application creation) ──
+// Shows only students who:
+//   a) have an application at this college, AND are not confirmed at any OTHER college, OR
+//   b) have no applications anywhere (fresh walk-in)
+// If the query is a 10-digit mobile matching a student confirmed elsewhere,
+// an OTP is auto-sent and transfer_required: true is returned.
 router.get('/:collegeId/students/search', async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId);
   const { q } = req.query;
   if (!q || q.trim().length < 2) {
     return res.status(400).json({ success: false, message: 'Query must be at least 2 characters.' });
   }
   try {
-    const result = await db.request()
-      .input('q', `%${q.trim()}%`)
+    const pool = await db;
+
+    // Phase A: scoped search
+    const normalResult = await pool.request()
+      .input('q',         mssqlShared.NVarChar, `%${q.trim()}%`)
+      .input('collegeId', mssqlShared.Int,       collegeId)
       .query(`
-        SELECT TOP 20 id, full_name, email, phone, category
-        FROM students
-        WHERE full_name LIKE @q OR email LIKE @q OR phone LIKE @q
-        ORDER BY full_name
+        SELECT TOP 20 s.id, s.full_name, s.email, s.phone, s.category
+        FROM students s
+        WHERE (s.full_name LIKE @q OR s.email LIKE @q OR s.phone LIKE @q)
+          AND (
+            EXISTS (
+              SELECT 1 FROM applications a
+              WHERE a.student_id = s.id AND a.college_id = @collegeId
+            )
+            OR NOT EXISTS (
+              SELECT 1 FROM applications a WHERE a.student_id = s.id
+            )
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM applications a
+            WHERE a.student_id = s.id
+              AND a.college_id <> @collegeId
+              AND a.status IN ('confirmed','fees_paid','roll_assigned','enrolled')
+          )
+        ORDER BY s.full_name
       `);
-    return res.json({ success: true, data: result.recordset });
+
+    // Phase B: transfer check — only when query looks like a phone number
+    const isPhone = /^[6-9]\d{9}$/.test(q.trim());
+    if (isPhone && normalResult.recordset.length === 0) {
+      const transferCheck = await pool.request()
+        .input('phone',     mssqlShared.NVarChar, q.trim())
+        .input('collegeId', mssqlShared.Int,       collegeId)
+        .query(`
+          SELECT s.id, s.phone
+          FROM students s
+          WHERE s.phone = @phone
+            AND EXISTS (
+              SELECT 1 FROM applications a
+              WHERE a.student_id = s.id
+                AND a.college_id <> @collegeId
+                AND a.status IN ('confirmed','fees_paid','roll_assigned','enrolled')
+            )
+        `);
+
+      if (transferCheck.recordset.length > 0) {
+        const student = transferCheck.recordset[0];
+        // Auto-send OTP — swallow errors so search still responds
+        try { await sendTransferOtp(student.phone); } catch (e) { logger.warn({ err: e }, 'transfer OTP send failed'); }
+        return res.json({ success: true, data: [], transfer_required: true, student_id: student.id });
+      }
+    }
+
+    return res.json({ success: true, data: normalResult.recordset });
   } catch (err) {
     logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── Resend transfer OTP ───────────────────────────────────────
+router.post('/:collegeId/students/transfer-otp', async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId);
+  const { mobile } = req.body;
+  if (!mobile || !/^[6-9]\d{9}$/.test(mobile.trim())) {
+    return res.status(400).json({ success: false, message: 'A valid 10-digit mobile number is required.' });
+  }
+  try {
+    const pool = await db;
+    const check = await pool.request()
+      .input('phone',     mssqlShared.NVarChar, mobile.trim())
+      .input('collegeId', mssqlShared.Int,       collegeId)
+      .query(`
+        SELECT s.id FROM students s
+        WHERE s.phone = @phone
+          AND EXISTS (
+            SELECT 1 FROM applications a
+            WHERE a.student_id = s.id
+              AND a.college_id <> @collegeId
+              AND a.status IN ('confirmed','fees_paid','roll_assigned','enrolled')
+          )
+      `);
+
+    if (!check.recordset.length) {
+      return res.status(404).json({ success: false, message: 'No confirmed student found with this mobile.' });
+    }
+
+    await sendTransferOtp(mobile.trim());
+    return res.json({ success: true, message: 'OTP sent to the student\'s WhatsApp. Valid for 10 minutes.' });
+  } catch (err) {
+    logger.error({ err }, 'transfer-otp error');
+    return res.status(500).json({ success: false, message: err.message || 'Failed to send OTP.' });
+  }
+});
+
+// ── Verify transfer OTP ───────────────────────────────────────
+router.post('/:collegeId/students/transfer-verify', async (req, res) => {
+  const { mobile, otp } = req.body;
+  if (!mobile || !otp) {
+    return res.status(400).json({ success: false, message: 'mobile and otp are required.' });
+  }
+  try {
+    const normPhone = whatsapp.normalisePhone(mobile.trim());
+    const { valid, reason } = await verifyAndConsumeOtp(normPhone, otp, 'student_transfer');
+    if (!valid) return res.status(400).json({ success: false, message: reason });
+
+    const pool = await db;
+    const student = await pool.request()
+      .input('phone', mssqlShared.NVarChar, mobile.trim())
+      .query(`SELECT id, full_name, email, phone FROM students WHERE phone = @phone`);
+
+    if (!student.recordset.length) {
+      return res.status(404).json({ success: false, message: 'Student not found.' });
+    }
+    return res.json({ success: true, data: student.recordset[0] });
+  } catch (err) {
+    logger.error({ err }, 'transfer-verify error');
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
@@ -725,9 +847,7 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
     .filter(i => i.amount && parseFloat(i.amount) > 0)
     .map((i, idx) => ({ installment_no: idx + 1, amount: parseFloat(i.amount), due_date: i.due_date || null }));
 
-  if (validInstallments.length === 0) {
-    return res.status(400).json({ success: false, message: 'At least one installment with an amount is required.' });
-  }
+  // Installments are optional — if none provided, student pays full amount freely
 
   try {
     const appRes = await db.request()
@@ -738,9 +858,28 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
     if (appRes.recordset.length === 0) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
-    const CONFIRMABLE = ['doc_verified', 'scrutiny_accepted', 'doc_verification_pending'];
+    const CONFIRMABLE = ['submitted', 'doc_verified', 'scrutiny_accepted', 'doc_verification_pending'];
     if (!CONFIRMABLE.includes(appRes.recordset[0].status)) {
       return res.status(400).json({ success: false, message: 'Application must be accepted before it can be confirmed.' });
+    }
+
+    // Auto-approve submitted applications (college-created, no manual review needed)
+    if (appRes.recordset[0].status === 'submitted') {
+      try {
+        const pool0 = await db;
+        const tx0   = pool0.transaction();
+        await tx0.begin();
+        try {
+          await tx0.request()
+            .input('pid', mssqlShared.Int, appRes.recordset[0].admission_period_id || 0)
+            .query('UPDATE admission_periods SET filled_seats = filled_seats + 1 WHERE id = @pid AND filled_seats < total_seats');
+          await tx0.request()
+            .input('id',    mssqlShared.Int,      parseInt(req.params.appId))
+            .input('actor', mssqlShared.NVarChar, String(req.user.staff_id || req.user.id))
+            .query(`UPDATE applications SET status = 'doc_verified', approved_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(), updated_by = @actor WHERE id = @id`);
+          await tx0.commit();
+        } catch (e) { await tx0.rollback(); }
+      } catch (_) {}
     }
 
     // Compute total fee from fees master
@@ -773,8 +912,8 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
         }
       }
 
-      // Store pay_now as first installment amount for backward-compat with payments.js
-      const firstInstAmt = validInstallments[0].amount;
+      // pay_now = first installment if set, else full total
+      const firstInstAmt = validInstallments.length > 0 ? validInstallments[0].amount : total;
       await tx2.request()
         .input('id',    mssqlShared.Int,      parseInt(req.params.appId))
         .input('total', mssqlShared.Decimal,  total)
@@ -795,8 +934,10 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
       throw txErr;
     }
 
-    // Save installment plan outside transaction (non-critical — replace any existing)
-    await saveInstallments(parseInt(req.params.appId), validInstallments, actor, null);
+    // Save installment plan outside transaction (non-critical — only if provided)
+    if (validInstallments.length > 0) {
+      await saveInstallments(parseInt(req.params.appId), validInstallments, actor, null);
+    }
 
     const instSummary = validInstallments.map(i => `Inst-${i.installment_no}: ₹${i.amount}`).join(', ');
     await logActivity(req.params.appId, 'confirmed', 'college', `Total fee: ₹${total}. Installments: ${instSummary}`);

@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 import { registerStudentByCollege } from '../../auth/services/authService.js'
-import { getCollegeAdminAdmissionPeriods, searchStudents } from '../../../services/collegeAdminService.js'
+import { getCollegeAdminAdmissionPeriods, searchStudents, sendTransferOtp, verifyTransferOtp } from '../../../services/collegeAdminService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 
@@ -38,6 +38,14 @@ export default function AddApplicationStart() {
   const [regError, setRegError]       = useState('')
   const [registering, setRegistering] = useState(false)
 
+  // Transfer OTP flow
+  const [transferRequired, setTransferRequired] = useState(false)
+  const [transferMobile, setTransferMobile]     = useState('')
+  const [otpValue, setOtpValue]                 = useState('')
+  const [otpError, setOtpError]                 = useState('')
+  const [otpVerifying, setOtpVerifying]         = useState(false)
+  const [otpSending, setOtpSending]             = useState(false)
+
   // Period & submit
   const [selectedPeriod, setPeriod] = useState('')
   const [error, setError]           = useState('')
@@ -53,11 +61,23 @@ export default function AddApplicationStart() {
   // ── Debounced student search ────────────────────────────────
   useEffect(() => {
     setNoResults(false)
+    setTransferRequired(false)
+    setTransferMobile('')
+    setOtpValue('')
+    setOtpError('')
     if (query.trim().length < 2) { setStudents([]); return }
+    if (selectedStudent) return   // don't re-search after selection
     const t = setTimeout(() => {
       setSearching(true)
       searchStudents(collegeId, query.trim())
         .then(r => {
+          if (r.data.transfer_required) {
+            setTransferRequired(true)
+            setTransferMobile(query.trim())
+            setStudents([])
+            setNoResults(false)
+            return
+          }
           const data = r.data.data || []
           setStudents(data)
           setNoResults(data.length === 0)
@@ -112,9 +132,50 @@ export default function AddApplicationStart() {
       setShowRegForm(false)
       setRegForm(EMPTY_REG)
     } catch (err) {
+      // Backend detected student is confirmed elsewhere — switch to OTP flow
+      if (err?.response?.data?.transfer_required) {
+        setTransferRequired(true)
+        setTransferMobile(regForm.phone.trim())
+        setShowRegForm(false)
+        setRegForm(EMPTY_REG)
+        return
+      }
       setRegError(err?.response?.data?.message || 'Registration failed.')
     } finally {
       setRegistering(false)
+    }
+  }
+
+  // ── Transfer OTP handlers ───────────────────────────────────
+  async function handleVerifyOtp() {
+    setOtpError('')
+    if (!otpValue || !/^\d{6}$/.test(otpValue)) {
+      setOtpError('Please enter the 6-digit OTP.')
+      return
+    }
+    setOtpVerifying(true)
+    try {
+      const res = await verifyTransferOtp(collegeId, transferMobile, otpValue)
+      const student = res.data.data
+      handleSelectStudent({ id: student.id, full_name: student.full_name, email: student.email, phone: student.phone })
+      setTransferRequired(false)
+      setOtpValue('')
+    } catch (err) {
+      setOtpError(err?.response?.data?.message || 'OTP verification failed.')
+    } finally {
+      setOtpVerifying(false)
+    }
+  }
+
+  async function handleResendOtp() {
+    setOtpSending(true)
+    setOtpError('')
+    try {
+      await sendTransferOtp(collegeId, transferMobile)
+    } catch (err) {
+      setOtpError('Failed to resend OTP. Please try again.')
+    } finally {
+      setOtpSending(false)
     }
   }
 
@@ -154,7 +215,7 @@ export default function AddApplicationStart() {
           <input
             type="text"
             value={query}
-            onChange={e => { setQuery(e.target.value); setSelected(null); setShowRegForm(false) }}
+            onChange={e => { setQuery(e.target.value); setSelected(null); setShowRegForm(false); setTransferRequired(false); setOtpValue(''); setOtpError('') }}
             placeholder="Name, email or phone…"
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
@@ -193,6 +254,45 @@ export default function AddApplicationStart() {
               className="text-xs text-slate-400 hover:text-slate-600 ml-3"
             >
               ✕
+            </button>
+          </div>
+        )}
+
+        {/* Transfer OTP panel */}
+        {transferRequired && !selectedStudent && (
+          <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-3">
+            <div>
+              <p className="text-sm font-bold text-amber-900">Transfer Verification Required</p>
+              <p className="text-sm text-amber-700 mt-1">
+                This student has a confirmed admission at another college. An OTP has been sent to their WhatsApp
+                (<span className="font-semibold">{transferMobile}</span>).
+                Please ask the student for the OTP to proceed.
+              </p>
+            </div>
+            <div className="flex gap-2 items-end">
+              <div className="flex-1">
+                <label className="block text-xs font-semibold text-slate-600 mb-1">6-digit OTP</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={otpValue}
+                  onChange={e => setOtpValue(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="••••••"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+              <Button onClick={handleVerifyOtp} loading={otpVerifying}>Verify OTP</Button>
+            </div>
+            {otpError && (
+              <p className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-700">{otpError}</p>
+            )}
+            <button
+              onClick={handleResendOtp}
+              disabled={otpSending}
+              className="text-xs text-indigo-600 hover:underline disabled:opacity-50"
+            >
+              {otpSending ? 'Sending…' : 'Resend OTP'}
             </button>
           </div>
         )}

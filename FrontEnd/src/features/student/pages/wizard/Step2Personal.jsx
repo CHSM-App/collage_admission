@@ -165,6 +165,10 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
   }
 
   function handleNext() {
+    // Validate division (college only)
+    if (isCollege && divisions.length > 0 && !data.division) {
+      setLocalError('Division selection is required.'); return
+    }
     // Validate caste selection
     if (!data.category) {
       setLocalError('Caste / Community Category is required.'); return
@@ -181,10 +185,11 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
       address: data.address, taluka: data.taluka, district: data.district, state: data.state,
       category:       data.category       || null,
       special_status: data.special_status || null,
-      fees_category:  data.fees_category,
+      fees_category:  data.fees_category || (determined.category || null),
       fees_category_override:        overrideMode,
       fees_category_override_remark: overrideMode ? overrideRemark : '',
       degree_course_code: data.degree_course_code || degreeCourse?.degree_course_code || null,
+      division: data.division || null,
     })
   }
 
@@ -252,6 +257,30 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
           </div>
         )}
 
+
+        {/* Division — college only */}
+        {isCollege && divisions.length > 0 && (
+          <div>
+            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Division</p>
+            <div className="flex flex-wrap gap-2">
+              {divisions.map(d => (
+                <button
+                  key={d.division_letter}
+                  type="button"
+                  onClick={() => handleDivisionSelect(d.division_letter)}
+                  className={`px-4 py-1.5 rounded-lg border text-sm font-semibold transition ${
+                    data.division === d.division_letter
+                      ? 'bg-slate-900 text-white border-slate-900'
+                      : 'bg-white text-slate-600 border-slate-300 hover:border-slate-500'
+                  }`}
+                >
+                  {d.division_letter}
+                  {d.funding_type && <span className="ml-1.5 text-xs font-normal opacity-70">{d.funding_type}</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Caste Category */}
         <FormField label={<span>Caste / Community Category <span className="text-red-500">*</span></span>}>
@@ -324,6 +353,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
               onChange={v => overrideMode && onChange({ target: { name: 'fees_category', value: v } })}
               disabled={!overrideMode}
               autoValue={!overrideMode ? determined.category : null}
+              autoSelected={!overrideMode}
             />
             {overrideMode && (
               <div className="flex flex-col gap-1 pt-1">
@@ -343,7 +373,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
               </div>
             )}
           </div>
-          {e.fees_category && <p className="mt-1 text-xs font-medium text-red-600">{e.fees_category}</p>}
+          {e.fees_category && !determined.category && <p className="mt-1 text-xs font-medium text-red-600">{e.fees_category}</p>}
         </FormField>
 
         {/* Fee Breakdown */}
@@ -421,12 +451,12 @@ function FeeBreakdown({ result, loading }) {
 }
 
 // ── Shared radio group ────────────────────────────────────────
-function RadioGroup({ name, options, value, onChange, disabled, clearable, autoValue }) {
+function RadioGroup({ name, options, value, onChange, disabled, clearable, autoValue, autoSelected }) {
   return (
     <div className="flex flex-wrap gap-2 mt-1">
       {options.map(opt => {
-        const checked = value === opt
-        const isAuto  = autoValue === opt
+        const checked = value === opt || (autoSelected && autoValue === opt)
+        const isAuto  = autoValue === opt && autoSelected
         return (
           <label key={opt} className={`flex items-center gap-1.5 cursor-pointer ${disabled ? 'cursor-default' : ''}`}>
             <input
@@ -441,12 +471,9 @@ function RadioGroup({ name, options, value, onChange, disabled, clearable, autoV
             <span className={`text-sm px-2 py-0.5 rounded border transition select-none ${
               checked
                 ? 'bg-slate-900 text-white border-slate-900 font-semibold'
-                : isAuto
-                  ? 'bg-slate-100 text-slate-700 border-slate-300 font-medium'
-                  : 'bg-white text-slate-600 border-slate-200'
+                : 'bg-white text-slate-600 border-slate-200'
             } ${disabled && !checked ? 'opacity-50' : ''}`}>
               {opt}
-              {isAuto && !checked && <span className="ml-1 text-xs text-slate-400">↑</span>}
             </span>
           </label>
         )

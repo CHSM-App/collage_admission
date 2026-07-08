@@ -1,10 +1,12 @@
 import axios from 'axios'
 
 const api = axios.create({
-  baseURL:      import.meta.env.VITE_API_URL || 'http://192.168.1.5:5000/',
+  baseURL:      import.meta.env.VITE_API_URL || 'http://192.168.1.7:5000/',
   headers:      { 'Content-Type': 'application/json' },
   withCredentials: true,   // send httpOnly auth_token cookie on every request
 })
+
+
 
 api.interceptors.response.use(
   res => res,
@@ -50,3 +52,10 @@ api.interceptors.response.use(
 )
 
 export default api
+
+
+
+
+
+
+
