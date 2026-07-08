@@ -14,6 +14,15 @@ const TYPE_LABEL = {
   misc_fee:                 'Misc Fees',
   exam_fee:                 'Exam Fees',
 }
+const GATEWAY_LABEL = {
+  cash:   'Cash',
+  payu:   'Online (PayU)',
+  online: 'Online',
+  upi:    'UPI',
+  neft:   'NEFT/RTGS',
+  dd:     'Demand Draft',
+  cheque: 'Cheque',
+}
 
 // DB returns datetime strings without timezone (IST stored as-is).
 // Treat them as local time by replacing the space with 'T' — no UTC offset applied.
@@ -59,6 +68,10 @@ export default function PaymentReceipts({ applicationId, onClose, hideTypes = []
 
   if (!payments.length) return <div className="py-6 text-center text-slate-400 text-sm">No payment receipts found.</div>
 
+  const feeTotal    = data?.fee_total   != null ? Number(data.fee_total)   : null
+  const collegePaid = data?.college_paid != null ? Number(data.college_paid) : null
+  const dueAmount   = feeTotal != null && collegePaid != null ? Math.max(0, feeTotal - collegePaid) : null
+
   return (
     <div className="space-y-2">
       {onClose && (
@@ -69,6 +82,7 @@ export default function PaymentReceipts({ applicationId, onClose, hideTypes = []
       )}
       {payments.map((pmt, idx) => {
         const isPending = pmt.status !== 'success'
+        const modeLabel = pmt.gateway ? (GATEWAY_LABEL[pmt.gateway] || pmt.gateway) : null
         return (
         <div key={pmt.id} className={`rounded-lg border overflow-hidden ${isPending ? 'border-amber-200' : 'border-slate-200'}`}>
           <button
@@ -85,6 +99,8 @@ export default function PaymentReceipts({ applicationId, onClose, hideTypes = []
                 </p>
                 <p className="text-xs text-slate-400">
                   {isPending ? 'Awaiting payment' : `${fmtDate(pmt.completed_at)} ${fmtTime(pmt.completed_at)}`}
+                  {modeLabel && !isPending && <span className="ml-1.5 text-slate-300">·</span>}
+                  {modeLabel && !isPending && <span className="ml-1.5">{modeLabel}</span>}
                 </p>
               </div>
             </div>
@@ -96,20 +112,31 @@ export default function PaymentReceipts({ applicationId, onClose, hideTypes = []
               }
             </div>
           </button>
-          {!isPending && activeId === pmt.id && <ReceiptSheet app={data.application} pmt={pmt} showOrderId={showOrderId} />}
+          {!isPending && activeId === pmt.id && (
+            <ReceiptSheet
+              app={data.application}
+              pmt={pmt}
+              showOrderId={showOrderId}
+              feeTotal={feeTotal}
+              collegePaid={collegePaid}
+            />
+          )}
         </div>
         )
       })}
+
     </div>
   )
 }
 
 // ── Printable receipt ────────────────────────────────────────
-function ReceiptSheet({ app, pmt, showOrderId = false }) {
+function ReceiptSheet({ app, pmt, showOrderId = false, feeTotal = null, collegePaid = null }) {
   const receiptNo   = `RCP-${String(pmt.id).padStart(6, '0')}`
   const typeLabel   = TYPE_LABEL[pmt.payment_type] || pmt.payment_type
   const fullLabel   = typeLabel
   const studentName = (app.app_full_name || app.student_name || '').trim()
+  const modeLabel   = pmt.gateway ? (GATEWAY_LABEL[pmt.gateway] || pmt.gateway) : null
+  const dueAmt      = feeTotal != null && collegePaid != null ? Math.max(0, feeTotal - collegePaid) : null
   const sheetRef    = useRef(null)
 
   function buildReceiptBlock(copyLabel) {
@@ -141,16 +168,18 @@ function ReceiptSheet({ app, pmt, showOrderId = false }) {
         </tr>`
 
     // Single-cell spacer spanning all columns — stretches to fill remaining height.
-    // colspan=3 means no vertical column dividers in the empty space.
     const fillerRows = `
           <tr style="height:100%;">
-            <td colspan="3" style="border:1px solid #000;border-top:none;"></td>
+            <td colspan="3" style="border-left:1px solid #000;border-right:1px solid #000;border-top:none;border-bottom:none;"></td>
           </tr>`
 
     const totalAmt = Number(pmt.amount).toFixed(2)
+    const dueBlock = (dueAmt != null && dueAmt >= 0.01) ? `
+        <div style="margin-top:6px;font-size:11px;">
+          <span>Due : </span><strong>&#x20B9; ${dueAmt.toLocaleString('en-IN')}</strong>
+        </div>` : ''
 
-    // Each block is a flex column. The table wrapper has flex:1 so it stretches
-    // to fill whatever height the taller sibling block takes — both copies are always equal height.
+    // Each block is a flex column.
     return `
     <div style="width:48%;font-family:'Times New Roman',Times,serif;font-size:12px;color:#000;border:2px solid #000;padding:10px 12px;box-sizing:border-box;display:flex;flex-direction:column;">
       <div>
@@ -165,13 +194,14 @@ function ReceiptSheet({ app, pmt, showOrderId = false }) {
           <span>Date &nbsp;- &nbsp;${shortDate}</span>
           <span>Class &nbsp;- &nbsp;${classLabel}</span>
         </div>
-        <div style="margin-top:4px;font-size:11px;">
-          Received from &nbsp;<strong>${studentName}</strong>
+        <div style="margin-top:4px;font-size:11px;display:flex;justify-content:space-between;">
+          <span>Received from &nbsp;<strong>${studentName}</strong></span>
+          ${modeLabel ? `<span>Mode : <strong>${modeLabel}</strong></span>` : ''}
         </div>
       </div>
 
       <div style="flex:1;display:flex;flex-direction:column;margin-top:8px;">
-        <table style="width:100%;height:100%;border-collapse:collapse;">
+        <table style="width:100%;height:100%;border-collapse:collapse;border-bottom:1px solid #000;">
           <thead>
             <tr>
               <th style="border:1px solid #000;padding:3px 6px;font-size:11px;text-align:center;width:40px;">Sr. No.</th>
@@ -191,6 +221,7 @@ function ReceiptSheet({ app, pmt, showOrderId = false }) {
           <span>Total : <strong>₹ ${totalAmt}</strong></span>
           <span style="font-style:italic;font-size:10px;">${numberToWords(Number(pmt.amount))} Only</span>
         </div>
+        ${dueBlock}
         <div style="margin-top:20px;display:flex;justify-content:space-between;font-size:11px;">
           <span>Student Signature</span>
           <span>Cashier / Accountant</span>
@@ -268,7 +299,7 @@ function ReceiptSheet({ app, pmt, showOrderId = false }) {
       <div ref={sheetRef} className="bg-white p-4" style={{ fontFamily: "'Times New Roman', Times, serif", color: '#000' }}>
         <ReceiptCopy copyLabel="Office Copy" app={app} receiptNo={receiptNo} shortDate={shortDate}
           classLabel={classLabel} studentName={studentName} displayRows={displayRows}
-          fillerCount={fillerCount} pmt={pmt} />
+          fillerCount={fillerCount} pmt={pmt} modeLabel={modeLabel} dueAmt={dueAmt} />
       </div>
     </div>
   )
@@ -276,7 +307,7 @@ function ReceiptSheet({ app, pmt, showOrderId = false }) {
 
 
 // ── Traditional college receipt copy (JSX) ───────────────────
-function ReceiptCopy({ copyLabel, app, receiptNo, shortDate, classLabel, studentName, displayRows, fillerCount, pmt }) {
+function ReceiptCopy({ copyLabel, app, receiptNo, shortDate, classLabel, studentName, displayRows, fillerCount, pmt, modeLabel, dueAmt }) {
   const td = 'border border-black px-2 py-1 text-xs'
   return (
     <div className="border border-black p-3 text-xs" style={{ fontFamily: "'Times New Roman', Times, serif" }}>
@@ -294,11 +325,12 @@ function ReceiptCopy({ copyLabel, app, receiptNo, shortDate, classLabel, student
         {classLabel && <span>Class &nbsp;- &nbsp;{classLabel}</span>}
       </div>
 
-      <div className="mt-1 text-xs">
-        Received from &nbsp;<strong>{studentName}</strong>
+      <div className="flex justify-between mt-1 text-xs">
+        <span>Received from &nbsp;<strong>{studentName}</strong></span>
+        {modeLabel && <span>Mode : <strong>{modeLabel}</strong></span>}
       </div>
 
-      <table className="w-full border-collapse mt-2" style={{ height: '100%' }}>
+      <table className="w-full border-collapse mt-2 border-b border-black" style={{ height: '100%' }}>
         <thead>
           <tr>
             <th className={`${td} text-center w-10`}>Sr. No.</th>
@@ -316,7 +348,7 @@ function ReceiptCopy({ copyLabel, app, receiptNo, shortDate, classLabel, student
           ))}
           {/* Single-cell spacer spanning all columns — no column dividers in empty space */}
           <tr style={{ height: '100%' }}>
-            <td colSpan={3} className="border border-black border-t-0" />
+            <td colSpan={3} className="border-x border-black border-t-0 border-b-0" />
           </tr>
         </tbody>
       </table>
@@ -325,6 +357,12 @@ function ReceiptCopy({ copyLabel, app, receiptNo, shortDate, classLabel, student
         <span>Total : <strong>₹ {Number(pmt.amount).toFixed(2)}</strong></span>
         <span className="italic">{numberToWords(Number(pmt.amount))} Only</span>
       </div>
+
+      {dueAmt != null && dueAmt >= 0.01 && (
+        <div className="mt-1 text-xs">
+          <span>Due : </span><strong>₹ {dueAmt.toLocaleString('en-IN')}</strong>
+        </div>
+      )}
 
       <div className="flex justify-between mt-5 text-xs">
         <span>Student Signature</span>

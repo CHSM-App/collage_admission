@@ -810,7 +810,7 @@ router.get('/receipts/:applicationId', async (req, res) => {
     let platformDebt = feeBreakdownPlatformTotal; // platform portion yet to be "consumed"
     let cumulativeBefore = 0;
     const paymentsWithHeads = payments.map(pmt => {
-      if (pmt.payment_type !== 'college_fee' || feeBreakdown.length === 0) {
+      if ((pmt.payment_type !== 'college_fee' && pmt.payment_type !== 'college_fee_installment') || feeBreakdown.length === 0) {
         return pmt;
       }
       const pmtAmt = parseFloat(pmt.amount);
@@ -879,7 +879,21 @@ router.get('/receipts/:applicationId', async (req, res) => {
       return { ...pmt, fee_heads: feeHeads };
     });
 
-    return res.json({ success: true, data: { application: app, payments: enrichedPayments } });
+    // Compute total fee and total paid for due-amount display on receipt
+    const collegeFeeTotal = feeBreakdown.reduce((s, h) => s + (parseFloat(h.amount) || 0), 0);
+    const collegePaid = enrichedPayments
+      .filter(p => p.payment_type === 'college_fee' || p.payment_type === 'college_fee_installment')
+      .reduce((s, p) => s + (parseFloat(p.amount) || 0), 0);
+
+    return res.json({
+      success: true,
+      data: {
+        application: app,
+        payments: enrichedPayments,
+        fee_total: collegeFeeTotal > 0 ? collegeFeeTotal : null,
+        college_paid: collegeFeeTotal > 0 ? collegePaid : null,
+      },
+    });
   } catch (err) {
     logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
