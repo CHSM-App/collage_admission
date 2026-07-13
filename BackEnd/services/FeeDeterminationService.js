@@ -216,23 +216,26 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
     outsiderOnlyCodes = new Set(outsiderOnlyRes.recordset.map(r => r.fees_code))
   }
 
+  // A fee head is only charged when the college has CONFIGURED it for this exact
+  // course + year + student-type — i.e. there is a classwise_fees row with a
+  // NON-NULL amount for the student's slab. The college-wide fees_master base
+  // amount is NOT used as a fallback: if the classwise amount is blank (null) or
+  // there is no classwise row at all, the fee is treated as "not set" (excluded).
   const breakdown = feesRes.recordset
     .filter(row => isNewStudent || !outsiderOnlyCodes.has(row.fees_code))
     .map(row => {
-      const cwCol   = `cw_cat${slab}`
-      const baseCol = `fees_cat${slab}_amount`
-      const cwVal   = row[cwCol]
-      const baseVal = row[baseCol]
-      const amount  = cwVal != null ? parseFloat(String(cwVal)) : parseFloat(String(baseVal ?? 0))
+      const cwVal = row[`cw_cat${slab}`]
+      if (cwVal == null) return null   // not configured for this class/year → not charged
       return {
         fees_code:    row.fees_code,
         fees_head:    row.fees_head,
         short_name:   row.short_name,
         fees_type:    row.fees_type,
         is_refundable: !!row.is_refundable,
-        amount,
+        amount:       parseFloat(String(cwVal)),
       }
     })
+    .filter(Boolean)
 
   // 5. For new students, also include Outsider-specific fee heads configured for this
   //    class and year. New = FY always, or higher years with no prior app at this college.
@@ -263,18 +266,15 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
       `)
 
     for (const row of outsiderRes.recordset) {
-      // Resolve outsider amount: try student's slab first, then scan all slabs for first non-null.
+      // Only the student's slab amount counts, and only if it is actually set
+      // (non-null). A blank outsider amount is "not set" — skip it entirely.
       const cwSlabAmount = row[`cw_cat${slab}`]
-      const cwFallback = cwSlabAmount != null ? cwSlabAmount
-        : [1,2,3,4,5,6,7,8].reduce((found, n) => found != null ? found : row[`cw_cat${n}`], null)
-      const amount = cwFallback != null ? parseFloat(String(cwFallback)) : 0
+      if (cwSlabAmount == null) continue
+      const amount = parseFloat(String(cwSlabAmount))
 
-      // If this fee head already exists in the breakdown (fetched with Grand/NonGrand type),
-      // only override its amount with the outsider amount when the outsider amount is non-zero.
-      // If outsider classwise row has all nulls (amount=0), keep the fees_master base amount.
       const existing = breakdown.find(h => h.fees_code === row.fees_code)
       if (existing) {
-        if (amount > 0) existing.amount = amount
+        existing.amount = amount
         existing.is_outsider = true
       } else {
         breakdown.push({

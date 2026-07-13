@@ -30,6 +30,9 @@ export const acceptDeclaration = (appId, data) =>
 export const resubmitApplication = (appId) =>
   api.post(`api/applications/${appId}/resubmit`)
 
+export const submitDirectApplication = (appId, data) =>
+  api.post(`api/applications/${appId}/submit-direct`, data)
+
 export const getSubjectSelections = (appId) =>
   api.get(`api/applications/${appId}/subject-selections`)
 

@@ -15,6 +15,7 @@ const CollegeLogin        = lazy(() => import('../features/auth/pages/CollegeLog
 const StudentLogin        = lazy(() => import('../features/auth/pages/StudentLogin.jsx'))
 const StudentRegister     = lazy(() => import('../features/auth/pages/StudentRegister.jsx'))
 const ForgotPassword      = lazy(() => import('../features/auth/pages/ForgotPassword.jsx'))
+const CollegeForgotPassword = lazy(() => import('../features/auth/pages/CollegeForgotPassword.jsx'))
 const AdminDashboard      = lazy(() => import('../features/admin/pages/AdminDashboard.jsx'))
 const CollegeDashboard    = lazy(() => import('../features/college/pages/CollegeDashboard.jsx'))
 const StudentDashboard    = lazy(() => import('../features/student/pages/StudentDashboard.jsx'))
@@ -52,6 +53,7 @@ export default function AppRoutes() {
         <Route path={LOGIN_PATHS.admin}    element={<AdminLogin />} />
         <Route path="/register/student"    element={<StudentRegister />} />
         <Route path="/forgot-password"     element={<ForgotPassword />} />
+        <Route path="/college/forgot-password" element={<CollegeForgotPassword />} />
         <Route path="/payment-result"      element={<PaymentResult />} />
         <Route path="/pay/:token"          element={<PayViaLink />} />
 

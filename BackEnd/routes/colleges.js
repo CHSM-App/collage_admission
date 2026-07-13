@@ -16,6 +16,7 @@ const mssql   = require('mssql');
 const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const logger  = require('../config/logger');
+const { presetForType, isValidType, COLLEGE_TYPES } = require('../constants/collegePresets');
 
 // ── Generate next college code (CL001, CL002, …) ────────────
 async function generateCollegeCode() {
@@ -32,11 +33,18 @@ async function generateCollegeCode() {
 
 // Create a new college (admin onboarding) — requires super-admin auth
 router.post('/', authenticate, requireAdmin, async (req, res) => {
-  const { name, address, city, phone, email, admin_email, admin_password, college_code, application_fee } = req.body
+  const { name, address, city, phone, email, admin_email, admin_password, college_code, application_fee, college_type } = req.body
 
   if (!name || !email || !admin_email || !admin_password) {
     return res.status(400).json({ success: false, message: 'name, email, admin_email and admin_password are required.' })
   }
+
+  // Determine college type (drives the features_config bundle). Default: general.
+  const type = college_type || 'general'
+  if (!isValidType(type)) {
+    return res.status(400).json({ success: false, message: `college_type must be one of: ${COLLEGE_TYPES.join(', ')}.` })
+  }
+  const featuresConfig = JSON.stringify(presetForType(type))
 
   try {
     // Check duplicate admin_email
@@ -74,12 +82,14 @@ router.post('/', authenticate, requireAdmin, async (req, res) => {
       .input('hash',  mssql.NVarChar,  hash)
       .input('code',  mssql.NVarChar,  code)
       .input('fee',   mssql.Decimal,   application_fee ? parseFloat(application_fee) : null)
+      .input('ctype', mssql.NVarChar,  type)
+      .input('feat',  mssql.NVarChar,  featuresConfig)
       .input('actor', mssql.NVarChar,  String(req.user.id))
       .query(`
         DECLARE @t TABLE (id INT, name NVARCHAR(200), admin_email NVARCHAR(150), college_code NVARCHAR(50));
-        INSERT INTO colleges (name, address, city, phone, email, admin_email, admin_password_hash, college_code, application_fee, created_by)
+        INSERT INTO colleges (name, address, city, phone, email, admin_email, admin_password_hash, college_code, application_fee, college_type, features_config, created_by)
         OUTPUT INSERTED.id, INSERTED.name, INSERTED.admin_email, INSERTED.college_code INTO @t
-        VALUES (@name, @addr, @city, @phone, @email, @ae, @hash, @code, @fee, @actor);
+        VALUES (@name, @addr, @city, @phone, @email, @ae, @hash, @code, @fee, @ctype, @feat, @actor);
         SELECT id, name, admin_email, college_code FROM @t;
       `)
 
@@ -149,12 +159,20 @@ router.get('/by-code/:code', async (req, res) => {
   try {
     const collegeRes = await db.request()
       .input('code', code)
-      .query('SELECT id, name, city, phone, email FROM colleges WHERE UPPER(college_code) = @code AND is_enabled = 1');
+      .query('SELECT id, name, city, phone, email, features_config FROM colleges WHERE UPPER(college_code) = @code AND is_enabled = 1');
 
     if (!collegeRes.recordset.length) {
       return res.status(404).json({ success: false, message: 'No college found with that code. Please check and try again.' });
     }
-    const college = collegeRes.recordset[0];
+    const row = collegeRes.recordset[0];
+    const college = {
+      id:    row.id,
+      name:  row.name,
+      city:  row.city,
+      phone: row.phone,
+      email: row.email,
+      features: row.features_config ? JSON.parse(row.features_config) : null,
+    };
 
     const today = new Date().toISOString().slice(0, 10);
     const periodsRes = await db.request()

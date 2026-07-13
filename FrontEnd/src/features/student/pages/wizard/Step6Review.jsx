@@ -12,7 +12,7 @@ const EXAM_ROWS  = {
   5: ['SSC', 'HSC', 'FY_SEM1', 'FY_SEM2', 'SY_SEM1', 'SY_SEM2', 'TY_SEM1', 'TY_SEM2', '4Y_SEM1', '4Y_SEM2'],
 }
 
-export default function Step6Review({ data, errors, globalError, saving, appId, applicationFeePaid, onBack, onEditStep, onDone }) {
+export default function Step6Review({ data, errors, globalError, saving, appId, applicationFeePaid, onBack, onEditStep, onDone, features }) {
   const [accepted, setAccepted] = useState(!!data.declaration_accepted)
 
   const {
@@ -20,11 +20,13 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
     submitError,
     resubmitted,
     handleSubmit: submitApplication,
+    handleDirectSubmit: submitDirect,
     handleResubmit: resubmitApp,
   } = useApplicationSubmit(appId)
 
-  function handleSubmit()   { submitApplication(accepted) }
-  function handleResubmit() { resubmitApp(accepted) }
+  function handleSubmit()       { submitApplication(accepted) }
+  function handleDirectSubmit() { submitDirect(accepted) }
+  function handleResubmit()     { resubmitApp(accepted) }
 
   // ── Resubmit success screen ───────────────────────────────
   if (resubmitted) {
@@ -63,14 +65,43 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
 
         <ReviewSection title="Personal Details" onEdit={() => onEditStep(2)}>
           <Row label="Full Name"     value={[data.surname, data.first_name, data.middle_name].filter(Boolean).join(' ')} />
+          {features?.admission_form?.name_as_on_aadhaar === true && (
+            <Row label="Name as on Aadhaar" value={data.name_as_on_aadhaar} />
+          )}
+          {features?.admission_form?.son_of === true && (
+            <Row label="S/o" value={data.son_of} />
+          )}
           <Row label="Mother's First Name" value={data.mother_name} />
+          {features?.admission_form?.semester === true && (
+            <Row label="Semester" value={data.semester ? `Semester ${data.semester}` : ''} />
+          )}
+          {features?.admission_form?.date_of_admission === true && (
+            <Row label="Date of Admission" value={fmtDate(data.date_of_admission)} />
+          )}
+          {features?.admission_form?.diploma_direct_sy === true && (
+            <Row label="Diploma (Direct SY)" value={data.is_diploma_direct_sy ? 'Yes' : 'No'} />
+          )}
           <Row label="Gender"         value={data.sex} />
           <Row label="Mobile"        value={data.mobile} />
+          {data.parent_mobile && <Row label="Parent's Mobile" value={data.parent_mobile} />}
+          {data.land_line && <Row label="Land Line" value={data.land_line} />}
           <Row label="Email"         value={data.email} />
           <Row label="Address"       value={[data.address, data.taluka, data.district, data.state].filter(Boolean).join(', ')} />
+          {[data.native_address, data.native_taluka, data.native_district].some(Boolean) && (
+            <Row label="Native Address" value={[data.native_address, data.native_taluka, data.native_district].filter(Boolean).join(', ')} />
+          )}
+          {data.guardian_relation && <Row label="Guardian's Relation" value={data.guardian_relation} />}
           <Row label="Category"      value={data.category} />
+          {features?.admission_form?.admitted_category === true && (
+            <Row label="Admitted Category" value={data.admitted_category} />
+          )}
+          {features?.admission_form?.admission_quota === true && (
+            <Row label="Admission Quota" value={data.admission_quota} />
+          )}
           <Row label="Special Status" value={data.special_status} />
-          <Row label="Fees Category" value={data.fees_category} />
+          {features?.payment?.college_fee !== false && (
+            <Row label="Fees Category" value={data.fees_category} />
+          )}
         </ReviewSection>
 
         <ReviewSection title="Other Details" onEdit={() => onEditStep(3)}>
@@ -165,23 +196,32 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
         </div>
 
         {/* Fee summary / resubmit notice */}
-        {applicationFeePaid ? (
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
-            <p className="font-semibold text-emerald-800">Application fee already paid</p>
-            <p className="text-emerald-700 text-xs mt-0.5">
-              No additional payment required. Click "Resubmit Application" to send your corrected form.
-            </p>
-          </div>
-        ) : (
-          <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm">
-            <p className="font-semibold text-blue-900">
-              Platform fee: ₹{Number(data.application_fee || 0).toLocaleString('en-IN')}
-            </p>
-            <p className="text-blue-700 text-xs mt-0.5">
-              Clicking "Pay & Submit" will redirect you to the PayU payment page. Non-refundable.
-            </p>
-          </div>
-        )}
+        {(() => {
+          const hasPlatformFee = features?.payment?.platform_fee !== false
+          if (applicationFeePaid) {
+            return (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
+                <p className="font-semibold text-emerald-800">Application fee already paid</p>
+                <p className="text-emerald-700 text-xs mt-0.5">
+                  No additional payment required. Click "Resubmit Application" to send your corrected form.
+                </p>
+              </div>
+            )
+          }
+          if (hasPlatformFee) {
+            return (
+              <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm">
+                <p className="font-semibold text-blue-900">
+                  Platform fee: ₹{Number(data.application_fee || 0).toLocaleString('en-IN')}
+                </p>
+                <p className="text-blue-700 text-xs mt-0.5">
+                  Clicking "Pay & Submit" will redirect you to the PayU payment page. Non-refundable.
+                </p>
+              </div>
+            )
+          }
+          return null
+        })()}
 
         {(submitError || globalError) && (
           <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -190,33 +230,38 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
         )}
 
         {/* Actions */}
-        <div className="flex flex-col-reverse sm:flex-row gap-3">
-          <Button variant="secondary" onClick={onBack} disabled={processing} className="w-full sm:w-auto">
-            ← Back
-          </Button>
-          {applicationFeePaid ? (
-            <Button
-              onClick={handleResubmit}
-              loading={processing}
-              disabled={!accepted || processing}
-              className={`w-full sm:w-auto sm:ml-auto ${!accepted ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              Resubmit Application →
-            </Button>
-          ) : (
-            <Button
-              onClick={handleSubmit}
-              loading={processing}
-              disabled={!accepted || processing}
-              className={`w-full sm:w-auto sm:ml-auto ${(!accepted || processing) ? 'opacity-50 cursor-not-allowed' : ''}`}
-            >
-              Pay ₹{Number(data.application_fee || 0).toLocaleString('en-IN')} &amp; Submit →
-            </Button>
-          )}
-        </div>
+        {(() => {
+          const hasPlatformFee = features?.payment?.platform_fee !== false
+          return (
+            <div className="flex flex-col-reverse sm:flex-row gap-3">
+              <Button variant="secondary" onClick={onBack} disabled={processing} className="w-full sm:w-auto">
+                ← Back
+              </Button>
+              {(applicationFeePaid || !hasPlatformFee) ? (
+                <Button
+                  onClick={applicationFeePaid ? handleResubmit : handleDirectSubmit}
+                  loading={processing}
+                  disabled={!accepted || processing}
+                  className={`w-full sm:w-auto sm:ml-auto ${!accepted ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {applicationFeePaid ? 'Resubmit Application →' : 'Submit Application →'}
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleSubmit}
+                  loading={processing}
+                  disabled={!accepted || processing}
+                  className={`w-full sm:w-auto sm:ml-auto ${(!accepted || processing) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  Pay ₹{Number(data.application_fee || 0).toLocaleString('en-IN')} &amp; Submit →
+                </Button>
+              )}
+            </div>
+          )
+        })()}
         {!accepted && (
           <p className="text-xs text-center text-slate-400">
-            Accept the declaration above to {applicationFeePaid ? 'resubmit' : 'enable payment'}.
+            Accept the declaration above to {applicationFeePaid ? 'resubmit' : features?.payment?.platform_fee !== false ? 'enable payment' : 'submit'}.
           </p>
         )}
       </div>

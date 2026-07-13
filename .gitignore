@@ -12,3 +12,6 @@ playwright-report/
 
 # Lock file (generated, managed per-environment)
 package-lock.json
+
+# Uploaded student documents (user data, served via authenticated route)
+BackEnd/uploads/

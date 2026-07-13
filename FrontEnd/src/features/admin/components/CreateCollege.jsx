@@ -6,7 +6,13 @@ import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
 const EMPTY = {
   name: '', address: '', city: '', phone: '',
   email: '', admin_email: '', admin_password: '', college_code: '', application_fee: '',
+  college_type: 'general',
 }
+
+const COLLEGE_TYPE_OPTIONS = [
+  { value: 'general',     label: 'General (BSc / BCom / Arts)' },
+  { value: 'agriculture', label: 'Agriculture' },
+]
 
 const inputCls = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500'
 
@@ -78,6 +84,14 @@ export default function CreateCollege({ onCreated }) {
           <Field label="College Name" required>
             <input name="name" value={form.name} onChange={handleChange} required
               placeholder="e.g. Shri Mallikarjun College" className={inputCls} />
+          </Field>
+          <Field label="College Type" required>
+            <select name="college_type" value={form.college_type} onChange={handleChange} className={inputCls}>
+              {COLLEGE_TYPE_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-slate-400">Determines which admission-form fields this college collects.</p>
           </Field>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="City" required>

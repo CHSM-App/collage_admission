@@ -26,6 +26,7 @@ const mssql   = require('mssql');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
 const logger  = require('../config/logger');
+const { presetForType, isValidType, COLLEGE_TYPES } = require('../constants/collegePresets');
 
 const ALL_PERMISSIONS = [
   'submit_application',
@@ -60,8 +61,27 @@ const NAV_ITEMS = [
 
 // ── PUT /admin/colleges/:id ──────────────────────────────────
 router.put('/colleges/:id', authenticate, requireAdmin, async (req, res) => {
-  const { application_fee, is_enabled } = req.body;
+  const { application_fee, is_enabled, college_type } = req.body;
   const id = parseInt(req.params.id);
+
+  // Change college type — overwrites features_config with that type's preset
+  if (college_type !== undefined) {
+    if (!isValidType(college_type)) {
+      return res.status(400).json({ success: false, message: `college_type must be one of: ${COLLEGE_TYPES.join(', ')}.` });
+    }
+    try {
+      await db.request()
+        .input('ctype',    mssql.NVarChar, college_type)
+        .input('features', mssql.NVarChar, JSON.stringify(presetForType(college_type)))
+        .input('id',       mssql.Int,      id)
+        .input('actor',    mssql.NVarChar, String(req.user.id))
+        .query(`UPDATE colleges SET college_type = @ctype, features_config = @features, updated_by = @actor WHERE id = @id`);
+      return res.json({ success: true, message: 'College type updated.' });
+    } catch (err) {
+      logger.error({ err });
+      return res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  }
 
   // Toggle enabled/disabled
   if (is_enabled !== undefined) {
@@ -100,6 +120,25 @@ router.put('/colleges/:id', authenticate, requireAdmin, async (req, res) => {
   }
 });
 
+// ── GET /admin/colleges/:id/features ────────────────────────
+router.get('/colleges/:id/features', authenticate, requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const result = await db.request()
+      .input('id', mssql.Int, id)
+      .query(`SELECT features_config, college_type FROM colleges WHERE id = @id`);
+    if (!result.recordset.length)
+      return res.status(404).json({ success: false, message: 'College not found.' });
+
+    const raw = result.recordset[0].features_config;
+    const features = raw ? JSON.parse(raw) : null;
+    return res.json({ success: true, data: features, college_type: result.recordset[0].college_type });
+  } catch (err) {
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
 // ── GET /admin/colleges ──────────────────────────────────────
 router.get('/colleges', authenticate, requireAdmin, async (req, res) => {
   const { page, limit, offset } = parsePage(req.query);
@@ -108,7 +147,7 @@ router.get('/colleges', authenticate, requireAdmin, async (req, res) => {
     const total    = countRes.recordset[0].total;
 
     const dataRes = await db.request().query(`
-      SELECT c.id, c.name, c.city, c.email, c.college_code, c.application_fee, c.is_enabled,
+      SELECT c.id, c.name, c.city, c.email, c.college_code, c.application_fee, c.is_enabled, c.college_type,
              (SELECT COUNT(*) FROM college_users cu WHERE cu.college_id = c.id AND cu.is_active = 1) AS active_users,
              (SELECT COUNT(*) FROM college_roles cr WHERE cr.college_id = c.id) AS roles_count
       FROM colleges c
@@ -309,7 +348,7 @@ router.get('/colleges/:collegeId/users', authenticate, requireAdmin, async (req,
     const dataRes = await db.request()
       .input('cid', mssql.Int, collegeId)
       .query(`
-        SELECT u.id, u.full_name, u.email, u.is_active, u.created_at,
+        SELECT u.id, u.full_name, u.email, u.phone, u.is_active, u.created_at,
                r.id AS role_id, r.role_name
         FROM college_users u
         JOIN college_roles r ON r.id = u.role_id
@@ -329,10 +368,14 @@ router.get('/colleges/:collegeId/users', authenticate, requireAdmin, async (req,
 // body: { full_name, email, password, role_id }
 router.post('/colleges/:collegeId/users', authenticate, requireAdmin, async (req, res) => {
   const collegeId = parseInt(req.params.collegeId);
-  const { full_name, email, password, role_id } = req.body;
+  const { full_name, email, password, role_id, phone } = req.body;
 
   if (!full_name?.trim() || !email?.trim() || !password || !role_id) {
     return res.status(400).json({ success: false, message: 'full_name, email, password and role_id are required.' });
+  }
+  const cleanPhone = phone ? String(phone).replace(/\D/g, '') : null;
+  if (cleanPhone && !/^[6-9]\d{9}$/.test(cleanPhone)) {
+    return res.status(400).json({ success: false, message: 'Phone must be a 10-digit number starting with 6–9.' });
   }
 
   try {
@@ -342,13 +385,14 @@ router.post('/colleges/:collegeId/users', authenticate, requireAdmin, async (req
       .input('rid',   mssql.Int,      parseInt(role_id))
       .input('name',  mssql.NVarChar, full_name.trim())
       .input('em',    mssql.NVarChar, email.trim().toLowerCase())
+      .input('phone', mssql.NVarChar, cleanPhone)
       .input('hash',  mssql.NVarChar, hash)
       .input('actor', mssql.NVarChar, String(req.user.id))
       .query(`
         DECLARE @t TABLE (id INT, full_name NVARCHAR(150), email NVARCHAR(150));
-        INSERT INTO college_users (college_id, role_id, full_name, email, password_hash, created_by)
+        INSERT INTO college_users (college_id, role_id, full_name, email, phone, password_hash, created_by)
         OUTPUT INSERTED.id, INSERTED.full_name, INSERTED.email INTO @t
-        VALUES (@cid, @rid, @name, @em, @hash, @actor);
+        VALUES (@cid, @rid, @name, @em, @phone, @hash, @actor);
         SELECT id, full_name, email FROM @t;
       `);
 
@@ -365,7 +409,11 @@ router.post('/colleges/:collegeId/users', authenticate, requireAdmin, async (req
 // ── PUT /admin/colleges/:collegeId/users/:userId ─────────────
 router.put('/colleges/:collegeId/users/:userId', authenticate, requireAdmin, async (req, res) => {
   const userId = parseInt(req.params.userId);
-  const { full_name, email, password, role_id, is_active } = req.body;
+  const { full_name, email, password, role_id, is_active, phone } = req.body;
+  const cleanPhone = phone !== undefined ? (phone ? String(phone).replace(/\D/g, '') : null) : undefined;
+  if (cleanPhone && !/^[6-9]\d{9}$/.test(cleanPhone)) {
+    return res.status(400).json({ success: false, message: 'Phone must be a 10-digit number starting with 6–9.' });
+  }
   try {
     let hashClause = '';
     const req2 = db.request()
@@ -374,6 +422,9 @@ router.put('/colleges/:collegeId/users/:userId', authenticate, requireAdmin, asy
       .input('em',    mssql.NVarChar, email?.trim().toLowerCase() || null)
       .input('rid',   mssql.Int,      role_id    ? parseInt(role_id) : null)
       .input('act',   mssql.Bit,      is_active !== undefined ? (is_active ? 1 : 0) : null)
+      // phone: undefined = not provided (keep); null = explicitly cleared; string = set
+      .input('phone', mssql.NVarChar, cleanPhone === undefined ? null : cleanPhone)
+      .input('phoneProvided', mssql.Bit, cleanPhone === undefined ? 0 : 1)
       .input('actor', mssql.NVarChar, String(req.user.id));
 
     if (password) {
@@ -388,6 +439,7 @@ router.put('/colleges/:collegeId/users/:userId', authenticate, requireAdmin, asy
         email      = COALESCE(@em,   email),
         role_id    = COALESCE(@rid,  role_id),
         is_active  = COALESCE(@act,  is_active),
+        phone      = CASE WHEN @phoneProvided = 1 THEN @phone ELSE phone END,
         updated_by = @actor
         ${hashClause}
       WHERE id = @id

@@ -12,7 +12,7 @@ const FUNDING_COLORS = {
   Both:       'bg-blue-50 text-blue-700 border-blue-200',
 }
 
-export default function Step2Personal({ data, errors, globalError, saving, onChange, onBack, onNext, readOnly, isCollege }) {
+export default function Step2Personal({ data, errors, globalError, saving, onChange, onBack, onNext, readOnly, isCollege, features }) {
   const [determined, setDetermined]         = useState({ category: '', reason: '' })
   const [overrideMode, setOverrideMode]     = useState(!!data.fees_category_override)
   const [overrideRemark, setOverrideRemark] = useState(data.fees_category_override_remark || '')
@@ -164,14 +164,87 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
     onChange({ target: { name: 'division', value: same ? '' : letter } })
   }
 
+  const showCasteCategory    = features?.admission_form?.caste_category    !== false
+  const feesEnabled          = features?.payment?.college_fee              !== false
+  const showFeesCategory     = showCasteCategory && feesEnabled
+  const showAdmittedCategory = features?.admission_form?.admitted_category === true
+  const showOtherCategory    = features?.admission_form?.other_category    === true
+  const showAdmissionQuota   = features?.admission_form?.admission_quota   === true
+  const showFatherNameSplit  = features?.admission_form?.father_name_split === true
+  const showDateOfAdmission  = features?.admission_form?.date_of_admission  === true
+  // "Diploma Student (Direct SY)" only applies to SY (Second Year) admissions.
+  const showDiplomaDirectSy  = features?.admission_form?.diploma_direct_sy  === true
+                               && parseInt(data.year_of_study, 10) === 2
+  const showNameAsOnAadhaar  = features?.admission_form?.name_as_on_aadhaar === true
+  const showSonOf            = features?.admission_form?.son_of             === true
+  const showSemester         = features?.admission_form?.semester          === true
+
+  // ── Semester options, derived from the admission year and the DSY flag ──
+  // A year of study maps to two semesters: year Y → sem (2Y-1) and 2Y.
+  // FY → 1,2 · SY → 3,4 · TY → 5,6 · etc.
+  // If "Diploma Student (Direct SY)" is checked, the student enters at SY, so
+  // semesters 1 & 2 are blocked (SY onwards only).
+  const semesterOptions = (() => {
+    const y = parseInt(data.year_of_study, 10)
+    let sems
+    if (y >= 1 && y <= 5) {
+      sems = [2 * y - 1, 2 * y]
+    } else {
+      sems = [1, 2, 3, 4, 5, 6, 7, 8]  // fallback if year unknown
+    }
+    if (data.is_diploma_direct_sy) {
+      sems = sems.filter(s => s > 2)   // DSY → SY onwards (no sem 1 or 2)
+    }
+    return sems
+  })()
+
+  // DSY only applies to SY. If the field is not shown (non-SY admission) but the
+  // flag is somehow set, clear it so it isn't saved for a non-SY application.
+  useEffect(() => {
+    if (!showDiplomaDirectSy && data.is_diploma_direct_sy) {
+      onChange({ target: { name: 'is_diploma_direct_sy', value: false } })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDiplomaDirectSy])
+
+  // If the currently-selected semester is no longer valid (e.g. DSY toggled, or
+  // year changed), clear it so the user re-picks a valid option.
+  useEffect(() => {
+    if (showSemester && data.semester && !semesterOptions.includes(parseInt(data.semester, 10))) {
+      onChange({ target: { name: 'semester', value: '' } })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.is_diploma_direct_sy, data.year_of_study])
+
+  // Default Date of Admission to today for new applications (won't overwrite a saved date).
+  useEffect(() => {
+    if (showDateOfAdmission && !data.date_of_admission) {
+      const today = new Date().toLocaleDateString('en-CA') // YYYY-MM-DD in local time
+      onChange({ target: { name: 'date_of_admission', value: today } })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showDateOfAdmission])
+
   function handleNext() {
     // Validate division (college only)
     if (isCollege && divisions.length > 0 && !data.division) {
       setLocalError('Division selection is required.'); return
     }
-    // Validate caste selection
-    if (!data.category) {
+    // Validate caste selection (only if feature is enabled)
+    if (showCasteCategory && !data.category) {
       setLocalError('Caste / Community Category is required.'); return
+    }
+    // Validate admitted category (only if feature is enabled)
+    if (showAdmittedCategory && !data.admitted_category) {
+      setLocalError('Admitted Category is required.'); return
+    }
+    // Validate admission quota (only if feature is enabled)
+    if (showAdmissionQuota && !data.admission_quota) {
+      setLocalError('Admission Quota is required.'); return
+    }
+    // Validate semester (only if feature is enabled)
+    if (showSemester && !data.semester) {
+      setLocalError('Semester is required.'); return
     }
     // Validate mobile
     if (data.mobile && !/^[6-9]\d{9}$/.test(data.mobile.trim())) {
@@ -190,6 +263,26 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
       fees_category_override_remark: overrideMode ? overrideRemark : '',
       degree_course_code: data.degree_course_code || degreeCourse?.degree_course_code || null,
       division: data.division || null,
+      admitted_category: data.admitted_category || null,
+      other_category:    data.other_category    || null,
+      admission_quota:   data.admission_quota   || null,
+      date_of_admission:    data.date_of_admission || null,
+      is_diploma_direct_sy: !!data.is_diploma_direct_sy,
+      name_as_on_aadhaar:   data.name_as_on_aadhaar || null,
+      son_of:               data.son_of || null,
+      native_address:    data.native_address    || null,
+      native_taluka:     data.native_taluka     || null,
+      native_district:   data.native_district   || null,
+      parent_mobile:     data.parent_mobile     || null,
+      land_line:         data.land_line         || null,
+      guardian_relation: data.guardian_relation || null,
+      semester:          data.semester          || null,
+      father_surname:      data.father_surname      || null,
+      father_first_name:   data.father_first_name   || null,
+      father_middle_name:  data.father_middle_name  || null,
+      mother_surname:      data.mother_surname      || null,
+      mother_first_name:   data.mother_first_name   || null,
+      mother_middle_name:  data.mother_middle_name  || null,
     })
   }
 
@@ -209,6 +302,35 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
 
       <div className="px-4 sm:px-5 py-5 space-y-5">
 
+        {/* Admission details (feature-gated) */}
+        {(showDateOfAdmission || showDiplomaDirectSy || showSemester) && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+            {showSemester && (
+              <FormField
+                label={<span>Semester <span className="text-red-500">*</span></span>}
+                name="semester" type="select"
+                value={data.semester || ''} onChange={onChange}
+                placeholder="Select semester…"
+                options={semesterOptions.map(n => ({ value: String(n), label: `Semester ${n}` }))}
+              />
+            )}
+            {showDateOfAdmission && (
+              <FormField label="Date of Admission" name="date_of_admission" type="date"
+                value={data.date_of_admission || ''} onChange={onChange} />
+            )}
+            {showDiplomaDirectSy && (
+              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer h-10">
+                <input type="checkbox" name="is_diploma_direct_sy"
+                  checked={!!data.is_diploma_direct_sy}
+                  onChange={e => onChange({ target: { name: 'is_diploma_direct_sy', value: e.target.checked } })}
+                  className="h-4 w-4 accent-slate-800"
+                />
+                Diploma Student (Direct SY)
+              </label>
+            )}
+          </div>
+        )}
+
         {/* Name */}
         <div>
           <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-400">Full Name</p>
@@ -218,7 +340,41 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
             <FormField label="Middle / Father's Name" name="middle_name" value={data.middle_name} onChange={onNameChange} error={e.middle_name} required placeholder="Ramesh" />
             <FormField label="Mother's First Name"    name="mother_name" value={data.mother_name} onChange={onNameChange} error={e.mother_name} required placeholder="Sunita" />
           </div>
+          {(showNameAsOnAadhaar || showSonOf) && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+              {showNameAsOnAadhaar && (
+                <FormField label="Name as on Aadhaar Card" name="name_as_on_aadhaar"
+                  value={data.name_as_on_aadhaar || ''} onChange={onChange} placeholder="As printed on Aadhaar" />
+              )}
+              {showSonOf && (
+                <FormField label="S/o (for Transcript & Certificate)" name="son_of"
+                  value={data.son_of || ''} onChange={onChange} placeholder="Father's name if needed" />
+              )}
+            </div>
+          )}
         </div>
+
+        {/* Father & Mother name split (feature-gated) */}
+        {showFatherNameSplit && (
+          <div className="space-y-3">
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Father's / Husband's Name</p>
+              <div className="grid grid-cols-3 gap-3">
+                <FormField label="Surname"    name="father_surname"     value={data.father_surname     || ''} onChange={onChange} placeholder="Shetty" />
+                <FormField label="First Name" name="father_first_name"  value={data.father_first_name  || ''} onChange={onChange} placeholder="Ramesh" />
+                <FormField label="Middle Name"name="father_middle_name" value={data.father_middle_name || ''} onChange={onChange} placeholder="Kumar" />
+              </div>
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Mother's Name (from paternal side)</p>
+              <div className="grid grid-cols-3 gap-3">
+                <FormField label="Surname"    name="mother_surname"     value={data.mother_surname     || ''} onChange={onChange} placeholder="Shetty" />
+                <FormField label="First Name" name="mother_first_name"  value={data.mother_first_name  || ''} onChange={onChange} placeholder="Sunita" />
+                <FormField label="Middle Name"name="mother_middle_name" value={data.mother_middle_name || ''} onChange={onChange} placeholder="Devi" />
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <FormField label="Gender" name="sex" type="select" value={data.sex} onChange={onChange}
@@ -226,6 +382,17 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
           <FormField label="Mobile Number" name="mobile" type="tel" value={data.mobile}
             onChange={e => onChange({ target: { name: 'mobile', value: e.target.value.replace(/\D/g, '').slice(0, 10) } })}
             error={e.mobile} required placeholder="9876543210" hint="10 digits, starting with 6-9" maxLength={10} inputMode="numeric" />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <FormField label="Parent's Mobile" name="parent_mobile" type="tel" value={data.parent_mobile || ''}
+            onChange={e => onChange({ target: { name: 'parent_mobile', value: e.target.value.replace(/\D/g, '').slice(0, 10) } })}
+            placeholder="9876543210" maxLength={10} inputMode="numeric" />
+          <FormField label="Land Line" name="land_line" value={data.land_line || ''}
+            onChange={e => onChange({ target: { name: 'land_line', value: e.target.value.replace(/[^\d-]/g, '') } })}
+            placeholder="e.g. 0233-1234567" />
+          <FormField label="Guardian's Relation with Student" name="guardian_relation" value={data.guardian_relation || ''}
+            onChange={onChange} placeholder="e.g. Father, Uncle" />
         </div>
 
         <FormField label="Email Address" name="email" type="email" value={data.email}
@@ -246,6 +413,19 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
           </div>
         </div>
 
+        {/* Native (Permanent) Address */}
+        <div>
+          <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-400">Native / Permanent Address</p>
+          <div className="space-y-3">
+            <FormField label="Address" name="native_address" type="textarea" rows={2} value={data.native_address || ''}
+              onChange={onChange} placeholder="House no., Street, Area…" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <FormField label="Taluka"   name="native_taluka"   value={data.native_taluka   || ''} onChange={onChange} placeholder="Vengurla" />
+              <FormField label="District" name="native_district" value={data.native_district || ''} onChange={onChange} placeholder="Sindhudurg" />
+            </div>
+          </div>
+        </div>
+
         {/* Degree Course */}
         {degreeCourse && (
           <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
@@ -261,7 +441,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
         {/* Division — college only */}
         {isCollege && divisions.length > 0 && (
           <div>
-            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Division</p>
+            <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Division <span className="text-red-500">*</span></p>
             <div className="flex flex-wrap gap-2">
               {divisions.map(d => (
                 <button
@@ -283,38 +463,42 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
         )}
 
         {/* Caste Category */}
-        <FormField label={<span>Caste / Community Category <span className="text-red-500">*</span></span>}>
-          {!categoryMaster ? (
-            <p className="text-xs text-slate-400 mt-1">Loading categories…</p>
-          ) : (
-            <RadioGroup
-              name="category"
-              options={casteOptions}
-              value={data.category}
-              onChange={v => onChange({ target: { name: 'category', value: v } })}
-            />
-          )}
-          {categoryMaster && !data.category && <p className="mt-1 text-xs text-slate-400">This field is mandatory — please select one.</p>}
-          {e.category && <p className="mt-1 text-xs font-medium text-red-600">{e.category}</p>}
-        </FormField>
+        {showCasteCategory && (
+          <FormField label={<span>Caste / Community Category <span className="text-red-500">*</span></span>}>
+            {!categoryMaster ? (
+              <p className="text-xs text-slate-400 mt-1">Loading categories…</p>
+            ) : (
+              <RadioGroup
+                name="category"
+                options={casteOptions}
+                value={data.category}
+                onChange={v => onChange({ target: { name: 'category', value: v } })}
+              />
+            )}
+            {categoryMaster && !data.category && <p className="mt-1 text-xs text-slate-400">This field is mandatory — please select one.</p>}
+            {e.category && <p className="mt-1 text-xs font-medium text-red-600">{e.category}</p>}
+          </FormField>
+        )}
 
         {/* Special Status */}
-        <FormField
-          label="Special Status (Optional)"
-          hint={specialStatusDisabled ? 'Special status is only applicable for General (Gen.) category.' : 'Select only if applicable — may qualify for additional concession.'}
-        >
-          <RadioGroup
-            name="special_status"
-            options={specialOptions}
-            value={data.special_status}
-            onChange={v => onChange({ target: { name: 'special_status', value: v } })}
-            clearable
-            disabled={specialStatusDisabled}
-          />
-        </FormField>
+        {showCasteCategory && (
+          <FormField
+            label="Special Status (Optional)"
+            hint={specialStatusDisabled ? 'Special status is only applicable for General (Gen.) category.' : 'Select only if applicable — may qualify for additional concession.'}
+          >
+            <RadioGroup
+              name="special_status"
+              options={specialOptions}
+              value={data.special_status}
+              onChange={v => onChange({ target: { name: 'special_status', value: v } })}
+              clearable
+              disabled={specialStatusDisabled}
+            />
+          </FormField>
+        )}
 
         {/* Fees Category */}
-        <FormField
+        {showFeesCategory && <FormField
           label={
             <span className="flex items-center gap-2">
               Fees Category
@@ -374,7 +558,46 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
             )}
           </div>
           {e.fees_category && !determined.category && <p className="mt-1 text-xs font-medium text-red-600">{e.fees_category}</p>}
-        </FormField>
+        </FormField>}
+
+        {/* Admitted Category */}
+        {showAdmittedCategory && (
+          <FormField label={<span>Admitted Category <span className="text-red-500">*</span></span>}>
+            <RadioGroup
+              name="admitted_category"
+              options={['SC', 'ST', 'VJ/DT(a)', 'NT(b)', 'NT(c)', 'NT(d)', 'OBC', 'SBC', 'OPEN', 'EWS', 'SEBC', 'CR', 'CO']}
+              value={data.admitted_category}
+              onChange={v => onChange({ target: { name: 'admitted_category', value: v } })}
+            />
+            {errors.admitted_category && <p className="mt-1 text-xs font-medium text-red-600">{errors.admitted_category}</p>}
+          </FormField>
+        )}
+
+        {/* Other Category */}
+        {showOtherCategory && (
+          <FormField label="Other Category">
+            <RadioGroup
+              name="other_category"
+              options={['FF', 'DP', 'PH', 'PD', 'AG', 'OS', 'PAP', 'Spot Round', 'None']}
+              value={data.other_category}
+              onChange={v => onChange({ target: { name: 'other_category', value: v } })}
+              clearable
+            />
+          </FormField>
+        )}
+
+        {/* Admission Quota */}
+        {showAdmissionQuota && (
+          <FormField label={<span>Admission Quota <span className="text-red-500">*</span></span>}>
+            <RadioGroup
+              name="admission_quota"
+              options={['70%', '30%', 'OS', 'Goa', 'ICAR', 'J & K', 'Management']}
+              value={data.admission_quota}
+              onChange={v => onChange({ target: { name: 'admission_quota', value: v } })}
+            />
+            {errors.admission_quota && <p className="mt-1 text-xs font-medium text-red-600">{errors.admission_quota}</p>}
+          </FormField>
+        )}
 
         {/* Fee Breakdown */}
         {/* <FeeBreakdown result={feeResult} loading={feeLoading} /> */}

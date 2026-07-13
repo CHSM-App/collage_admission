@@ -6,6 +6,7 @@ import { DASHBOARD_PATHS } from '../app/routePaths.js'
 import Button from '../shared/components/Button.jsx'
 import { useAuth } from '../features/auth/hooks/useAuth.js'
 import { useNotifications } from '../features/student/hooks/useNotifications.js'
+import { useCollegeFeatures } from '../features/college/hooks/useCollegeFeatures.js'
 
 const roleLabels = {
   student: 'Student Portal',
@@ -75,6 +76,9 @@ export default function DashboardLayout() {
 
   const isStaff       = !!user?.is_staff
   const permissions   = user?.permissions || {}
+
+  // College feature flags — hide fee-related nav when college_fee is off
+  const { collegeFeeEnabled } = useCollegeFeatures(role === 'college' ? user?.id : null)
 
   // ── Notifications (student only) ──────────────────────────
   const { notifications, unread, markSeen, clearAll } = useNotifications(
@@ -146,6 +150,22 @@ export default function DashboardLayout() {
         return false
       }
       return navVisibility[navKey(item.to)] !== false
+    })
+  }
+
+  // Hide fee-related sidebar items when college_fee feature is off
+  const FEE_SECTIONS = new Set(['fee-receipts', 'reports', 'master-fees'])
+  if (role === 'college' && !collegeFeeEnabled) {
+    const navKey = (to) => to ? new URLSearchParams(to.split('?')[1] || '').get('section') || 'overview' : null
+    currentItems = currentItems.filter((item, idx, arr) => {
+      if (!item.to) {
+        for (let i = idx + 1; i < arr.length; i++) {
+          if (!arr[i].to) break
+          if (!FEE_SECTIONS.has(navKey(arr[i].to))) return true
+        }
+        return false
+      }
+      return !FEE_SECTIONS.has(navKey(item.to))
     })
   }
 

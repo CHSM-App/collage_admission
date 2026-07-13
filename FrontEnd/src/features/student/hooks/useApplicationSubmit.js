@@ -8,7 +8,7 @@
  */
 import { useState } from 'react'
 import { usePayU } from '../../../shared/hooks/usePayU.js'
-import { acceptDeclaration, resubmitApplication } from '../../../services/applicationService.js'
+import { acceptDeclaration, resubmitApplication, submitDirectApplication } from '../../../services/applicationService.js'
 import { initiatePayment } from '../../../services/paymentService.js'
 
 export function useApplicationSubmit(appId) {
@@ -41,6 +41,21 @@ export function useApplicationSubmit(appId) {
     }
   }
 
+  // ── Direct submit (no payment — platform_fee disabled) ───
+  async function handleDirectSubmit(accepted) {
+    if (!accepted) return
+    setProcessing(true)
+    setSubmitError('')
+    try {
+      await submitDirectApplication(appId, { accepted: true })
+      setResubmitted(true)
+    } catch (err) {
+      setSubmitError(err?.response?.data?.message || 'Submission failed. Please try again.')
+    } finally {
+      setProcessing(false)
+    }
+  }
+
   // ── Resubmit (correction flow — fee already paid) ────────
   async function handleResubmit(accepted) {
     if (!accepted) return
@@ -62,6 +77,7 @@ export function useApplicationSubmit(appId) {
     submitError,
     resubmitted,
     handleSubmit,
+    handleDirectSubmit,
     handleResubmit,
   }
 }

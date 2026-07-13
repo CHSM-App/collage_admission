@@ -360,6 +360,7 @@ router.get('/applications/:id/form', async (req, res) => {
         SELECT a.*,
                c.name  AS college_name,  c.city AS college_city, c.address AS college_address,
                COALESCE(c.application_fee, 0) AS application_fee,
+               c.features_config,
                COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
                ap.academic_year AS period_ay,
                s.email AS student_email, s.full_name AS student_name, s.phone AS student_phone,
@@ -459,9 +460,12 @@ router.get('/applications/:id/form', async (req, res) => {
         ORDER BY dt.name
       `);
 
+    const features = app.features_config ? JSON.parse(app.features_config) : null;
+    delete app.features_config;
+
     return res.json({
       success: true,
-      data: { application: app, previous_exam: exam, previous_exams: exams, documents: docsRes.recordset, student_documents: studentDocsRes.recordset },
+      data: { application: app, features, previous_exam: exam, previous_exams: exams, documents: docsRes.recordset, student_documents: studentDocsRes.recordset },
     });
   } catch (err) {
     logger.error({ err });
@@ -572,6 +576,13 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
     category, special_status,
     fees_category, fees_category_override, fees_category_override_remark,
     division, degree_course_code,
+    admitted_category, other_category, admission_quota,
+    father_surname, father_first_name, father_middle_name,
+    mother_surname, mother_first_name, mother_middle_name,
+    date_of_admission, is_diploma_direct_sy, name_as_on_aadhaar, son_of,
+    native_address, native_taluka, native_district,
+    parent_mobile, land_line, guardian_relation,
+    semester,
   } = req.body;
 
   const errors = {};
@@ -591,7 +602,53 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
     if (!district) errors.district = 'District is required.';
     if (!state)    errors.state    = 'State is required.';
   }
-  if (!fees_category) errors.fees_category = 'Fees category is required.';
+  // Load the college's features_config to drive feature-gated validation
+  const featRes = await db.request()
+    .input('appId', mssql.Int, appId)
+    .query(`SELECT c.features_config FROM applications a JOIN colleges c ON c.id = a.college_id WHERE a.id = @appId`);
+  const featRaw = featRes.recordset[0]?.features_config;
+  const features = featRaw ? JSON.parse(featRaw) : null;
+
+  // Fees category is only required when the college fee feature is enabled
+  const feesEnabled = features?.payment?.college_fee !== false;
+  if (feesEnabled && !fees_category) errors.fees_category = 'Fees category is required.';
+
+  if (features?.admission_form?.admitted_category === true && !admitted_category) {
+    errors.admitted_category = 'Admitted Category is required.';
+  }
+  if (features?.admission_form?.admission_quota === true && !admission_quota) {
+    errors.admission_quota = 'Admission Quota is required.';
+  }
+  if (features?.admission_form?.semester === true && !semester) {
+    errors.semester = 'Semester is required.';
+  }
+
+  // ── Strict bounds: reject oversized / malformed input (defense in depth;
+  //    the DB also caps lengths, but we reject early with a clean 422). ──
+  const tooLong = (val, maxLen) => typeof val === 'string' && val.length > maxLen;
+  const LENGTHS = {
+    surname: 100, first_name: 100, middle_name: 100, mother_name: 100,
+    address: 300, taluka: 100, district: 100, state: 100,
+    category: 50, special_status: 50, fees_category: 50,
+    admitted_category: 50, other_category: 50, admission_quota: 50,
+    name_as_on_aadhaar: 200, son_of: 200,
+    native_address: 300, native_taluka: 100, native_district: 100,
+    parent_mobile: 20, land_line: 20, guardian_relation: 50,
+    father_surname: 100, father_first_name: 100, father_middle_name: 100,
+    mother_surname: 100, mother_first_name: 100, mother_middle_name: 100,
+  };
+  for (const [field, maxLen] of Object.entries(LENGTHS)) {
+    if (tooLong(req.body[field], maxLen)) {
+      errors[field] = `Must be at most ${maxLen} characters.`;
+    }
+  }
+  if (semester != null && semester !== '' &&
+      (!Number.isInteger(Number(semester)) || Number(semester) < 1 || Number(semester) > 8)) {
+    errors.semester = 'Semester must be a number between 1 and 8.';
+  }
+  if (parent_mobile && !/^[0-9]{0,15}$/.test(String(parent_mobile))) {
+    errors.parent_mobile = "Parent's mobile must contain only digits.";
+  }
 
   if (Object.keys(errors).length) {
     return res.status(422).json({ success: false, errors });
@@ -618,6 +675,26 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
       .input('fovermk',  mssql.NVarChar, fees_category_override_remark || null)
       .input('div',      mssql.Char,     division || null)
       .input('dcc',      mssql.NVarChar, degree_course_code || null)
+      .input('admcat',   mssql.NVarChar, admitted_category  || null)
+      .input('othcat',   mssql.NVarChar, other_category     || null)
+      .input('admquo',   mssql.NVarChar, admission_quota    || null)
+      .input('fsn',      mssql.NVarChar, father_surname     || null)
+      .input('ffn2',     mssql.NVarChar, father_first_name  || null)
+      .input('fmn',      mssql.NVarChar, father_middle_name || null)
+      .input('msn',      mssql.NVarChar, mother_surname     || null)
+      .input('mfn2',     mssql.NVarChar, mother_first_name  || null)
+      .input('mmn',      mssql.NVarChar, mother_middle_name || null)
+      .input('doa',      mssql.Date,     date_of_admission || null)
+      .input('diploma',  mssql.Bit,      is_diploma_direct_sy ? 1 : 0)
+      .input('aadname',  mssql.NVarChar, name_as_on_aadhaar || null)
+      .input('sonof',    mssql.NVarChar, son_of || null)
+      .input('naddr',    mssql.NVarChar, native_address    || null)
+      .input('ntal',     mssql.NVarChar, native_taluka     || null)
+      .input('ndist',    mssql.NVarChar, native_district   || null)
+      .input('pmob',     mssql.NVarChar, parent_mobile     || null)
+      .input('landl',    mssql.NVarChar, land_line         || null)
+      .input('grel',     mssql.NVarChar, guardian_relation || null)
+      .input('sem',      mssql.Int,      semester ? parseInt(semester) : null)
       .input('step',     mssql.Int,      2)
       .input('actor',    mssql.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
@@ -631,6 +708,16 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
           fees_category_override_remark=@fovermk,
           app_division=@div,
           app_degree_course_code=@dcc,
+          app_admitted_category=@admcat,
+          app_other_category=@othcat,
+          app_admission_quota=@admquo,
+          app_father_surname=@fsn, app_father_first_name=@ffn2, app_father_middle_name=@fmn,
+          app_mother_surname=@msn, app_mother_first_name=@mfn2, app_mother_middle_name=@mmn,
+          app_date_of_admission=@doa, app_is_diploma_direct_sy=@diploma,
+          app_name_as_on_aadhaar=@aadname, app_son_of=@sonof,
+          app_native_address=@naddr, app_native_taluka=@ntal, app_native_district=@ndist,
+          app_parent_mobile=@pmob, app_land_line=@landl, app_guardian_relation=@grel,
+          app_semester=@sem,
           current_step = CASE WHEN current_step < @step THEN @step ELSE current_step END,
           updated_at=GETDATE(),
           updated_by=@actor
@@ -656,6 +743,7 @@ router.patch('/applications/:id/other-details', async (req, res) => {
     father_full_name, son_daughter_number, father_occupation, annual_income,
     aadhaar, prn, abc_id, university_app_no,
     bank_account, bank_ifsc, bank_name, bank_branch,
+    hsc_maths, hsc_biology, hostel_facility,
   } = req.body;
 
   const errors = {};
@@ -720,6 +808,9 @@ router.patch('/applications/:id/other-details', async (req, res) => {
       .input('bifc', mssql.NVarChar, bank_ifsc      || null)
       .input('bnm',  mssql.NVarChar, bank_name      || null)
       .input('bbr',  mssql.NVarChar, bank_branch    || null)
+      .input('hscm', mssql.Bit,      hsc_maths      ? 1 : 0)
+      .input('hscb', mssql.Bit,      hsc_biology    ? 1 : 0)
+      .input('hstl', mssql.Bit,      hostel_facility ? 1 : 0)
       .input('step', mssql.Int,      3)
       .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
@@ -732,6 +823,7 @@ router.patch('/applications/:id/other-details', async (req, res) => {
           app_annual_income=@ai, app_aadhaar=@adh, app_prn=@prn, app_abc_id=@abc,
           app_university_app_no=@uano,
           app_bank_account=@bacc, app_bank_ifsc=@bifc, app_bank_name=@bnm, app_bank_branch=@bbr,
+          app_hsc_maths=@hscm, app_hsc_biology=@hscb, app_hostel_facility=@hstl,
           current_step = CASE WHEN current_step < @step THEN @step ELSE current_step END,
           updated_at=GETDATE(),
           updated_by=@actor
@@ -1020,6 +1112,13 @@ router.post('/applications/:id/declaration', async (req, res) => {
         WHERE id = @id
       `);
 
+    // If a college edits an application that was already submitted (i.e. past draft),
+    // record it as an update in the timeline. A fresh draft submission is covered by
+    // the subsequent 'submitted' log, so we skip that case.
+    if (req.user?.role === 'college' && app.status !== 'draft') {
+      await logActivity(appId, 'application_updated', 'college', null);
+    }
+
     return res.json({ success: true, message: 'Declaration accepted. Application ready for payment.' });
   } catch (err) {
     logger.error({ err });
@@ -1091,6 +1190,98 @@ router.post('/applications/:id/resubmit', async (req, res) => {
     await logActivity(appId, 'correction_resubmitted', 'student', null);
 
     return res.json({ success: true, message: 'Application resubmitted successfully.' });
+  } catch (err) {
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── POST /api/applications/:id/submit-direct (no payment flow) ──
+// Used when college has platform_fee disabled in features_config.
+// Accepts declaration + moves application straight to under_review.
+router.post('/applications/:id/submit-direct', async (req, res) => {
+  const appId = parseInt(req.params.id);
+  const app = await assertDraft(appId, res, req.user);
+  if (!app) return;
+
+  const { accepted } = req.body;
+  if (!accepted) {
+    return res.status(422).json({ success: false, message: 'You must accept the declaration to proceed.' });
+  }
+
+  try {
+    // Guard: only allowed when college has platform_fee explicitly disabled
+    const featRes = await db.request()
+      .input('appId', mssql.Int, appId)
+      .query(`SELECT c.features_config FROM applications a JOIN colleges c ON c.id = a.college_id WHERE a.id = @appId`);
+    const featRaw = featRes.recordset[0]?.features_config;
+    const features = featRaw ? JSON.parse(featRaw) : null;
+    if (features?.payment?.platform_fee !== false) {
+      return res.status(403).json({ success: false, message: 'Direct submission is not allowed for this college. Please pay the application fee.' });
+    }
+
+    // Verify all mandatory docs are linked
+    const missingDocs = await db.request()
+      .input('appId', mssql.Int, appId)
+      .query(`
+        SELECT rd.document_type_id, dt.name AS doc_name
+        FROM required_documents rd
+        JOIN document_types dt ON dt.id = rd.document_type_id
+        JOIN applications a ON a.college_id = rd.college_id
+                           AND a.course_id  = rd.course_id
+                           AND a.year_of_study = rd.year_of_study
+        WHERE a.id = @appId AND rd.is_mandatory = 1
+          AND NOT EXISTS (
+            SELECT 1 FROM application_documents ad
+            WHERE ad.application_id = @appId AND ad.document_type_id = rd.document_type_id
+          )
+      `);
+
+    if (missingDocs.recordset.length > 0) {
+      const names = missingDocs.recordset.map(d => d.doc_name).join(', ');
+      return res.status(422).json({
+        success: false,
+        message: `Please upload the following mandatory documents before proceeding: ${names}`,
+        missing_documents: missingDocs.recordset,
+      });
+    }
+
+    // Fetch app details needed to generate registration number
+    const appInfoRes = await db.request()
+      .input('id', mssql.Int, appId)
+      .query(`SELECT college_id, course_id, year_of_study, academic_year FROM applications WHERE id = @id`);
+    const ai = appInfoRes.recordset[0];
+
+    // Generate registration number (same logic as payment flow)
+    const prefix = `${(ai.academic_year || '').replace('-', '')}-${String(ai.course_id).padStart(2, '0')}-${ai.year_of_study}`;
+    const cntRes = await db.request()
+      .input('regPrefix', mssql.NVarChar, `${prefix}-%`)
+      .query(`SELECT COUNT(*) AS cnt FROM applications WHERE registration_number LIKE @regPrefix AND registration_number IS NOT NULL`);
+    const seq = (cntRes.recordset[0].cnt || 0) + 1;
+    const regNum = `${prefix}-${String(seq).padStart(4, '0')}`;
+
+    const actor = String(req.user.staff_id || req.user.id);
+    await db.request()
+      .input('id',     mssql.Int,      appId)
+      .input('regNum', mssql.NVarChar, regNum)
+      .input('actor',  mssql.NVarChar, actor)
+      .query(`
+        UPDATE applications SET
+          status = 'submitted',
+          registration_number = @regNum,
+          declaration_accepted_at = GETDATE(),
+          submitted_at = GETDATE(),
+          current_step = 6,
+          updated_at = GETDATE(),
+          updated_by = @actor,
+          status_updated_at = GETDATE()
+        WHERE id = @id
+      `);
+
+    const submitterRole = req.user?.role === 'college' ? 'college' : 'student';
+    await logActivity(appId, 'submitted', submitterRole, null);
+
+    return res.json({ success: true, message: 'Application submitted successfully.', registration_number: regNum });
   } catch (err) {
     logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });

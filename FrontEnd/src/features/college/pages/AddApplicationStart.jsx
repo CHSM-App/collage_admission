@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 import { registerStudentByCollege } from '../../auth/services/authService.js'
-import { getCollegeAdminAdmissionPeriods, searchStudents, sendTransferOtp, verifyTransferOtp } from '../../../services/collegeAdminService.js'
+import { getCollegeAdminAdmissionPeriods, getStudentAppliedCourses, searchStudents, sendTransferOtp, verifyTransferOtp } from '../../../services/collegeAdminService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 
@@ -31,6 +31,9 @@ export default function AddApplicationStart() {
   const [searching, setSearching]  = useState(false)
   const [noResults, setNoResults]  = useState(false)   // true after search completes with 0 results
   const [selectedStudent, setSelected] = useState(null)
+
+  // Courses (course+year+academic_year) the selected student has already applied for
+  const [appliedCourses, setAppliedCourses] = useState([])
 
   // New student registration form
   const [showRegForm, setShowRegForm] = useState(false)
@@ -87,6 +90,36 @@ export default function AddApplicationStart() {
     }, 350)
     return () => clearTimeout(t)
   }, [query, collegeId])
+
+  // ── Load the selected student's already-applied courses ─────
+  useEffect(() => {
+    if (!selectedStudent) { setAppliedCourses([]); return }
+    getStudentAppliedCourses(collegeId, selectedStudent.id)
+      .then(r => {
+        const applied = r.data.data || []
+        setAppliedCourses(applied)
+        // Clear a previously-picked course if it's now blocked for this student
+        const p = periods.find(p => String(p.id) === selectedPeriod)
+        if (p && applied.some(a =>
+          a.course_id === p.course_id &&
+          a.year_of_study === p.year_of_study &&
+          a.academic_year === p.academic_year
+        )) {
+          setPeriod('')
+        }
+      })
+      .catch(() => setAppliedCourses([]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedStudent, collegeId])
+
+  // True if the given period matches a course the student already applied for
+  function isAlreadyApplied(period) {
+    return appliedCourses.some(a =>
+      a.course_id === period.course_id &&
+      a.year_of_study === period.year_of_study &&
+      a.academic_year === period.academic_year
+    )
+  }
 
   function handleSelectStudent(s) {
     setSelected(s)
@@ -187,6 +220,10 @@ export default function AddApplicationStart() {
 
     const p = periods.find(p => String(p.id) === selectedPeriod)
     if (!p) return
+    if (isAlreadyApplied(p)) {
+      setError('This student has already applied for the selected course. Please choose another.')
+      return
+    }
 
     navigate(
       `/college/apply/new` +
@@ -389,11 +426,15 @@ export default function AddApplicationStart() {
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="">— Select course &amp; year —</option>
-            {periods.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.course_name} — {YEAR_LABEL[p.year_of_study]} · {p.academic_year}
-              </option>
-            ))}
+            {periods.map(p => {
+              const applied = isAlreadyApplied(p)
+              return (
+                <option key={p.id} value={p.id} disabled={applied} className={applied ? 'text-slate-400' : ''}>
+                  {p.course_name} — {YEAR_LABEL[p.year_of_study]} · {p.academic_year}
+                  {applied ? ' (already applied)' : ''}
+                </option>
+              )
+            })}
           </select>
         )}
       </div>

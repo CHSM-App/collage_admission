@@ -80,6 +80,24 @@ async function getStudentForNotification(appId) {
   }
 }
 
+// ── College features (self) ─────────────────────────────────
+
+router.get('/:collegeId/features', async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId);
+  try {
+    const result = await db.request()
+      .input('id', mssqlShared.Int, collegeId)
+      .query('SELECT features_config FROM colleges WHERE id = @id');
+    if (!result.recordset.length)
+      return res.status(404).json({ success: false, message: 'College not found.' });
+    const raw = result.recordset[0].features_config;
+    return res.json({ success: true, data: raw ? JSON.parse(raw) : null });
+  } catch (err) {
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
 // ── Admission Periods ───────────────────────────────────────
 
 router.get('/:collegeId/admission-periods', async (req, res) => {
@@ -126,8 +144,36 @@ router.post('/:collegeId/admission-periods', requirePerm('manage_admission_perio
     return res.status(400).json({ success: false, message: 'Missing required fields.' });
   }
 
+  const collegeId = parseInt(req.params.collegeId);
   const actorId = String(req.user.staff_id || req.user.id);
   try {
+    // Guard: don't allow opening admission for a course/year whose college fee is
+    // not set. Only applies to colleges that HAVE a college-fee system — for
+    // colleges with college_fee disabled (e.g. agriculture), a ₹0 fee is expected.
+    const featRes = await db.request()
+      .input('cid', mssqlShared.Int, collegeId)
+      .query('SELECT features_config FROM colleges WHERE id = @cid');
+    const features = featRes.recordset[0]?.features_config
+      ? JSON.parse(featRes.recordset[0].features_config) : null;
+    const collegeFeeEnabled = features?.payment?.college_fee !== false;
+
+    if (collegeFeeEnabled) {
+      const yearLevel = YEAR_LEVEL_MAP[parseInt(year_of_study)] || 'FY';
+      // Compute the fee for the common student types; require at least one to be set.
+      const [grand, nonGrand] = await Promise.all([
+        feeSvc.compute({ collegeId, facultyMasterId: parseInt(course_id), yearLevel,
+          caste: 'OPEN', studentType: 'Grand', academicYear: academic_year, isNewStudent: true, pool: db }),
+        feeSvc.compute({ collegeId, facultyMasterId: parseInt(course_id), yearLevel,
+          caste: 'OPEN', studentType: 'NonGrand', academicYear: academic_year, isNewStudent: true, pool: db }),
+      ]);
+      if ((grand.totalFee || 0) <= 0 && (nonGrand.totalFee || 0) <= 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'College fee is not set for this course and year. Please configure the fees in Fees Master before opening admission.',
+        });
+      }
+    }
+
     const result = await db.request()
       .input('col',  parseInt(req.params.collegeId))
       .input('crs',  parseInt(course_id))
@@ -244,24 +290,32 @@ router.get('/:collegeId/students/search', async (req, res) => {
         FROM students s
         WHERE (s.full_name LIKE @q OR s.email LIKE @q OR s.phone LIKE @q)
           AND (
+            -- Already has an application at this college — always show
             EXISTS (
               SELECT 1 FROM applications a
               WHERE a.student_id = s.id AND a.college_id = @collegeId
             )
-            OR NOT EXISTS (
-              SELECT 1 FROM applications a WHERE a.student_id = s.id
+            OR (
+              -- No application at this college — show only if not confirmed elsewhere
+              NOT EXISTS (
+                SELECT 1 FROM applications a WHERE a.student_id = s.id AND a.college_id = @collegeId
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM applications a
+                WHERE a.student_id = s.id
+                  AND a.college_id <> @collegeId
+                  AND a.status IN ('confirmed','fees_paid','roll_assigned','enrolled')
+              )
+              AND (
+                NOT EXISTS (SELECT 1 FROM applications a WHERE a.student_id = s.id)
+              )
             )
-          )
-          AND NOT EXISTS (
-            SELECT 1 FROM applications a
-            WHERE a.student_id = s.id
-              AND a.college_id <> @collegeId
-              AND a.status IN ('confirmed','fees_paid','roll_assigned','enrolled')
           )
         ORDER BY s.full_name
       `);
 
     // Phase B: transfer check — only when query looks like a phone number
+    // Skip if the student already appeared in Phase A (already at this college)
     const isPhone = /^[6-9]\d{9}$/.test(q.trim());
     if (isPhone && normalResult.recordset.length === 0) {
       const transferCheck = await pool.request()
@@ -271,6 +325,10 @@ router.get('/:collegeId/students/search', async (req, res) => {
           SELECT s.id, s.phone
           FROM students s
           WHERE s.phone = @phone
+            AND NOT EXISTS (
+              SELECT 1 FROM applications a
+              WHERE a.student_id = s.id AND a.college_id = @collegeId
+            )
             AND EXISTS (
               SELECT 1 FROM applications a
               WHERE a.student_id = s.id
@@ -325,7 +383,35 @@ router.post('/:collegeId/students/transfer-otp', async (req, res) => {
     return res.json({ success: true, message: 'OTP sent to the student\'s WhatsApp. Valid for 10 minutes.' });
   } catch (err) {
     logger.error({ err }, 'transfer-otp error');
-    return res.status(500).json({ success: false, message: err.message || 'Failed to send OTP.' });
+    return res.status(500).json({ success: false, message: 'Failed to send OTP. Please try again.' });
+  }
+});
+
+// ── Existing applications for a student at this college ───────
+// Returns the (course_id, year_of_study) pairs the student has already
+// applied for at this college, so the Add Application course dropdown can
+// gray out courses they've already applied to. Draft, cancelled and rejected
+// apps are excluded — a draft was only started (not submitted), and
+// cancelled/rejected courses may be re-applied to.
+router.get('/:collegeId/students/:studentId/applied-courses', async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId);
+  const studentId = parseInt(req.params.studentId);
+  try {
+    const pool = await db;
+    const result = await pool.request()
+      .input('collegeId', mssqlShared.Int, collegeId)
+      .input('studentId', mssqlShared.Int, studentId)
+      .query(`
+        SELECT DISTINCT a.course_id, a.year_of_study, a.academic_year
+        FROM applications a
+        WHERE a.student_id = @studentId
+          AND a.college_id = @collegeId
+          AND a.status NOT IN ('draft', 'cancelled', 'rejected')
+      `);
+    return res.json({ success: true, data: result.recordset });
+  } catch (err) {
+    logger.error({ err }, 'applied-courses error');
+    return res.status(500).json({ success: false, message: 'Server error.' });
   }
 });
 
@@ -365,47 +451,62 @@ router.get('/:collegeId/applications', requirePerm('review_application'), async 
     const pool = await db;
     const collegeId = parseInt(req.params.collegeId);
 
-    // When filtering by pending link, include draft applications too (link may have been sent before submission)
-    let where = pending_link === '1'
+    // whereBase holds every filter EXCEPT status. The status filter is added on
+    // top only for the data/count queries; the status-counts query uses whereBase
+    // alone so each status count reflects the full set (unaffected by the current
+    // status selection), while still respecting course/year/division filters.
+    let whereBase = pending_link === '1'
       ? `WHERE a.college_id = @col`
       : `WHERE a.college_id = @col AND a.status <> 'draft'`;
 
-    // Build shared inputs map to apply to both requests independently
-    const extraInputs = [];
-    if (status) {
-      const statuses = status.split(',').map(s => s.trim()).filter(Boolean);
-      if (statuses.length === 1) {
-        where += ' AND a.status = @status';
-        extraInputs.push(r => r.input('status', statuses[0]));
-      } else {
-        const placeholders = statuses.map((_, i) => `@s${i}`).join(',');
-        where += ` AND a.status IN (${placeholders})`;
-        statuses.forEach((s, i) => extraInputs.push(r => r.input(`s${i}`, s)));
-      }
-    }
+    // Inputs shared by all queries (everything except the status inputs).
+    const baseInputs = [];
     if (course_id) {
-      where += ' AND a.course_id = @crs';
-      extraInputs.push(r => r.input('crs', parseInt(course_id)));
+      whereBase += ' AND a.course_id = @crs';
+      baseInputs.push(r => r.input('crs', parseInt(course_id)));
     }
     if (year_of_study) {
-      where += ' AND a.year_of_study = @yr';
-      extraInputs.push(r => r.input('yr', parseInt(year_of_study)));
+      whereBase += ' AND a.year_of_study = @yr';
+      baseInputs.push(r => r.input('yr', parseInt(year_of_study)));
     }
     if (division) {
-      where += ' AND a.app_division = @div';
-      extraInputs.push(r => r.input('div', division));
+      whereBase += ' AND a.app_division = @div';
+      baseInputs.push(r => r.input('div', division));
     }
     // Filter: only applications that have an active (unused, unexpired) payment link
     if (pending_link === '1') {
-      where += ` AND EXISTS (
+      whereBase += ` AND EXISTS (
         SELECT 1 FROM payment_link_tokens plt
         WHERE plt.application_id = a.id AND plt.used = 0 AND plt.expires_at > GETDATE()
       )`;
     }
 
+    // Add the status filter on top of whereBase for the data/count queries.
+    let where = whereBase;
+    const statusInputs = [];
+    if (status) {
+      const statuses = status.split(',').map(s => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        where += ' AND a.status = @status';
+        statusInputs.push(r => r.input('status', statuses[0]));
+      } else {
+        const placeholders = statuses.map((_, i) => `@s${i}`).join(',');
+        where += ` AND a.status IN (${placeholders})`;
+        statuses.forEach((s, i) => statusInputs.push(r => r.input(`s${i}`, s)));
+      }
+    }
+
     function makeRequest() {
       const r = pool.request().input('col', collegeId);
-      extraInputs.forEach(fn => fn(r));
+      baseInputs.forEach(fn => fn(r));
+      statusInputs.forEach(fn => fn(r));
+      return r;
+    }
+
+    // Request for the status-counts query — base filters only, NO status filter.
+    function makeBaseRequest() {
+      const r = pool.request().input('col', collegeId);
+      baseInputs.forEach(fn => fn(r));
       return r;
     }
 
@@ -416,7 +517,7 @@ router.get('/:collegeId/applications', requirePerm('review_application'), async 
     `;
 
     // Use separate request objects — mssql requests are single-use
-    const [countRes, dataRes] = await Promise.all([
+    const [countRes, dataRes, statusCountRes] = await Promise.all([
       makeRequest().query(`SELECT COUNT(*) AS total ${joins} ${where}`),
       makeRequest().query(`
         SELECT
@@ -429,12 +530,24 @@ router.get('/:collegeId/applications', requirePerm('review_application'), async 
             WHERE plt.application_id = a.id AND plt.used = 0 AND plt.expires_at > GETDATE()
           ) THEN 1 ELSE 0 END AS has_pending_link
         ${joins} ${where}
-        ORDER BY a.submitted_at DESC
+        ORDER BY COALESCE(a.submitted_at, a.created_at) DESC
         ${paginateQuery(offset, limit)}
       `),
+      makeBaseRequest().query(`SELECT a.status, COUNT(*) AS cnt ${joins} ${whereBase} GROUP BY a.status`),
     ]);
 
-    return res.json(paginatedResponse(dataRes.recordset, countRes.recordset[0].total, page, limit));
+    // status_counts: { <status>: <count>, ... } and a grand total across all statuses.
+    const status_counts = {};
+    let status_total = 0;
+    for (const row of statusCountRes.recordset) {
+      status_counts[row.status] = row.cnt;
+      status_total += row.cnt;
+    }
+
+    const resp = paginatedResponse(dataRes.recordset, countRes.recordset[0].total, page, limit);
+    resp.status_counts = status_counts;
+    resp.status_total  = status_total;
+    return res.json(resp);
   } catch (err) {
     logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
@@ -530,6 +643,7 @@ router.get('/:collegeId/applications/:appId', requirePerm('review_application'),
           s.dob, s.gender, s.address, s.city, s.category,
           COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name,
           col.name AS college_name,
+          col.features_config AS college_features_config,
           CASE WHEN EXISTS (
             SELECT 1 FROM payment_link_tokens plt
             WHERE plt.application_id = a.id AND plt.used = 0 AND plt.expires_at > GETDATE()
@@ -593,9 +707,16 @@ router.get('/:collegeId/applications/:appId', requirePerm('review_application'),
         ORDER BY created_at ASC
       `);
 
+    // Parse the college's features_config so the review can gate fields using the
+    // authoritative config (not a separately-cached self-features fetch).
+    const row = result.recordset[0];
+    let features = null;
+    try { features = row.college_features_config ? JSON.parse(row.college_features_config) : null; } catch (_) {}
+    delete row.college_features_config;
+
     return res.json({
       success: true,
-      data: { ...result.recordset[0], documents: docs.recordset, exam, exams, activity: activityRes.recordset },
+      data: { ...row, features, documents: docs.recordset, exam, exams, activity: activityRes.recordset },
     });
   } catch (err) {
     logger.error({ err });
@@ -858,7 +979,11 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
     if (appRes.recordset.length === 0) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
-    const CONFIRMABLE = ['submitted', 'doc_verified', 'scrutiny_accepted', 'doc_verification_pending'];
+    // 'confirmed' is included so the college fee step is idempotent: when the
+    // application fee is collected first (recordApplicationFee sets status to
+    // 'confirmed'), confirming again just records the college-fee total /
+    // installments / division rather than erroring.
+    const CONFIRMABLE = ['submitted', 'doc_verified', 'scrutiny_accepted', 'doc_verification_pending', 'confirmed'];
     if (!CONFIRMABLE.includes(appRes.recordset[0].status)) {
       return res.status(400).json({ success: false, message: 'Application must be accepted before it can be confirmed.' });
     }
@@ -882,15 +1007,29 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
       } catch (_) {}
     }
 
-    // Compute total fee from fees master
-    const feeResult = await computeFeeForApp(parseInt(req.params.appId), parseInt(req.params.collegeId), division || null);
-    const total = feeResult ? feeResult.totalFee : 0;
-    if (!total || total <= 0) {
-      return res.status(400).json({ success: false, message: 'Could not compute fee total. Please configure classwise fees in Fees Master first.' });
-    }
-    const instTotal = validInstallments.reduce((s, i) => s + i.amount, 0);
-    if (instTotal > total + 0.01) {
-      return res.status(400).json({ success: false, message: `Installment total (₹${instTotal}) cannot exceed fee total (₹${total}).` });
+    // Does this college run a college-fee system? For colleges with college_fee
+    // disabled (e.g. agriculture), there is no fee to compute — confirmation just
+    // marks the admission confirmed with a ₹0 total. The fee-total requirement
+    // only applies to colleges that actually charge a college fee.
+    const featConfRes = await db.request()
+      .input('cid', mssqlShared.Int, parseInt(req.params.collegeId))
+      .query('SELECT features_config FROM colleges WHERE id = @cid');
+    const confFeatures = featConfRes.recordset[0]?.features_config
+      ? JSON.parse(featConfRes.recordset[0].features_config) : null;
+    const collegeFeeEnabled = confFeatures?.payment?.college_fee !== false;
+
+    let total = 0;
+    if (collegeFeeEnabled) {
+      // Compute total fee from fees master
+      const feeResult = await computeFeeForApp(parseInt(req.params.appId), parseInt(req.params.collegeId), division || null);
+      total = feeResult ? feeResult.totalFee : 0;
+      if (!total || total <= 0) {
+        return res.status(400).json({ success: false, message: 'Could not compute fee total. Please configure classwise fees in Fees Master first.' });
+      }
+      const instTotal = validInstallments.reduce((s, i) => s + i.amount, 0);
+      if (instTotal > total + 0.01) {
+        return res.status(400).json({ success: false, message: `Installment total (₹${instTotal}) cannot exceed fee total (₹${total}).` });
+      }
     }
 
     const actor = String(req.user.staff_id || req.user.id);
@@ -940,9 +1079,15 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
     }
 
     const instSummary = validInstallments.map(i => `Inst-${i.installment_no}: ₹${i.amount}`).join(', ');
-    await logActivity(req.params.appId, 'confirmed', 'college', `Total fee: ₹${total}. Installments: ${instSummary}`);
+    await logActivity(req.params.appId, 'confirmed', 'college',
+      collegeFeeEnabled ? `Total fee: ₹${total}. Installments: ${instSummary}` : 'Admission confirmed (no college fee).');
 
-    return res.json({ success: true, message: 'Admission confirmed. Student can now pay the college fee.' });
+    return res.json({
+      success: true,
+      message: collegeFeeEnabled
+        ? 'Admission confirmed. Student can now pay the college fee.'
+        : 'Admission confirmed.',
+    });
   } catch (err) {
     logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
@@ -1093,14 +1238,23 @@ router.post('/:collegeId/applications/:appId/record-application-fee', requirePer
     if (paidRes.recordset[0].cnt > 0)
       return res.status(400).json({ success: false, message: 'Application fee already collected.' });
 
-    // Generate registration number (same logic as payments.js)
-    const ayClean  = (app.academic_year || '').replace('-', '');
-    const prefix   = `${ayClean}-${String(app.course_id).padStart(2, '0')}-${app.year_of_study}`;
-    const cntRes   = await db.request()
-      .input('regPrefix', mssqlShared.NVarChar, `${prefix}-%`)
-      .query(`SELECT COUNT(*) AS cnt FROM applications WHERE registration_number LIKE @regPrefix AND registration_number IS NOT NULL`);
-    const seq    = (cntRes.recordset[0].cnt || 0) + 1;
-    const regNum = `${prefix}-${String(seq).padStart(4, '0')}`;
+    // Fetch existing registration number — may already be set by the submit step
+    const existingRegRes = await db.request()
+      .input('appId', mssqlShared.Int, appId)
+      .query(`SELECT registration_number FROM applications WHERE id = @appId`);
+    const existingRegNum = existingRegRes.recordset[0]?.registration_number || null;
+
+    // Generate registration number only if not already assigned
+    let regNum = existingRegNum;
+    if (!regNum) {
+      const ayClean  = (app.academic_year || '').replace('-', '');
+      const prefix   = `${ayClean}-${String(app.course_id).padStart(2, '0')}-${app.year_of_study}`;
+      const cntRes   = await db.request()
+        .input('regPrefix', mssqlShared.NVarChar, `${prefix}-%`)
+        .query(`SELECT COUNT(*) AS cnt FROM applications WHERE registration_number LIKE @regPrefix AND registration_number IS NOT NULL`);
+      const seq = (cntRes.recordset[0].cnt || 0) + 1;
+      regNum = `${prefix}-${String(seq).padStart(4, '0')}`;
+    }
 
     const pool = await db;
     const tx   = pool.transaction();
@@ -1127,11 +1281,11 @@ router.post('/:collegeId/applications/:appId/record-application-fee', requirePer
         .input('actor',  mssqlShared.NVarChar,  actor)
         .query(`
           UPDATE applications
-          SET status = 'submitted', registration_number = @regNum,
-              application_fee_paid = 1, submitted_at = GETDATE(),
+          SET status = 'confirmed', registration_number = @regNum,
+              application_fee_paid = 1, submitted_at = COALESCE(submitted_at, GETDATE()),
               updated_at = GETDATE(), status_updated_at = GETDATE(),
               updated_by = @actor
-          WHERE id = @id AND status = 'draft'
+          WHERE id = @id AND status IN ('draft', 'submitted', 'confirmed')
         `);
 
       await tx.commit();
@@ -1140,7 +1294,7 @@ router.post('/:collegeId/applications/:appId/record-application-fee', requirePer
       throw e;
     }
 
-    await logActivity(appId, 'submitted', 'college', `Cash application fee: ₹${fee.toLocaleString('en-IN')}`);
+    await logActivity(appId, 'application_fee_paid', 'college', `Cash application fee: ₹${fee.toLocaleString('en-IN')}`);
 
     return res.json({ success: true, message: `Application fee collected and application submitted.`, amount: fee, registration_number: regNum });
   } catch (err) {

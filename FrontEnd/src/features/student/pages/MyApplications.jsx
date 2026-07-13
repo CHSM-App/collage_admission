@@ -28,6 +28,17 @@ const STATUS_META = {
   cancelled:            { label: 'Cancelled',           color: 'bg-slate-100 text-slate-500' },
 }
 
+// Resolve the status label for an app. For colleges with no college-fee system
+// (e.g. agriculture), a 'confirmed' application is simply admitted — there is no
+// fee pending — so show 'Admission Confirmed' instead of 'Fees Pending'.
+function statusMetaFor(app) {
+  const meta = STATUS_META[app.status] || { label: app.status, color: 'bg-slate-100 text-slate-600' }
+  if (app.status === 'confirmed' && app.college_fee_enabled === 0) {
+    return { label: 'Admission Confirmed', color: 'bg-emerald-100 text-emerald-700' }
+  }
+  return meta
+}
+
 export default function MyApplications() {
   const { user }    = useAuthContext()
   const navigate    = useNavigate()
@@ -195,7 +206,7 @@ export default function MyApplications() {
               </thead>
               <tbody className="divide-y-2 divide-slate-300">
                 {filtered.map(app => {
-                  const meta = STATUS_META[app.status] || { label: app.status, color: 'bg-slate-100 text-slate-600' }
+                  const meta = statusMetaFor(app)
                   const isExpanded = expandedId === app.id
 
                   return (
@@ -286,7 +297,7 @@ export default function MyApplications() {
 
 // ── Mobile card ───────────────────────────────────────────────
 function MobileCard({ app, expandedId, setExpandedId, navigate, setFeePayApp, setReceiptsAppId, setSelectSubjectsApp, fetchApps }) {
-  const meta       = STATUS_META[app.status] || { label: app.status, color: 'bg-slate-100 text-slate-600' }
+  const meta       = statusMetaFor(app)
   const isExpanded = expandedId === app.id
   const isPrint    = expandedId === `print-${app.id}`
 
@@ -404,9 +415,14 @@ function AppDetail({ app, navigate, setFeePayApp, setReceiptsAppId, setSelectSub
         </div>
       )}
 
-      {app.status === 'confirmed' && (
+      {app.status === 'confirmed' && app.college_fee_enabled !== 0 && (
         <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-3 space-y-2">
           <p className="text-sm font-semibold text-slate-800">Documents verified! Please pay the college fee to confirm your admission.</p>
+        </div>
+      )}
+      {app.status === 'confirmed' && app.college_fee_enabled === 0 && (
+        <div className="rounded-md bg-emerald-50 border border-emerald-200 px-3 py-3">
+          <p className="text-sm font-semibold text-emerald-800">Your admission is confirmed.</p>
         </div>
       )}
 

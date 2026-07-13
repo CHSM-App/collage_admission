@@ -3,6 +3,7 @@ import { getCollegeAdminAdmissionPeriods, createAdmissionPeriod, updateAdmission
 import { getFaculty, checkFeesConfigured } from '../../../services/masterService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
+import { useCollegeFeatures } from '../hooks/useCollegeFeatures.js'
 import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
 import { useToast } from '../../../context/ToastContext.jsx'
 import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
@@ -28,6 +29,7 @@ export default function AdmissionPeriods({ collegeId }) {
   const { canWrite } = usePermissions()
   const rw = canWrite('manage_admission_periods')
   const toast = useToast()
+  const { collegeFeeEnabled } = useCollegeFeatures(collegeId)
   const [periods, setPeriods]       = useState([])
   const [courses, setCourses]       = useState([])
   const [loading, setLoading]       = useState(true)
@@ -109,9 +111,11 @@ export default function AdmissionPeriods({ collegeId }) {
       setError(`An open admission period already exists for ${conflict.course_name} — ${YEAR_LABEL[form.year_of_study]}. Close it before creating a new one.`)
       return
     }
-    // Check fees are configured for this course + year + academic_year before opening
+    // Check fees are configured for this course + year + academic_year before opening.
+    // Skipped for colleges with no college-fee system (e.g. agriculture) — a ₹0 fee
+    // is expected there, so we don't require fees to be set.
     setSaving(true)
-    if (form.course_id && form.year_of_study && form.academic_year) {
+    if (collegeFeeEnabled && form.course_id && form.year_of_study && form.academic_year) {
       try {
         const yearLevel = YEAR_LABEL[form.year_of_study] // convert 1→'FY', 2→'SY', etc.
         const chk = await checkFeesConfigured(collegeId, form.course_id, yearLevel, form.academic_year)

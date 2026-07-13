@@ -21,6 +21,7 @@ export const REGISTER_PATHS = {
 }
 
 export const FORGOT_PASSWORD_PATH = '/forgot-password'
+export const COLLEGE_FORGOT_PASSWORD_PATH = '/college/forgot-password'
 
 export const getDashboardPath = (role) => DASHBOARD_PATHS[role] || LOGIN_PATHS.student
 

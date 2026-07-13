@@ -7,17 +7,19 @@
 ## Table of Contents
 
 1. [Project Overview](#1-project-overview)
+1a. [How It Works — Operation Flows](#1a-how-it-works--operation-flows)
 2. [Tech Stack](#2-tech-stack)
 3. [Repository Structure](#3-repository-structure)
 4. [Getting Started (Local Setup)](#4-getting-started-local-setup)
 5. [Environment Variables](#5-environment-variables)
-6. [Database Schema (All Tables)](#6-database-schema-all-tables)
+6. [Database Schema (All Tables)](#6-databaese-schema-all-tables)
 7. [Database Migrations](#7-database-migrations)
 8. [Backend Architecture](#8-backend-architecture)
 9. [All API Routes](#9-all-api-routes)
 10. [Authentication & Authorization](#10-authentication--authorization)
 11. [Frontend Architecture](#11-frontend-architecture)
 12. [All Frontend Routes & Pages](#12-all-frontend-routes--pages)
+12a. [College Types & Features Config](#12a-college-types--features-config)
 13. [Application State Machine (Status Flow)](#13-application-state-machine-status-flow)
 14. [Fee Determination System](#14-fee-determination-system)
 15. [Payment Flow (PayU)](#15-payment-flow-payu)
@@ -46,6 +48,96 @@ This is a **multi-tenant, multi-role web application** for managing college admi
 
 The platform supports the full admission lifecycle from a student first registering, all the way through document verification, fee payment, roll number assignment, subject selection, and finally enrollment.
 
+### The three types of users (in plain words)
+
+| User | Logs in at | What they do |
+|---|---|---|
+| **Student** | `/login/student` | Registers, finds a college by its code, fills the admission form, uploads documents, pays fees, and tracks status. |
+| **College staff** | `/login/college` | Runs their whole admission process: receives applications, reviews them, requests corrections, verifies documents, sets fees, collects payment, assigns roll numbers, prints certificates. Can also fill an application *on behalf of* a walk-in student. |
+| **Super Admin** | `/login/vtadmin` | Onboards new colleges, sets each college's "type" (which decides the form fields), enables/disables colleges, and manages staff roles. |
+
+---
+
+## 1a. How It Works — Operation Flows
+
+This section explains every major operation as a simple numbered story. Read this first to understand the "big picture" before diving into code. Each flow lists the **screens**, the **API calls**, and the **status changes** involved.
+
+> **Key idea:** every application has a **status** (like `draft`, `submitted`, `confirmed`). Almost every action moves the application from one status to the next. The full list of statuses is in [Section 13](#13-application-state-machine-status-flow).
+
+### Flow A — Student applies online (self-service)
+
+1. **Register / Log in.** Student registers at `/register/student` (or is auto-created by a college) and logs in at `/login/student`.
+2. **Find the college.** Student enters the college code on the dashboard. This shows the college's open admission periods (course + year + academic year).
+3. **Start the form.** Picking a period creates a **draft** application (`status = draft`).
+4. **Fill the multi-step form** (`/apply/:applicationId`):
+   - Step 1 — Confirm course/year context
+   - Step 2 — Personal details (name, contact, category, address)
+   - Step 3 — Other details (birth, parents, Aadhaar, PRN, ABC ID, bank)
+   - Step 4 — Previous exam marks (SSC, HSC, earlier semesters)
+   - Step 5 — Upload documents
+   - Step 6 — Review everything and accept the declaration
+   Each step saves to its own API endpoint (see [Section 9](#9-all-api-routes)).
+5. **Pay the application fee** (only if the college charges one — see `platform_fee` in [Section 12a](#12a-college-types--features-config)). Payment goes through PayU. On success, the application becomes **`submitted`**.
+   - If the college has **no** application fee, the app is submitted directly.
+6. **Wait for the college.** The student now tracks status on their dashboard. The college takes over (Flow C).
+
+### Flow B — College fills an application for a walk-in student
+
+Used when a student comes to the college counter and staff enter the form for them.
+
+1. Staff open **Add Application** (`/college/apply/new`).
+2. **Find or register the student** — search by name/email/phone, or register a brand-new student on the spot.
+   - If the student is already **confirmed at another college**, an OTP is sent to their WhatsApp to authorise the transfer.
+3. **Pick the admission course** (period). Courses the student has *already applied to* at this college are greyed out.
+4. Staff fill the same multi-step form (Flow A, steps 4–6).
+5. **Submit + collect application fee.** Staff either mark cash as collected, take an online payment, or send a WhatsApp payment link.
+   - Collecting the application fee moves the app straight to **`confirmed`** (the college is doing the review inline — no separate approval needed).
+6. **Set college fee and confirm.** On the "Division & Fees" step, staff review the fee breakdown, optionally set an installment plan, pick a division, and click **Confirm & Collect Fee**. The application stays **`confirmed`** with the fee details recorded, then staff collect the college fee.
+
+### Flow C — College reviews a student-submitted application
+
+This is the review pipeline for applications that arrived via Flow A.
+
+1. Application lands in the college **inbox** as **`submitted`**.
+2. Staff open it. They can:
+   - **Request a correction** → `correction_requested` (student edits and resubmits → `correction_done`).
+   - **Accept / verify documents** → the app advances toward `doc_verified`.
+   - **Reject** → `rejected` (final).
+3. **Confirm admission.** Staff verify documents, set the total college fee (and optional installments), pick a division, and confirm → **`confirmed`**.
+4. **Student pays the college fee** (PayU or a WhatsApp link) → **`fees_paid`**.
+5. **Assign roll number** → **`roll_assigned`**.
+6. **Subject selection** (student picks subjects) → **`enrolled`** (final).
+
+### Flow D — Super Admin onboards a college
+
+1. Admin logs in at `/login/vtadmin` and opens **Create College**.
+2. Fills college info + admin login + **College Type** (General or Agriculture — see [Section 12a](#12a-college-types--features-config)).
+3. On save, the backend creates the college and writes its **features config** from the chosen type's preset. This decides which form fields and fee options that college uses.
+4. Later, the admin can change a college's type from the **Features** tab; changing the type re-applies that type's full field set.
+
+### Flow E — Fee payment (both application fee and college fee)
+
+1. Student clicks **Pay**. The backend creates a pending payment row and returns a PayU form.
+2. The browser auto-submits the form to PayU; the student pays on PayU's page.
+3. PayU redirects back to `/payment-result`. The backend verifies the response hash and marks the payment **success/failed**.
+4. On success, the relevant flag is set (`application_fee_paid` or `college_fee_paid`) and the application status advances.
+   - **WhatsApp links:** instead of paying in-app, the college can send a payment link over WhatsApp; the student opens it and pays the same way.
+
+### Flow F — Forgot password
+
+Two separate flows, because students and colleges are identified differently:
+
+**Student** (`/forgot-password`) — identified by **phone**:
+1. Enter the registered phone number → OTP sent to their WhatsApp.
+2. Enter the OTP, set a new password.
+
+**College admin or staff** (`/college/forgot-password`) — identified by **email**:
+1. Enter the **login email**. The backend resolves it to a college admin (`colleges.admin_email`) or a staff member (`college_users.email`).
+2. An OTP is sent to the phone on file — the **college's** phone for an admin, the **staff member's own** phone for staff.
+3. Enter the OTP, set a new password. The matching account's password is updated.
+   - Unknown emails get a generic reply (no account enumeration).
+   - An account with no phone on file is told to contact its college admin (staff phones are set in the staff form).
+
 ---
 
 ## 2. Tech Stack
@@ -67,7 +159,8 @@ The platform supports the full admission lifecycle from a student first register
 | Routing (FE) | React Router DOM | ^7.14 |
 | Logging (BE) | Pino | ^10.3 |
 | Input Validation (BE) | express-validator | ^7.3 |
-| Rate Limiting (BE) | express-rate-limit | ^8.5 |
+| Rate Limiting (BE) | express-rate-limit + express-slow-down | ^8.x |
+| File Type Detection (BE) | file-type (magic bytes) | ^22 (ESM, dynamic import) |
 | Security Headers (BE) | Helmet | ^8.1 |
 | Testing (FE) | Vitest + React Testing Library | ^4.1 |
 
@@ -134,8 +227,8 @@ collage_admission/
 │   │       ├── 018_college_fee_instalments.sql ← Multi-instalment tracking
 │   │       ├── 019_misc_fixes.sql    ← Minor column additions and fixes
 │   │       └── 020_payment_link_tokens_txnid.sql ← Adds gateway_txnid to payment_link_tokens
-│   ├── public/
-│   │   └── uploads/                  ← Uploaded documents stored here
+│   ├── uploads/                      ← Uploaded documents (OUTSIDE web root; served via authenticated route)
+│   ├── public/                       ← Static assets (NOT uploads)
 │   ├── app.js                        ← Express app configuration, route mounting
 │   ├── package.json
 │   ├── .env.example                  ← Template for required env variables
@@ -299,9 +392,9 @@ Student login accounts.
 |---|---|---|
 | `id` | INT IDENTITY PK | |
 | `full_name` | NVARCHAR(200) NOT NULL | |
-| `email` | NVARCHAR(150) UNIQUE NOT NULL | Used for login |
+| `email` | NVARCHAR(150) NOT NULL | Informational. **Not unique** — duplicate student emails are allowed (migration 037). Students do **not** log in by email. |
 | `password_hash` | NVARCHAR(255) NOT NULL | bcrypt hash |
-| `phone` | NVARCHAR(20) UNIQUE | Used for OTP |
+| `phone` | NVARCHAR(20) UNIQUE | **The student identifier** — used for login, OTP, and password reset. Must be unique. |
 | `dob` | DATE | |
 | `gender` | NVARCHAR(10) | |
 | `address` | NVARCHAR(500) | |
@@ -342,6 +435,8 @@ One row per college. Stores the main admin login credentials too.
 | `bank_ifsc` | NVARCHAR(20) | |
 | `bank_upi_id` | NVARCHAR(100) | |
 | `is_enabled` | BIT | Added in migration 009. If 0, college is disabled |
+| `college_type` | NVARCHAR(20) | Added in migration 031. `'general'` or `'agriculture'`. Drives `features_config`. See [12a](#12a-college-types--features-config). |
+| `features_config` | NVARCHAR(MAX) | Added in migration 029. JSON blob controlling which form fields/fees this college uses. Source of truth for the form. |
 | `created_at` | DATETIME2 | |
 
 #### `college_users`
@@ -353,7 +448,8 @@ College staff accounts (not the main admin, but additional staff).
 | `college_id` | INT FK → colleges.id | |
 | `role_id` | INT FK → college_roles.id | |
 | `full_name` | NVARCHAR(200) | |
-| `email` | NVARCHAR(150) UNIQUE | |
+| `email` | NVARCHAR(150) UNIQUE | Used for login |
+| `phone` | NVARCHAR(20) | Added in migration 038. Nullable. Used to send the staff member's password-reset OTP. |
 | `password_hash` | NVARCHAR(255) | |
 | `is_active` | BIT DEFAULT 1 | |
 | `created_at` | DATETIME2 | |
@@ -619,6 +715,12 @@ The central table. One row per student application. Contains both status-machine
 **Step 2 — Other Details:**
 `app_birth_date`, `app_birth_place`, `app_birth_taluka`, `app_birth_district`, `app_birth_state`, `app_nationality`, `app_marital_status`, `app_religion`, `app_caste`, `app_mother_tongue`, `app_height_cm`, `app_weight_kg`, `app_blood_group`, `app_father_full_name`, `app_son_daughter_no`, `app_father_occupation`, `app_annual_income`, `app_aadhaar`, `app_prn`, `app_abc_id`, `app_university_app_no`, `app_bank_account`, `app_bank_ifsc`, `app_bank_name`, `app_bank_branch`
 
+**Feature-gated fields** (shown only when the college's `features_config` enables them — see [12a](#12a-college-types--features-config)):
+- Added in migration 030: `app_hsc_maths`, `app_hsc_biology`, `app_hostel_facility`, `app_admitted_category`, `app_other_category`, `app_admission_quota`, and the parent-name split (`app_father_surname/first_name/middle_name`, `app_mother_surname/first_name/middle_name`).
+- Added in migration 033 (agriculture): `app_date_of_admission`, `app_is_diploma_direct_sy`, `app_name_as_on_aadhaar`, `app_son_of`.
+- Added in migration 034 (always shown): `app_native_address`, `app_native_taluka`, `app_native_district`, `app_parent_mobile`, `app_land_line`, `app_guardian_relation`.
+- Added in migration 036 (agriculture): `app_semester` (INT 1–8).
+
 **Timestamps:** `declaration_accepted_at`, `submitted_at`, `approved_at`, `confirmed_at`, `enrolled_at`, `status_updated_at`, `created_at`, `updated_at`
 
 #### `application_activity_log`
@@ -797,30 +899,51 @@ All migrations use `IF OBJECT_ID(...) IS NULL` guards so they are **safe to re-r
 
 **Migration order:**
 
+Migrations live in `BackEnd/scripts/migrations/`. Most are `.sql`; a few are `.js` (used when the change needs JSON manipulation or the shared preset constants). The `.js` ones are run with `node scripts/migrations/<file>.js`.
+
 | File | What it does |
 |---|---|
-| `001_base_schema.sql` | All core tables. Run on a fresh database only |
-| `002_applications_app_fields.sql` | Adds `app_*` snapshot columns to applications |
-| `003_admission_periods_archive.sql` | Adds audit archive table + trigger for admission_periods |
-| `004_indexes.sql` | Performance indexes on frequently queried columns |
-| `005_seed_document_types.sql` | Inserts default document types (Aadhaar, Caste Cert, etc.) |
-| `006_prev_exam_columns.sql` | Schema fix for application_previous_exam columns |
-| `007_applications_missing_columns.sql` | Adds any missing application columns |
-| `008_chatbot.sql` | Creates chatbot_knowledge and chatbot_logs tables |
-| `009_college_enabled.sql` | Adds `is_enabled` column to colleges |
-| `010_payu_payments.sql` | Renames Razorpay columns to `gateway`, `gateway_txnid`, `gateway_payment_id` |
-| `011_payment_link_tokens.sql` | Creates `payment_link_tokens` table for WhatsApp payment links |
-| `012_notifications.sql` | Creates in-app notifications table |
-| `013_college_users.sql` | Creates `college_users`, `college_roles`, `college_role_permissions` tables |
-| `014_certificates.sql` | Creates `certificate_bonafide`, `certificate_character`, `certificate_noc` tables |
-| `015_classwise_fees.sql` | Creates `classwise_fees` override table |
-| `016_reports.sql` | Adds report/analytics views |
-| `017_application_activity_log.sql` | Creates `application_activity_log` audit trail table |
-| `018_college_fee_instalments.sql` | Adds multi-instalment support columns |
-| `019_misc_fixes.sql` | Minor column additions and fixes |
-| `020_payment_link_tokens_txnid.sql` | Adds `gateway_txnid` column to `payment_link_tokens` for reload idempotency |
+| `001_base_schema.sql` | All core tables. Run on a fresh database only. |
+| `002_applications_app_fields.sql` | `app_*` snapshot columns on applications (already in 001; here for existing DBs). |
+| `003_admission_periods_archive.sql` | Audit archive table + trigger for admission_periods. |
+| `004_indexes.sql` | Performance indexes on frequently queried columns. |
+| `005_seed_document_types.sql` | Inserts default document types (Aadhaar, Caste Cert, etc.). |
+| `006_prev_exam_columns.sql` | Schema fix for `application_previous_exam` columns. |
+| `007_applications_missing_columns.sql` | Adds any missing application columns. |
+| `008_chatbot.sql` | Chatbot knowledge + logs tables. |
+| `009_college_enabled.sql` | Adds `is_enabled` column to colleges. |
+| `010_role_perm_manage_admission_periods.sql` | Seeds the "manage admission periods" role permission. |
+| `011_audit_arc_tables.sql` | Audit archive (`$Arc`) tables for core entities. |
+| `012_seed_super_admin.sql` | Seeds the default super-admin (password `Admin@123`). |
+| `013_created_updated_by.sql` | Adds `created_by` / `updated_by` audit columns. |
+| `014_payu_payments.sql` | PayU gateway columns (`gateway`, `gateway_txnid`, ...). |
+| `015_classwise_fees_student_type.sql` | Adds `student_type` to classwise fees. |
+| `016_fee_installments.sql` | Fee installment plan support. |
+| `017_academic_year_fees.sql` | Adds `academic_year` to fees master + classwise fees. |
+| `018_arc_academic_year.sql` | Adds `academic_year` to archive tables. |
+| `019_payment_link_tokens.sql` | Shareable WhatsApp/PayU payment link tokens. |
+| `020_payment_link_tokens_txnid.sql` | Adds `gateway_txnid` to payment link tokens (reload idempotency). |
+| `021_audit_triggers_payments_links.sql` | Audit triggers for payments + payment link tokens. |
+| `022_category_master.sql` | Dynamic category master: castes, special statuses, fees categories. |
+| `023_payment_type_misc_exam.sql` | Extends `payment_type` to include misc/exam fees. |
+| `024_payments_notes_column.sql` | Adds `notes` column to payments. |
+| `025_backfill_activity_log.sql` | Backfills activity log for existing applications. |
+| `026_receipt_numbering.sql` | Receipt numbering (counters + `receipt_no`). |
+| `027_clear_test_data.sql` | One-time cleanup of test data. |
+| `028_otp_student_transfer.sql` | Adds `student_transfer` as a valid OTP purpose. |
+| `029_features_config.sql` | Adds `features_config` JSON column to colleges (see [12a](#12a-college-types--features-config)). |
+| `030_new_admission_fields.sql` | Adds admitted/other category, quota, hostel, HSC flags, parent-name split columns. |
+| `031_college_type.sql` | Adds `college_type` column to colleges. |
+| `032_realign_admission_form_to_type.js` | Re-aligns each college's `admission_form` features to its type preset. |
+| `033_agri_admission_fields.sql` | Agriculture fields: date of admission, diploma/direct-SY, name-as-on-Aadhaar, S/o. |
+| `034_general_admission_fields.sql` | General fields: native address, parent mobile, land line, guardian relation. |
+| `035_realign_college_fee_to_type.js` | Re-aligns `payment.college_fee` to each college's type (general = on, agriculture = off). |
+| `036_app_semester.sql` | Adds `app_semester` column (agriculture semester field, 1–8). |
+| `037_students_email_non_unique.sql` | Drops the UNIQUE constraint on `students.email` — duplicate student emails are now allowed (phone stays unique). |
+| `038_college_users_phone.sql` | Adds `phone` to `college_users` (staff) so staff can receive a password-reset OTP. |
+| `039_otp_college_reset_purpose.sql` | Adds `college_password_reset` as a valid `otp_store.purpose` (college admin/staff forgot-password). |
 
-> **Important:** On an existing database, start from migration 002. On a brand new database, run 001 first, then 002 through 020. All migrations are idempotent (safe to re-run).
+> **Important:** On a brand-new database, run `001` first, then everything in order. On an existing database, run from wherever you left off. The `.sql` migrations are idempotent (safe to re-run); the `.js` re-alignment scripts are also safe to re-run (they only change rows that differ from the preset).
 
 ---
 
@@ -901,8 +1024,10 @@ Base URL: `http://localhost:8000` (or your production domain)
 | POST | `/auth/login/admin` | Public | Super admin login |
 | POST | `/auth/otp/send` | Public | Send OTP to phone via WhatsApp |
 | POST | `/auth/otp/verify` | Public | Verify OTP + complete student registration |
-| POST | `/auth/forgot-password/send-otp` | Public | Send password reset OTP |
-| POST | `/auth/forgot-password/reset` | Public | Reset password with OTP |
+| POST | `/auth/forgot-password/send-otp` | Public | **Student** reset — send OTP to their phone (identified by phone) |
+| POST | `/auth/forgot-password/reset` | Public | **Student** reset — verify OTP + set new password |
+| POST | `/auth/forgot-password/college/send-otp` | Public | **College** reset — identified by **email** (admin or staff); OTP goes to the phone on file |
+| POST | `/auth/forgot-password/college/reset` | Public | **College** reset — verify OTP + set new password on the matching account |
 | POST | `/auth/logout` | Authenticated | Clear auth cookie |
 | POST | `/auth/refresh` | Authenticated | Refresh JWT cookie (extend session) |
 
@@ -974,8 +1099,8 @@ All routes require college role. Staff also need appropriate permissions.
 | POST | `/college-admin/:collegeId/admission-periods` | College (write) | Create admission period |
 | PUT | `/college-admin/:collegeId/admission-periods/:id` | College (write) | Update admission period |
 | DELETE | `/college-admin/:collegeId/admission-periods/:id` | College (write) | Delete admission period |
-| GET | `/college-admin/:collegeId/applications` | College | List applications with filters |
-| GET | `/college-admin/:collegeId/applications/:appId` | College | Get full application detail |
+| GET | `/college-admin/:collegeId/applications` | College | List applications with filters. Also returns `status_counts` + `status_total` — per-status counts computed **ignoring the status filter** (see Rule 24). |
+| GET | `/college-admin/:collegeId/applications/:appId` | College | Get full application detail. Also embeds the college's parsed `features` so the review gates fields from the authoritative config (never a stale cache). |
 | POST | `/college-admin/:collegeId/applications/:appId/request-correction` | College (write) | Ask student to fix something |
 | POST | `/college-admin/:collegeId/applications/:appId/accept-scrutiny` | College (write) | Accept after review |
 | POST | `/college-admin/:collegeId/applications/:appId/reject` | College (write) | Reject application |
@@ -1061,8 +1186,8 @@ All master data CRUD endpoints. All require college access.
 | Method | Path | Access | Description |
 |---|---|---|---|
 | GET | `/admin/colleges/:collegeId/users` | Admin | List college staff users |
-| POST | `/admin/colleges/:collegeId/users` | Admin | Create college staff user |
-| PUT | `/admin/colleges/:collegeId/users/:userId` | Admin | Update staff user |
+| POST | `/admin/colleges/:collegeId/users` | Admin | Create college staff user. Accepts an optional `phone` (10-digit) used for their password-reset OTP. |
+| PUT | `/admin/colleges/:collegeId/users/:userId` | Admin | Update staff user (incl. `phone`). |
 | DELETE | `/admin/colleges/:collegeId/users/:userId` | Admin | Delete staff user |
 | GET | `/admin/colleges/:collegeId/roles` | Admin | List college roles |
 | POST | `/admin/colleges/:collegeId/roles` | Admin | Create role |
@@ -1161,7 +1286,8 @@ All page components are lazy-loaded with `React.lazy()`. This means each page is
 | `/login/college` | `CollegeLogin` | College admin login form |
 | `/login/vtadmin` | `AdminLogin` | Super admin login form |
 | `/register/student` | `StudentRegister` | Student registration with OTP flow |
-| `/forgot-password` | `ForgotPassword` | Password reset with OTP |
+| `/forgot-password` | `ForgotPassword` | **Student** password reset (by phone) with OTP |
+| `/college/forgot-password` | `CollegeForgotPassword` | **College** password reset (admin + staff, by email) with OTP |
 
 ### Application Wizard (Full-screen, no sidebar)
 
@@ -1210,6 +1336,107 @@ All page components are lazy-loaded with `React.lazy()`. This means each page is
 | `/admin/dashboard` | Platform overview |
 | `/admin/colleges` | List all colleges, create new college, toggle enable/disable |
 | `/admin/college/:id/roles` | Manage roles and permissions for a college |
+
+---
+
+## 12a. College Types & Features Config
+
+Not every college wants the same admission form. A general arts/science/commerce college needs different fields than an agriculture college, and some colleges charge fees while others don't. Instead of hard-coding this, each college has a **type** and a **features config**.
+
+### The big picture
+
+```
+College Type  ──picks──►  a preset  ──writes──►  features_config (JSON on the college row)
+   (general /                                          │
+    agriculture)                                       ▼
+                                        The form, reviews, validation, and fee
+                                        steps all READ features_config to decide
+                                        which fields to show and which fees to charge.
+```
+
+- **`college_type`** — a single column on `colleges`. Either `'general'` or `'agriculture'`. This is the only knob the Super Admin turns.
+- **`features_config`** — a JSON blob on `colleges`. This is the **source of truth** the whole app reads. The type just decides its starting values.
+- **Presets** live in one file: `BackEnd/constants/collegePresets.js`. Picking a type at onboarding (or changing it later) writes that type's preset into `features_config`.
+
+> **Why two layers?** The form code only ever reads `features_config`, never `college_type` directly. So adding a new college type, or letting an admin fine-tune one field, never requires touching the form code.
+
+### What features_config looks like
+
+```json
+{
+  "payment": {
+    "platform_fee": true,      // charge an application fee at submission?
+    "college_fee": true        // does this college run a college-fee system?
+  },
+  "admission_form": {
+    "caste_category": true,     // show caste/category selection
+    "admitted_category": false, // separate "Admitted Category" field
+    "other_category": false,    // FF, DP, PH, PD, AG, OS, PAP, Spot Round
+    "admission_quota": false,   // 70%, 30%, OS, Goa, ICAR, J&K, Management
+    "hostel_facility": false,   // hostel checkbox
+    "hsc_subject_flags": false, // "Passed with Maths / Biology at HSC"
+    "bank_details": true,
+    "abc_id": true,
+    "prn": true,
+    "father_name_split": false, // split parent names into Surname/First/Middle
+    "date_of_admission": false, // defaults to today; editable
+    "diploma_direct_sy": false, // "Diploma Student (Direct SY)" — only shown for SY admissions
+    "name_as_on_aadhaar": false,
+    "son_of": false,
+    "semester": false           // Semester 1–8, options derived from admission year
+  },
+  "documents": {
+    "required_docs": true,          // online document upload step
+    "certificate_checklist": false  // simple checkbox list of certificates
+  },
+  "notifications": { "whatsapp": true, "email": true }
+}
+```
+
+### The two presets
+
+| Feature | General preset | Agriculture preset |
+|---|---|---|
+| `payment.college_fee` | **true** (has college fees) | **false** (no college fees) |
+| `admission_form.admitted_category` | false | **true** |
+| `admission_form.other_category` | false | **true** |
+| `admission_form.admission_quota` | false | **true** |
+| `admission_form.hostel_facility` | false | **true** |
+| `admission_form.hsc_subject_flags` | false | **true** |
+| `admission_form.date_of_admission` | false | **true** |
+| `admission_form.diploma_direct_sy` | false | **true** |
+| `admission_form.name_as_on_aadhaar` | false | **true** |
+| `admission_form.son_of` | false | **true** |
+| `admission_form.semester` | false | **true** |
+| `documents.certificate_checklist` | false | **true** |
+
+Everything not listed above is the same in both (caste category, bank details, ABC ID, PRN on; `platform_fee` on).
+
+Some fields (Native Address, Parent's Mobile, Land Line, Guardian's Relation) are **always shown for every college** — they have no toggle.
+
+**Field-specific rules for the agriculture form:**
+- **Semester** options are derived from the admission year — FY → 1,2 · SY → 3,4 · TY → 5,6, etc. Required.
+- **Diploma Student (Direct SY)** is only shown for **SY** admissions (`year_of_study === 2`). When checked, semesters 1 & 2 are blocked (the student enters at SY).
+- **Date of Admission** defaults to today for new applications (still editable).
+
+### How a feature flag is used
+
+- **Show/hide a form field** — the form checks `features.admission_form.<key> === true` before rendering that field, and the review/print screens do the same.
+- **Require a field** — when a field is enabled, the frontend *and* the backend (`personal-details` route) both require it.
+- **Fees** — `payment.college_fee` controls the whole college-fee flow (fees category field, installment plan, fee receipts). `payment.platform_fee` controls whether an application fee is charged at submission.
+
+### Where it is set / read
+
+| Action | Endpoint / file |
+|---|---|
+| Create college with a type | `POST /colleges` (writes preset to `features_config`) |
+| Change a college's type later | `PUT /admin/colleges/:id` with `{ college_type }` (overwrites `features_config`) |
+| Admin reads type + config | `GET /admin/colleges/:id/features` |
+| Form/reviews read config | `GET /college-admin/:id/features` and `GET /api/applications/:id/form` |
+| Presets defined | `BackEnd/constants/collegePresets.js` |
+| Admin UI to pick type | `FrontEnd/src/features/admin/components/FeaturesPanel.jsx` |
+
+> **Keeping data in sync:** if a college's `college_type` and `features_config` ever disagree (e.g. after adding a new preset key), the re-alignment scripts `032_realign_admission_form_to_type.js` and `035_realign_college_fee_to_type.js` rewrite the type-driven parts of `features_config` from the preset.
 
 ---
 
@@ -1283,6 +1510,17 @@ The `status` column in `applications` follows this flow:
 
 Additionally, any application can be moved to `[cancelled]` at any non-terminal stage.
 
+### The college-side shortcut (important)
+
+The long path above is the **student-submitted** review pipeline. When a **college** creates and submits an application on a walk-in student's behalf (Flow B), it does **not** go through the manual `under_review → scrutiny_accepted → doc_verified` steps — the college is already reviewing it inline. Instead:
+
+```
+[draft] ──college submits + collects application fee──► [confirmed] ──college fee paid──► [fees_paid] ──► ...
+```
+
+- Collecting the **application fee** (`recordApplicationFee`) moves the app straight to **`confirmed`**.
+- The "Confirm & Collect Fee" step then records the college fee on the already-`confirmed` application. The confirm endpoint accepts `confirmed` status for exactly this reason (it is **idempotent** — confirming again just saves the fee total / installments / division rather than erroring).
+
 ### Status descriptions
 
 | Status | Who sets it | Meaning |
@@ -1334,8 +1572,25 @@ Priority order:
 1. Looks up `funding_type` from `division_master` for the student's division
 2. Determines fee slab (1–4) from caste/status
 3. Determines payment mode (Paying/Other/BCC)
-4. Fetches all fee heads from `fees_master` with any `classwise_fees` overrides applied
+4. Builds the fee breakdown from the fee heads **configured for this exact course + year + student-type** (see the rule below)
 5. Returns full fee breakdown with totals
+
+### ⚠️ A fee is only charged if it is actually configured
+
+A fee head is included **only** when there is a `classwise_fees` row for this exact
+**college + course (faculty_master) + year_level + student_type**, **and** the amount for
+the student's slab (`cat{slab}_amount`) is **NOT NULL**.
+
+- **Blank (NULL) classwise amount** → the college left it unset → the head is **not charged** (₹0).
+- **No classwise row at all** for this class/year → the head is **not charged**.
+- The college-wide `fees_master` base amount is **never used as a fallback**.
+
+> **Why:** the Fees Master UI deliberately stores `NULL` for an unset amount. Previously the
+> service fell back to the `fees_master` base amount, so courses whose fees were never set
+> still produced a phantom fee. Now "fee not set" reliably means **₹0**.
+
+**Consequence:** a course/year with no fees configured computes to **₹0**. This is what the
+"open admission" guard relies on — see [Key Business Rule 21](#26-key-business-rules).
 
 ```javascript
 const result = await FeeDeterminationService.compute({
@@ -1543,21 +1798,32 @@ Template 590 variables (in order): `college_name`, `registration_number`, `link_
 
 ## 16. Document Upload System
 
-### Storage Location
+### Storage Location (outside the web root)
 ```
-BackEnd/public/uploads/students/{studentId}/{timestamp}_{originalname}
+BackEnd/uploads/students/{studentId}/{timestamp}_{random}.{ext}
 ```
+Files are stored **outside** `public/` so they are never served statically or executed. The filename is random (no user-controlled name), and the extension is derived from the **detected** content type, not the client's filename.
 
 ### Allowed File Types
 - JPG, JPEG, PNG, WEBP, PDF
 - Max file size: 5 MB per file
 
 ### How Upload Works
-1. Multer middleware handles multipart/form-data
-2. `file-type` package does actual MIME type validation (not just extension check)
-3. File saved to disk at the path above
-4. Row inserted into `student_documents`
-5. If for an application, row inserted into `application_documents` linking the upload
+1. Multer middleware handles multipart/form-data. `student_id` in the destination is sanitized to digits (blocks path traversal).
+2. The `file-type` package validates the **actual magic bytes** (not just the extension); mismatches are rejected.
+3. The stored file is renamed with the trusted extension for the detected type.
+4. Row inserted into `student_documents` (path stored as `/uploads/students/{id}/{file}`).
+5. If for an application, a row is inserted into `application_documents` linking the upload.
+
+### Serving Files (authenticated, never static)
+Uploads are **not** served by `express.static`. They are streamed through an authenticated route:
+```
+GET /uploads/students/:studentId/:filename   (see BackEnd/routes/uploads.js)
+```
+- Requires authentication; students may only fetch their own files, college/admin may fetch any (for review).
+- Confirms the file is a registered `student_documents` row (not a guessed path).
+- Sets `X-Content-Type-Options: nosniff`, forces a trusted `Content-Type`, and uses `Content-Disposition: inline` — so an upload can never be interpreted as HTML/JS.
+- The frontend fetches files at the same `/uploads/...` URL (cookie auth is sent automatically), so no client change was needed.
 
 ### Document Verification
 College admins can mark individual documents as verified in the application detail view, which sets `application_documents.is_verified = 1`.
@@ -1734,13 +2000,17 @@ The `requireCollegeAccess` middleware also does a **live database check** on eve
 - `JWT_SECRET` validated at startup — server refuses to start without it
 
 ### Input Validation
-- All endpoints use `express-validator` to validate and sanitize inputs
-- File uploads: extension check + actual MIME type check via `file-type` package
+- Endpoints validate inputs with `express-validator` (auth, payments, applications) or explicit manual checks (type/format/length) — non-conforming input is rejected with a 422/400, not silently coerced.
+- Free-text fields on the main mutation (personal-details) have explicit **length bounds**; numeric fields have range checks (e.g. semester 1–8).
+- File uploads: mime allowlist + **actual magic-byte validation** via `file-type` (see [Section 16](#16-document-upload-system)).
 
 ### Rate Limiting
-- Login endpoints: rate limited to prevent brute force
-- OTP send: rate limited per phone number
-- Payment endpoints: rate limited
+Centralized in `BackEnd/middleware/rateLimits.js` — **all thresholds are env-configurable** (`RL_*` vars), nothing hardcoded. Three tiers:
+- **Auth** (login / register / OTP / password reset): strict. Combines a **per-IP** cap, a **per-account** cap (email/phone), and a **progressive slow-down** (backoff via `express-slow-down`) instead of a hard lockout — so a legitimate user who fumbles a password is delayed, not locked out, while brute force (even across rotating IPs) is throttled.
+- **Public** (unauthenticated browse: `/colleges`, `/masters`): moderate limit.
+- **Authenticated** (user actions): looser limit.
+- Loopback and non-production requests are skipped.
+- If deployed behind a reverse proxy, set `app.set('trust proxy', 1)` (a specific hop count, not `true`) so real client IPs are used.
 
 ### SQL Injection Prevention
 - All database queries use parameterized inputs (`.input()` with `mssql`)
@@ -1831,9 +2101,9 @@ npm run build
 
 ### File Upload Storage
 
-Uploaded documents are stored in `BackEnd/public/uploads/`. In production:
-- Either use a shared/persistent volume if running on multiple instances
-- Or configure Multer to use cloud storage (Azure Blob, AWS S3) instead
+Uploaded documents are stored in `BackEnd/uploads/` (**outside** the web root; gitignored) and served only through the authenticated route in `routes/uploads.js`. In production:
+- Use a shared/persistent volume if running on multiple instances (the folder is not in the deploy artifact).
+- Or configure Multer to use cloud storage (Azure Blob, AWS S3) instead — keep serving behind the authenticated route.
 
 ---
 
@@ -1871,6 +2141,24 @@ These are important rules that aren't obvious from reading the code alone:
 
 15. **PayU Idempotency**: The `gateway_txnid` field links a payment link token to a specific PayU transaction. If the student opens the link multiple times before paying, the backend always reuses the same pending payment row and the same txnid. This prevents duplicate payments for a single link.
 
+16. **College Type Drives the Form**: A college's `college_type` (`general`/`agriculture`) is picked at onboarding and writes the `features_config` JSON. The form, reviews, validation, and fee steps all read `features_config` — never `college_type` directly. Changing the type re-applies the preset. General colleges have a college-fee system; agriculture colleges do not. See [Section 12a](#12a-college-types--features-config).
+
+17. **College-Side Direct Confirm**: When a college fills an application itself and collects the application fee, the app jumps straight to `confirmed` (no manual review pipeline). The "Confirm & Collect Fee" endpoint therefore accepts an already-`confirmed` application and is idempotent — it records the college fee / installments / division rather than erroring. This is different from Rule 13, which applies to the *student self-service* flow where the app stays `draft` until fee payment.
+
+18. **Semester Options Follow the Year (agriculture)**: The Semester field's options are derived from the admission year — FY → 1,2 · SY → 3,4 · TY → 5,6, etc. "Diploma Student (Direct SY)" is only offered for **SY** admissions; when checked, semesters 1 & 2 are removed (the student enters at SY). A stale semester selection is cleared automatically when the year or DSY flag changes.
+
+19. **Duplicate Student Emails Allowed**: `students.email` is **not unique** (migration 037). Students log in and reset passwords by **phone**, which remains the unique identifier — so two students may share an email without breaking auth. Registration looks up existing students by phone only. (College and admin emails are still unique.)
+
+20. **"Fees Pending" Only for College-Fee Colleges**: On the student's My Applications, a `confirmed` application shows "Fees Pending" only when the college has a college-fee system. For agriculture colleges (`college_fee` off), a `confirmed` application shows "Admission Confirmed" instead — the my-applications API returns a `college_fee_enabled` flag the UI reads. The full application review also shows **every** applicable field (blank ones render as "—"), so nothing looks silently missing.
+
+21. **Cannot Open Admission Without Fees (college-fee colleges only)**: Creating an admission period is blocked if the college fee for that course + year is not configured (computes to ₹0) — the college is told to set the fees in Fees Master first. This is enforced **both** in the frontend pre-check and the backend `POST /admission-periods` route. **Skipped entirely for colleges with `college_fee` disabled** (e.g. agriculture), where ₹0 is expected. Relies on the "fee only if configured" rule in [Section 14](#14-fee-determination-system).
+
+22. **Confirming Admission Without a College Fee**: The `confirm` endpoint only computes the fee total (and only raises *"Could not compute fee total…"*) when the college **has** a college-fee system. For agriculture colleges (`college_fee` off) it skips all fee logic, confirms with `fee_total_amount = 0`, and returns simply *"Admission confirmed."* — no fee configuration is required.
+
+23. **College Forgot Password (admin + staff)**: Colleges reset by **email** (not phone, unlike students). The backend resolves the email to either a college admin (`colleges.admin_email` → OTP to the **college's** phone) or a staff member (`college_users.email` → OTP to the **staff member's own** phone, added in migration 038). Unknown emails get a generic response (no account enumeration); an account with **no phone on file** is told to contact its college admin. The reset updates whichever account matched (`colleges.admin_password_hash` or `college_users.password_hash`).
+
+24. **Inbox Status Counts Ignore the Status Filter**: In the college application inbox, the per-status counts in the dropdown are computed by the **backend** over the full set (`status_counts` / `status_total`), applying every filter **except** status. So selecting one status no longer zeroes out the other counts. Course/year/division filters still narrow the counts (intentional).
+
 ---
 
-*Last updated: June 2026. For questions, see the git log or open an issue.*
+*Last updated: July 2026. For questions, see the git log or open an issue.*

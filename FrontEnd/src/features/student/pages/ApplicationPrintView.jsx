@@ -56,7 +56,8 @@ export default function ApplicationPrintView({ appId, regNumber, onClose }) {
     </div>
   )
 
-  const { application: app, previous_exams, documents } = data
+  const { application: app, previous_exams, documents, features } = data
+  const feesEnabled = features?.payment?.college_fee !== false
   const fullName = [app.app_surname, app.app_first_name, app.app_middle_name].filter(Boolean).join(' ')
   const address  = [app.app_address, app.app_taluka, app.app_district, app.app_state].filter(Boolean).join(', ')
 
@@ -109,13 +110,23 @@ export default function ApplicationPrintView({ appId, regNumber, onClose }) {
 
           <PreviewSection title="Personal Details">
             <PRow label="Full Name"       value={fullName} />
+            {features?.admission_form?.name_as_on_aadhaar === true && <PRow label="Name as on Aadhaar" value={app.app_name_as_on_aadhaar} />}
+            {features?.admission_form?.son_of === true && <PRow label="S/o" value={app.app_son_of} />}
             <PRow label="Mother's Name"   value={app.app_mother_name} />
+            {features?.admission_form?.semester === true && <PRow label="Semester" value={app.app_semester ? `Semester ${app.app_semester}` : ''} />}
+            {features?.admission_form?.date_of_admission === true && <PRow label="Date of Admission" value={fmtDate(app.app_date_of_admission)} />}
+            {features?.admission_form?.diploma_direct_sy === true && <PRow label="Diploma (Direct SY)" value={app.app_is_diploma_direct_sy ? 'Yes' : 'No'} />}
             <PRow label="Gender"          value={app.app_sex} />
             <PRow label="Mobile"          value={app.app_mobile} />
+            {app.app_parent_mobile && <PRow label="Parent's Mobile" value={app.app_parent_mobile} />}
+            {app.app_land_line && <PRow label="Land Line" value={app.app_land_line} />}
             <PRow label="Email"           value={app.app_email} full />
+            {app.app_guardian_relation && <PRow label="Guardian's Relation" value={app.app_guardian_relation} />}
             <PRow label="Address"         value={address} full />
+            {[app.app_native_address, app.app_native_taluka, app.app_native_district].some(Boolean) &&
+              <PRow label="Native Address" value={[app.app_native_address, app.app_native_taluka, app.app_native_district].filter(Boolean).join(', ')} full />}
             <PRow label="Category"        value={app.app_category} />
-            <PRow label="Fees Category"   value={app.fees_category} />
+            {feesEnabled && <PRow label="Fees Category"   value={app.fees_category} />}
           </PreviewSection>
 
           <PreviewSection title="Other Details">
@@ -227,7 +238,9 @@ function PRow({ label, value, full }) {
 const PRINT_ROW_LABEL = { SSC: 'SSC', HSC: 'HSC', FY_SEM1: 'F.Y. Sem I', FY_SEM2: 'F.Y. Sem II', SY_SEM1: 'S.Y. Sem I', SY_SEM2: 'S.Y. Sem II', TY_SEM1: 'T.Y. Sem I', TY_SEM2: 'T.Y. Sem II', '4Y_SEM1': '4Y Sem I', '4Y_SEM2': '4Y Sem II' }
 
 function buildHTML(data, regNumber) {
-  const { application: app, previous_exams, documents } = data
+  const { application: app, previous_exams, documents, features } = data
+  const feesEnabled = features?.payment?.college_fee !== false
+  const af = features?.admission_form || {}
   const fullName  = [app.app_surname, app.app_first_name, app.app_middle_name].filter(Boolean).join(' ')
   const address   = [app.app_address, app.app_taluka, app.app_district, app.app_state].filter(Boolean).join(', ')
 
@@ -311,13 +324,23 @@ function buildHTML(data, regNumber) {
 
   ${section('Personal Details',
       row('Full Name',       fullName) +
+      (af.name_as_on_aadhaar === true ? row('Name as on Aadhaar', app.app_name_as_on_aadhaar) : '') +
+      (af.son_of === true ? row('S/o', app.app_son_of) : '') +
       row('Mother\'s Name',  app.app_mother_name) +
+      (af.semester === true ? row('Semester', app.app_semester ? 'Semester ' + app.app_semester : '') : '') +
+      (af.date_of_admission === true ? row('Date of Admission', fmtDate(app.app_date_of_admission)) : '') +
+      (af.diploma_direct_sy === true ? row('Diploma (Direct SY)', app.app_is_diploma_direct_sy ? 'Yes' : 'No') : '') +
       row('Gender',          app.app_sex) +
       row('Mobile',          app.app_mobile) +
+      (app.app_parent_mobile ? row('Parent\'s Mobile', app.app_parent_mobile) : '') +
+      (app.app_land_line ? row('Land Line', app.app_land_line) : '') +
       row('Email',           app.app_email) +
+      (app.app_guardian_relation ? row('Guardian\'s Relation', app.app_guardian_relation) : '') +
       row('Address',         address) +
+      ([app.app_native_address, app.app_native_taluka, app.app_native_district].some(Boolean)
+        ? row('Native Address', [app.app_native_address, app.app_native_taluka, app.app_native_district].filter(Boolean).join(', ')) : '') +
       row('Category',        app.app_category) +
-      row('Fees Category',   app.fees_category)
+      (feesEnabled ? row('Fees Category',   app.fees_category) : '')
   )}
 
   ${section('Other Details',

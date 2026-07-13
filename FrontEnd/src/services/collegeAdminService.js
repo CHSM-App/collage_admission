@@ -47,6 +47,9 @@ export const generateRollNumbers = (collegeId, data) =>
 export const searchStudents = (collegeId, query) =>
   api.get(`college-admin/${collegeId}/students/search?q=${encodeURIComponent(query)}`)
 
+export const getStudentAppliedCourses = (collegeId, studentId) =>
+  api.get(`college-admin/${collegeId}/students/${studentId}/applied-courses`)
+
 export const sendTransferOtp = (collegeId, mobile) =>
   api.post(`college-admin/${collegeId}/students/transfer-otp`, { mobile })
 
@@ -79,3 +82,6 @@ export const getMiscExamReceipts = (collegeId, params) =>
 
 export const createMiscFee = (collegeId, appId, data) =>
   api.post(`college-admin/${collegeId}/applications/${appId}/create-misc-fee`, data)
+
+export const getCollegeSelfFeatures = (collegeId) =>
+  api.get(`college-admin/${collegeId}/features`)

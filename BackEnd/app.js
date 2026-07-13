@@ -14,6 +14,8 @@ var applicationsRouter   = require('./routes/applications');
 var applicationFormRouter= require('./routes/application_form');
 var collegeAdminRouter   = require('./routes/college_admin');
 var documentsRouter      = require('./routes/documents');
+var uploadsRouter        = require('./routes/uploads');
+var { publicLimiter, authedLimiter } = require('./middleware/rateLimits');
 var paymentsRouter       = require('./routes/payments');
 var mastersRouter        = require('./routes/masters');
 var collegeUsersRouter   = require('./routes/college_users');
@@ -24,9 +26,7 @@ var indexRouter          = require('./routes/index');
 
 var app = express();
 
-// view engine setup
-app.set('views', path.join(__dirname, 'views'));
-app.set('view engine', 'pug');
+// This is a JSON API — no HTML view engine (pug) is used.
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 
@@ -66,22 +66,32 @@ app.use(logger('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
+
+// Uploaded documents are served through an authenticated, ownership-checked
+// route (files live outside the web root). Mount BEFORE express.static so
+// /uploads/* is never served statically.
+app.use('/uploads',       uploadsRouter);
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── Routes ───────────────────────────────────────────────────
+// Tiered rate limits (see middleware/rateLimits.js):
+//   • /auth has its own strict per-route limiters (login/register/OTP).
+//   • public browse routers get the moderate publicLimiter.
+//   • authenticated action routers get the looser authedLimiter.
 app.use('/',              indexRouter);
 app.use('/auth',          authRouter);
-app.use('/colleges',      collegesRouter);
-app.use('/applications',  applicationsRouter);
-app.use('/api',           applicationFormRouter);
-app.use('/college-admin', collegeAdminRouter);
-app.use('/payments',      paymentsRouter);
-app.use('/masters',       mastersRouter);
-app.use('/admin',         collegeUsersRouter);
-app.use('/notifications', notificationsRouter);
-app.use('/certificates',  certificatesRouter);
-app.use('/chat',          chatRouter);
-app.use('/',              documentsRouter);
+app.use('/colleges',      publicLimiter, collegesRouter);
+app.use('/applications',  authedLimiter, applicationsRouter);
+app.use('/api',           authedLimiter, applicationFormRouter);
+app.use('/college-admin', authedLimiter, collegeAdminRouter);
+app.use('/payments',      authedLimiter, paymentsRouter);
+app.use('/masters',       publicLimiter, mastersRouter);
+app.use('/admin',         authedLimiter, collegeUsersRouter);
+app.use('/notifications', authedLimiter, notificationsRouter);
+app.use('/certificates',  authedLimiter, certificatesRouter);
+app.use('/chat',          authedLimiter, chatRouter);
+app.use('/',              authedLimiter, documentsRouter);
 
 // ── 404 handler ──────────────────────────────────────────────
 app.use(function(req, res, next) {

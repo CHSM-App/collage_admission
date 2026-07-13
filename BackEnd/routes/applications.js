@@ -124,6 +124,7 @@ router.get('/', async (req, res) => {
           c.id   AS college_id,   c.name  AS college_name,  c.city AS college_city,
           a.course_id,    COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
           COALESCE(c.application_fee, 0) AS application_fee, ap.total_seats,
+          CASE WHEN JSON_VALUE(c.features_config, '$.payment.college_fee') = 'false' THEN 0 ELSE 1 END AS college_fee_enabled,
           (SELECT COUNT(*) FROM applications ax WHERE ax.admission_period_id = ap.id AND ax.status <> 'draft') AS filled_seats
         ${joins} ${where}
         ORDER BY a.created_at DESC
@@ -361,30 +362,37 @@ router.post('/:id/submit', async (req, res) => {
       app.college_id, app.course_id, app.year_of_study, app.academic_year
     );
 
+    const hasFee = parseFloat(app.application_fee) > 0;
+
     const pool = await db;
     const tx   = pool.transaction();
     await tx.begin();
     try {
-      await tx.request()
-        .input('appId',  mssql.Int,     appId)
-        .input('ptype',  mssql.NVarChar,'application_fee')
-        .input('amount', mssql.Decimal, app.application_fee)
-        .input('userId', mssql.Int,     req.user.id)
-        .input('actor',  mssql.NVarChar, String(req.user.staff_id || req.user.id))
-        .query(`
-          INSERT INTO payments (application_id, payment_type, amount, status, completed_at, paid_by, paid_by_user_id, created_by)
-          VALUES (@appId, @ptype, @amount, 'success', GETDATE(), 'student', @userId, @actor)
-        `);
+      // Only insert a payment record when there is no application fee to collect later.
+      // When hasFee is true, the college will collect via record-application-fee.
+      if (!hasFee) {
+        await tx.request()
+          .input('appId',  mssql.Int,     appId)
+          .input('ptype',  mssql.NVarChar,'application_fee')
+          .input('amount', mssql.Decimal, app.application_fee)
+          .input('userId', mssql.Int,     req.user.id)
+          .input('actor',  mssql.NVarChar, String(req.user.staff_id || req.user.id))
+          .query(`
+            INSERT INTO payments (application_id, payment_type, amount, status, completed_at, paid_by, paid_by_user_id, created_by)
+            VALUES (@appId, @ptype, @amount, 'success', GETDATE(), 'student', @userId, @actor)
+          `);
+      }
 
       await tx.request()
         .input('id',     mssql.Int,      appId)
         .input('regNum', mssql.NVarChar, regNum)
         .input('actor',  mssql.NVarChar, String(req.user.staff_id || req.user.id))
+        .input('feePaid', mssql.Bit,     hasFee ? 0 : 1)
         .query(`
           UPDATE applications
-          SET status = 'submitted',
+          SET status = 'confirmed',
               registration_number = @regNum,
-              application_fee_paid = 1,
+              application_fee_paid = @feePaid,
               submitted_at = GETDATE(),
               updated_at   = GETDATE(),
               status_updated_at = GETDATE(),
@@ -398,7 +406,7 @@ router.post('/:id/submit', async (req, res) => {
       throw txErr;
     }
 
-    await logActivity(appId, 'submitted', 'student', null);
+    await logActivity(appId, 'submitted', req.user?.role === 'college' ? 'college' : 'student', null);
 
     return res.json({
       success: true,

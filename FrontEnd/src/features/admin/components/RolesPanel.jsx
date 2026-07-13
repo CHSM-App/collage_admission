@@ -74,7 +74,7 @@ export default function RolesPanel({ college }) {
   // User form
   const [showUserForm, setShowUserForm] = useState(false)
   const [editingUser,  setEditingUser]  = useState(null)
-  const [userForm,     setUserForm]     = useState({ full_name: '', email: '', password: '', role_id: '' })
+  const [userForm,     setUserForm]     = useState({ full_name: '', email: '', phone: '', password: '', role_id: '' })
   const [userSaving,   setUserSaving]   = useState(false)
   const [userError,    setUserError]    = useState('')
 
@@ -144,14 +144,14 @@ export default function RolesPanel({ college }) {
   // ── User helpers ─────────────────────────────────────────────
   function openNewUser() {
     setEditingUser(null)
-    setUserForm({ full_name: '', email: '', password: '', role_id: roles[0]?.id || '' })
+    setUserForm({ full_name: '', email: '', phone: '', password: '', role_id: roles[0]?.id || '' })
     setUserError('')
     setShowUserForm(true)
   }
 
   function openEditUser(user) {
     setEditingUser(user)
-    setUserForm({ full_name: user.full_name, email: user.email, password: '', role_id: user.role_id })
+    setUserForm({ full_name: user.full_name, email: user.email, phone: user.phone || '', password: '', role_id: user.role_id })
     setUserError('')
     setShowUserForm(true)
   }
@@ -546,6 +546,20 @@ export default function RolesPanel({ college }) {
                       value={userForm.email}
                       onChange={e => setUserForm(f => ({ ...f, email: e.target.value }))}
                       placeholder="rahul@college.edu.in"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                      Phone <span className="font-normal text-slate-400">(for password reset OTP)</span>
+                    </label>
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      maxLength={10}
+                      value={userForm.phone}
+                      onChange={e => setUserForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
+                      placeholder="10-digit mobile"
                       className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                     />
                   </div>

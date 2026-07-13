@@ -286,11 +286,11 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
           .input('actor',  mssql.NVarChar, actorStr)
           .query(`
             UPDATE applications
-            SET status = 'submitted', registration_number = @regNum,
-                application_fee_paid = 1, submitted_at = GETDATE(),
+            SET status = 'confirmed', registration_number = @regNum,
+                application_fee_paid = 1, submitted_at = COALESCE(submitted_at, GETDATE()),
                 updated_at = GETDATE(), status_updated_at = GETDATE(),
                 updated_by = @actor
-            WHERE id = @id AND status = 'draft'
+            WHERE id = @id AND status IN ('draft', 'submitted', 'confirmed')
           `);
 
         await tx.commit();
@@ -936,7 +936,7 @@ router.post('/initiate', initiateValidators, validate, async (req, res) => {
     let description = '';
 
     if (payment_type === 'application_fee') {
-      if (app.status !== 'draft') {
+      if (!['draft', 'submitted'].includes(app.status)) {
         return res.status(400).json({ success: false, message: `Cannot pay application fee for status: ${app.status}` });
       }
       amount      = parseFloat(app.application_fee);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { getDashboardPath, LOGIN_PATHS, REGISTER_PATHS, FORGOT_PASSWORD_PATH } from '../../../app/routePaths.js'
+import { getDashboardPath, LOGIN_PATHS, REGISTER_PATHS, FORGOT_PASSWORD_PATH, COLLEGE_FORGOT_PASSWORD_PATH } from '../../../app/routePaths.js'
 import AuthLayout from '../../../layouts/AuthLayout.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import Input from '../../../shared/components/Input.jsx'
@@ -210,6 +210,14 @@ export default function RoleLoginForm({ role }) {
               </Link>
             </p>
           </div>
+        )}
+
+        {role === 'college' && (
+          <p className="text-center text-sm text-slate-500">
+            <Link to={COLLEGE_FORGOT_PASSWORD_PATH} className="font-semibold text-slate-950 hover:underline">
+              Forgot password?
+            </Link>
+          </p>
         )}
       </form>
     </AuthLayout>

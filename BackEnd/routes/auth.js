@@ -7,7 +7,7 @@
 const express   = require('express');
 const bcrypt    = require('bcryptjs');
 const jwt       = require('jsonwebtoken');
-const rateLimit = require('express-rate-limit');
+const { authLimiter, registerLimiter, otpLimiter } = require('../middleware/rateLimits');
 const router    = express.Router();
 const db        = require('./db');
 const whatsapp  = require('../services/whatsapp');
@@ -56,30 +56,9 @@ function setAuthCookie(res, token) {
   res.cookie('auth_token', token, COOKIE_OPTS);
 }
 
-// 10 attempts per 15 minutes per IP for login endpoints
-// In development/test, raise the limit to avoid blocking E2E test runs
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: process.env.NODE_ENV === 'production' ? 10 : 10000,
-  standardHeaders: true,
-  legacyHeaders: false,
-  skip: (req) => {
-    // Skip rate limiting entirely in test/development environments
-    if (process.env.NODE_ENV !== 'production') return true;
-    const ip = req.ip || '';
-    return ip === '::1' || ip === '127.0.0.1' || ip.includes('127.0.0.1');
-  },
-  message: { message: 'Too many login attempts. Please try again after 15 minutes.' },
-});
-
-// 5 registrations per hour per IP to prevent spam accounts
-const registerLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: 'Too many registration attempts. Please try again after an hour.' },
-});
+// Rate limiters (login, register, OTP) are centralized in
+// middleware/rateLimits.js — env-configurable, per-IP + per-account, with
+// progressive backoff. See that file for the tunable thresholds.
 
 const studentLoginValidators = [
   body('phone').isString().trim().notEmpty().withMessage('Phone number is required.'),
@@ -97,7 +76,7 @@ router.use('/otp',   auditLog);
 router.use('/forgot-password', auditLog);
 
 // ── Student login ───────────────────────────────────────────
-router.post('/login/student',loginLimiter, studentLoginValidators, validate, async (req, res) => {
+router.post('/login/student', ...authLimiter, studentLoginValidators, validate, async (req, res) => {
   const { phone, password } = req.body;
 
   try {
@@ -139,7 +118,7 @@ router.post('/login/student',loginLimiter, studentLoginValidators, validate, asy
 });
 
 // ── College login (admin OR staff — single endpoint) ────────
-router.post('/login/college', loginLimiter,emailLoginValidators, validate, async (req, res) => {
+router.post('/login/college', ...authLimiter, emailLoginValidators, validate, async (req, res) => {
   const { email, password } = req.body;
 
   try {
@@ -247,7 +226,7 @@ router.post('/login/college', loginLimiter,emailLoginValidators, validate, async
 });
 
 // ── Admin login ─────────────────────────────────────────────
-router.post('/login/admin',loginLimiter, emailLoginValidators, validate, async (req, res) => {
+router.post('/login/admin', ...authLimiter, emailLoginValidators, validate, async (req, res) => {
   const { email, password } = req.body;
   try {
     const result = await db.request()
@@ -277,7 +256,7 @@ router.post('/login/admin',loginLimiter, emailLoginValidators, validate, async (
 });
 
 // ── College staff (sub-user) login ──────────────────────────
-router.post('/login/college-user', loginLimiter, emailLoginValidators, validate, async (req, res) => {
+router.post('/login/college-user', ...authLimiter, emailLoginValidators, validate, async (req, res) => {
   const { email, password } = req.body;
   try {
     const result = await db.request()
@@ -356,14 +335,7 @@ router.post('/login/college-user', loginLimiter, emailLoginValidators, validate,
   }
 });
 
-// ── OTP rate limiter: 3 sends per 10 min per IP ─────────────
-const otpLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000,
-  max: 3,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { message: 'Too many OTP requests. Please wait 10 minutes.' },
-});
+// otpLimiter is imported from middleware/rateLimits.js (per-account keyed).
 
 const otpSendValidators = [
   body('full_name').isString().trim().notEmpty().isLength({ max: 150 }).withMessage('Full name is required (max 150 characters).'),
@@ -409,7 +381,7 @@ router.post('/otp/send', otpLimiter, otpSendValidators, validate, async (req, re
     return res.json({ message: 'OTP sent to your WhatsApp number. Valid for 10 minutes.' });
   } catch (err) {
     logger.error({ err }, 'OTP send error');
-    return res.status(500).json({ message: err.message || 'Failed to send OTP. Please try again.' });
+    return res.status(500).json({ message: 'Failed to send OTP. Please try again.' });
   }
 });
 
@@ -461,10 +433,15 @@ router.post('/otp/verify', otpVerifyValidators, validate, async (req, res) => {
 
 // ── Student registration ────────────────────────────────────
 router.post('/register/student', registerLimiter, async (req, res) => {
-  const { full_name, email, password, phone, dob, gender, address, city, category } = req.body;
+  const { full_name, password, phone, dob, gender, address, city, category } = req.body;
 
-  if (!full_name || !email) {
+  if (!full_name || !req.body.email) {
     return res.status(400).json({ message: 'Name and email are required.' });
+  }
+  // Normalize email (stored lowercased). Duplicate emails are allowed.
+  const email = String(req.body.email).trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ message: 'A valid email address is required.' });
   }
   // If no password provided (college-registered student), generate a random one.
   // The student will use Forgot Password to set their own password.
@@ -473,16 +450,14 @@ router.post('/register/student', registerLimiter, async (req, res) => {
   if (pwdErr) return res.status(400).json({ message: pwdErr });
 
   try {
+    // Duplicate emails are allowed (students log in by phone, not email), so we
+    // only look up existing students by PHONE. Phone stays unique.
     const exists = await db.request()
-      .input('email', email)
       .input('phone', phone ? phone.trim() : null)
-      .query('SELECT id, email, phone FROM students WHERE email = @email OR (phone IS NOT NULL AND phone = @phone)');
+      .query('SELECT id, full_name, email, phone FROM students WHERE phone IS NOT NULL AND phone = @phone');
 
     if (exists.recordset.length > 0) {
       const dup = exists.recordset[0];
-      if (dup.email.toLowerCase() === email.toLowerCase()) {
-        return res.status(409).json({ message: 'An account with this email already exists.' });
-      }
 
       // Phone collision — check if confirmed somewhere
       const confirmedCheck = await db.request()
@@ -553,6 +528,11 @@ router.post('/register/student', registerLimiter, async (req, res) => {
       },
     });
   } catch (err) {
+    // UNIQUE constraint violation — only phone is unique now (email can duplicate).
+    // A concurrent request may have inserted the same phone between check and insert.
+    if (err.number === 2627 || err.number === 2601) {
+      return res.status(409).json({ message: 'An account with this phone number already exists.' });
+    }
     logger.error({ err }, 'Student registration error');
     return res.status(500).json({ message: 'Server error. Please try again.' });
   }
@@ -584,7 +564,7 @@ router.post('/forgot-password/send-otp', otpLimiter,
     return res.json({ message: 'OTP sent to your WhatsApp number. Valid for 10 minutes.' });
   } catch (err) {
     logger.error({ err }, 'Forgot password OTP error');
-    return res.status(500).json({ message: err.message || 'Failed to send OTP. Please try again.' });
+    return res.status(500).json({ message: 'Failed to send OTP. Please try again.' });
   }
 });
 
@@ -596,7 +576,7 @@ const forgotPasswordResetValidators = [
 
 // ── Forgot password — verify OTP + reset password ────────────
 // POST /auth/forgot-password/reset   body: { phone, otp, new_password }
-router.post('/forgot-password/reset', forgotPasswordResetValidators, validate, async (req, res) => {
+router.post('/forgot-password/reset', ...authLimiter, forgotPasswordResetValidators, validate, async (req, res) => {
   const { phone, otp, new_password } = req.body;
 
   const pwdErr = validatePassword(new_password);
@@ -620,6 +600,112 @@ router.post('/forgot-password/reset', forgotPasswordResetValidators, validate, a
     return res.json({ message: 'Password reset successful. You can now log in.' });
   } catch (err) {
     logger.error({ err }, 'Password reset error');
+    return res.status(500).json({ message: 'Server error. Please try again.' });
+  }
+});
+
+// ── College forgot password (admin + staff) ──────────────────
+// Identify by email: college admin (colleges.admin_email → college phone) or
+// staff (college_users.email → staff phone). OTP is sent to the found phone.
+//
+// Resolves the account for a given email. Returns { type, id, phone, phoneRaw } or null.
+async function resolveCollegeAccount(email) {
+  const em = email.trim().toLowerCase();
+  // 1) College admin
+  const adminRes = await db.request()
+    .input('em', mssql.NVarChar, em)
+    .query('SELECT id, phone FROM colleges WHERE LOWER(admin_email) = @em');
+  if (adminRes.recordset.length) {
+    const row = adminRes.recordset[0];
+    return { type: 'college_admin', id: row.id, phoneRaw: row.phone };
+  }
+  // 2) Staff
+  const staffRes = await db.request()
+    .input('em', mssql.NVarChar, em)
+    .query('SELECT id, phone FROM college_users WHERE LOWER(email) = @em AND is_active = 1');
+  if (staffRes.recordset.length) {
+    const row = staffRes.recordset[0];
+    return { type: 'college_staff', id: row.id, phoneRaw: row.phone };
+  }
+  return null;
+}
+
+// POST /auth/forgot-password/college/send-otp   body: { email }
+router.post('/forgot-password/college/send-otp', otpLimiter,
+  body('email').isEmail().normalizeEmail().withMessage('A valid email address is required.'),
+  validate,
+  async (req, res) => {
+  const { email } = req.body;
+  // Generic response either way so we don't reveal which emails exist.
+  const generic = { message: 'If this email is registered, an OTP has been sent to the associated phone.' };
+  try {
+    const account = await resolveCollegeAccount(email);
+    if (!account || !account.phoneRaw || !/^[6-9]\d{9}$/.test(String(account.phoneRaw).replace(/\D/g, ''))) {
+      // No account, or no usable phone on file — tell the user to contact support/admin.
+      if (account && !account.phoneRaw) {
+        return res.status(400).json({ message: 'No phone number is on file for this account. Please contact your college admin to set one.' });
+      }
+      return res.json(generic);
+    }
+
+    const rawPhone  = String(account.phoneRaw).replace(/\D/g, '');
+    const normPhone = whatsapp.normalisePhone(rawPhone);
+    const otp       = String(Math.floor(100000 + Math.random() * 900000));
+
+    await whatsapp.sendOtp(normPhone, otp);
+    await saveOtp(normPhone, otp, 'college_password_reset', {
+      accountType: account.type, accountId: account.id, email: email.trim().toLowerCase(),
+    });
+
+    return res.json({ message: 'OTP sent to the registered WhatsApp number. Valid for 10 minutes.' });
+  } catch (err) {
+    logger.error({ err }, 'College forgot-password OTP error');
+    return res.status(500).json({ message: 'Failed to send OTP. Please try again.' });
+  }
+});
+
+// POST /auth/forgot-password/college/reset   body: { email, otp, new_password }
+router.post('/forgot-password/college/reset', ...authLimiter,
+  body('email').isEmail().normalizeEmail().withMessage('A valid email address is required.'),
+  body('otp').isString().trim().matches(/^\d{6}$/).withMessage('OTP must be a 6-digit number.'),
+  body('new_password').isString().notEmpty().withMessage('New password is required.'),
+  validate,
+  async (req, res) => {
+  const { email, otp, new_password } = req.body;
+  const pwdErr = validatePassword(new_password);
+  if (pwdErr) return res.status(400).json({ message: pwdErr });
+
+  try {
+    const account = await resolveCollegeAccount(email);
+    if (!account || !account.phoneRaw) {
+      return res.status(400).json({ message: 'Invalid request. Please start the reset again.' });
+    }
+    const normPhone = whatsapp.normalisePhone(String(account.phoneRaw).replace(/\D/g, ''));
+
+    const { valid, reason, pendingData } = await verifyAndConsumeOtp(normPhone, otp, 'college_password_reset');
+    if (!valid) return res.status(400).json({ message: reason });
+
+    // Ensure the OTP was issued for THIS email/account (defence in depth).
+    if (!pendingData || pendingData.email !== email.trim().toLowerCase()) {
+      return res.status(400).json({ message: 'This OTP does not match the account. Please start again.' });
+    }
+
+    const hash = await bcrypt.hash(new_password, 10);
+    if (account.type === 'college_admin') {
+      await db.request()
+        .input('id', mssql.Int, account.id)
+        .input('hash', mssql.NVarChar, hash)
+        .query('UPDATE colleges SET admin_password_hash = @hash, updated_by = \'self\' WHERE id = @id');
+    } else {
+      await db.request()
+        .input('id', mssql.Int, account.id)
+        .input('hash', mssql.NVarChar, hash)
+        .query('UPDATE college_users SET password_hash = @hash, updated_by = \'self\' WHERE id = @id');
+    }
+
+    return res.json({ message: 'Password reset successful. You can now log in.' });
+  } catch (err) {
+    logger.error({ err }, 'College password reset error');
     return res.status(500).json({ message: 'Server error. Please try again.' });
   }
 });

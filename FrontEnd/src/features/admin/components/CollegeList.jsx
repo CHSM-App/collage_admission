@@ -3,6 +3,7 @@ import { getAdminColleges, updateAdminCollege } from '../../../services/adminSer
 import Pagination from '../../../shared/components/Pagination.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import RolesPanel      from './RolesPanel.jsx'
+import FeaturesPanel  from './FeaturesPanel.jsx'
 import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
 import FacultyMaster   from '../../college/pages/masters/FacultyMaster.jsx'
 import CourseMaster    from '../../college/pages/masters/CourseMaster.jsx'
@@ -25,6 +26,7 @@ const TABS = [
   { key: 'bank',       label: 'Bank' },
   { key: 'fees',       label: 'Fees' },
   { key: 'categories', label: 'Categories' },
+  { key: 'features',   label: 'Features' },
 ]
 
 const LIMIT = 20
@@ -204,6 +206,7 @@ export default function CollegeList() {
           {tab === 'bank'      && <BankMaster       collegeId={selected.id} />}
           {tab === 'fees'       && <FeesMaster      collegeId={selected.id} />}
           {tab === 'categories' && <CategoryMaster  collegeId={selected.id} />}
+          {tab === 'features'   && <FeaturesPanel   collegeId={selected.id} />}
         </div>
       </div>
     )

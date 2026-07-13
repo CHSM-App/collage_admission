@@ -47,6 +47,13 @@ export const forgotPasswordSendOtp = (phone) =>
 export const forgotPasswordReset = (data) =>
   api.post('auth/forgot-password/reset', data)
 
+// College (admin + staff) forgot password — identify by email, OTP to phone.
+export const collegeForgotPasswordSendOtp = (email) =>
+  api.post('auth/forgot-password/college/send-otp', { email })
+
+export const collegeForgotPasswordReset = (data) =>
+  api.post('auth/forgot-password/college/reset', data)
+
 export const registerStudentByCollege = (data) =>
   api.post('auth/register/student', data)
 
@@ -57,5 +64,7 @@ export const authService = {
   verifyOtp,
   forgotPasswordSendOtp,
   forgotPasswordReset,
+  collegeForgotPasswordSendOtp,
+  collegeForgotPasswordReset,
   registerStudentByCollege,
 }

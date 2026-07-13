@@ -5,9 +5,9 @@ var mssql  = require('mssql');
 
 const START_TIME = Date.now();
 
-/* GET home page. */
-router.get('/', function(req, res, next) {
-  res.render('index', { title: 'Express' });
+/* GET home page — API root. Returns JSON (no HTML view engine). */
+router.get('/', function(req, res) {
+  res.json({ success: true, service: 'College Admission API', status: 'ok' });
 });
 
 /* GET /health — uptime monitoring and load balancer probe */

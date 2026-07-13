@@ -39,6 +39,12 @@ const initialState = {
     category:'', special_status:'', fees_category:'',
     fees_category_override: false, fees_category_override_remark: '',
     division: '', degree_course_code: '',
+    admitted_category: '', other_category: '', admission_quota: '',
+    date_of_admission: '', is_diploma_direct_sy: false, name_as_on_aadhaar: '', son_of: '',
+    native_address: '', native_taluka: '', native_district: '',
+    parent_mobile: '', land_line: '', guardian_relation: '', semester: '',
+    father_surname: '', father_first_name: '', father_middle_name: '',
+    mother_surname: '', mother_first_name: '', mother_middle_name: '',
     birth_date:'', birth_place:'', birth_taluka:'', birth_district:'', birth_state:'',
     nationality:'Indian', marital_status:'', religion:'', caste:'', mother_tongue:'',
     height_cm:'', weight_kg:'', blood_group:'',
@@ -73,6 +79,7 @@ function reducer(state, action) {
         appStatus:          action.appStatus,
         applicationFeePaid: action.applicationFeePaid,
         correctionNote:     action.correctionNote || null,
+        features:           action.features || null,
         loading:            false,
       }
     case 'SET_DATA':
@@ -122,6 +129,26 @@ function buildAutofill(app, lastApp, profile, user) {
     fees_category_override_remark: app.fees_category_override_remark || '',
     division:            app.app_division            || '',
     degree_course_code:  app.app_degree_course_code  || '',
+    admitted_category:   app.app_admitted_category   || '',
+    other_category:      app.app_other_category      || '',
+    admission_quota:     app.app_admission_quota     || '',
+    date_of_admission:   app.app_date_of_admission   ? String(app.app_date_of_admission).slice(0, 10) : '',
+    is_diploma_direct_sy: !!app.app_is_diploma_direct_sy,
+    name_as_on_aadhaar:  app.app_name_as_on_aadhaar  || '',
+    son_of:              app.app_son_of              || '',
+    native_address:      app.app_native_address      || '',
+    native_taluka:       app.app_native_taluka       || '',
+    native_district:     app.app_native_district     || '',
+    parent_mobile:       app.app_parent_mobile       || '',
+    land_line:           app.app_land_line           || '',
+    guardian_relation:   app.app_guardian_relation   || '',
+    semester:            app.app_semester != null ? String(app.app_semester) : '',
+    father_surname:      app.app_father_surname      || '',
+    father_first_name:   app.app_father_first_name   || '',
+    father_middle_name:  app.app_father_middle_name  || '',
+    mother_surname:      app.app_mother_surname      || '',
+    mother_first_name:   app.app_mother_first_name   || '',
+    mother_middle_name:  app.app_mother_middle_name  || '',
 
     birth_date:         formatDate(appPrefix('birth_date')) || formatDate(profile.birth_date) || '',
     birth_place:        appPrefix('birth_place')     || profile.birth_place    || '',
@@ -193,7 +220,7 @@ export function useApplicationForm() {
         }
 
         const formRes = await getApplicationForm(appId)
-        const { application: app, documents, previous_exams } = formRes.data.data
+        const { application: app, features, documents, previous_exams } = formRes.data.data
 
         const fillRes = await getStudentAutofill(user.id)
         const { profile, last_application } = fillRes.data.data
@@ -243,6 +270,7 @@ export function useApplicationForm() {
           appStatus:          app.status,
           applicationFeePaid: !!app.application_fee_paid,
           correctionNote:     app.correction_note || null,
+          features,
         })
       } catch (err) {
         dispatch({ type: 'SET_GLOBAL_ERR', message: err?.response?.data?.message || 'Failed to load application.' })
@@ -301,7 +329,7 @@ export function useApplicationForm() {
     dispatch({ type: 'SET_STEP', step: 6 })
   }
 
-  const { data, currentStep, loading, saving, errors, globalError, applicationId, appStatus, applicationFeePaid, correctionNote } = state
+  const { data, currentStep, loading, saving, errors, globalError, applicationId, appStatus, applicationFeePaid, correctionNote, features } = state
   const readOnly = !!appStatus && !EDITABLE_STATUSES.includes(appStatus)
 
   return {
@@ -316,6 +344,7 @@ export function useApplicationForm() {
     appStatus,
     applicationFeePaid,
     correctionNote,
+    features,
     readOnly,
     handleChange,
     setField,

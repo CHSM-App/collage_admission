@@ -47,6 +47,7 @@ export default function ApplyWizard() {
     appStatus,
     applicationFeePaid,
     correctionNote,
+    features,
     readOnly,
     handleChange,
     setField,
@@ -80,7 +81,7 @@ export default function ApplyWizard() {
     )
   }
 
-  const stepProps = { data, errors, globalError, saving, onChange: handleChange, setField, readOnly }
+  const stepProps = { data, errors, globalError, saving, onChange: handleChange, setField, readOnly, features }
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -177,6 +178,7 @@ export default function ApplyWizard() {
               {...stepProps}
               appId={applicationId}
               applicationFeePaid={applicationFeePaid}
+              features={features}
               onBack={() => goStep(5)}
               onEditStep={goStep}
               onDone={() => navigate(`/student/dashboard?section=applications`)}

@@ -6,6 +6,7 @@ import { getSubjectSelections } from '../../../services/applicationService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
 import { useDocumentPreview } from '../hooks/useDocumentPreview.js'
+import { useCollegeFeatures } from '../hooks/useCollegeFeatures.js'
 import CollegeCollectPayPanel from '../components/CollegeCollectPayPanel.jsx'
 import { SkeletonDetail, SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
@@ -28,18 +29,20 @@ function filterExamsByYear(exams, yearOfStudy) {
   return Object.fromEntries(Object.entries(exams || {}).filter(([type]) => allowed.includes(type)))
 }
 
-const STATUS_FLOW = {
-  submitted:                { label: 'Review Pending — awaiting college review' },
-  under_review:             { label: 'Review Pending — awaiting college review' },
-  correction_requested:     { label: 'Correction Pending — waiting for student to resubmit' },
-  correction_done:          { label: 'Correction Review — student has resubmitted' },
-  doc_verified:             { label: 'Student Awaited — student must visit college for doc check' },
-  confirmed:                { label: 'Fees Pending — student must pay college fee' },
-  fees_paid:                { label: 'Confirmed — admission complete' },
-  roll_assigned:            { label: 'Roll assigned — subject selection pending' },
-  enrolled:                 { label: 'Enrolled' },
-  rejected:                 { label: 'Rejected' },
-  cancelled:                { label: 'Cancelled' },
+function buildStatusFlow(collegeFeeEnabled) {
+  return {
+    submitted:            { label: 'Review Pending — awaiting college review' },
+    under_review:         { label: 'Review Pending — awaiting college review' },
+    correction_requested: { label: 'Correction Pending — waiting for student to resubmit' },
+    correction_done:      { label: 'Correction Review — student has resubmitted' },
+    doc_verified:         { label: 'Student Awaited — student must visit college for doc check' },
+    confirmed:            { label: collegeFeeEnabled ? 'Fees Pending — student must pay college fee' : 'Admission Confirmed' },
+    fees_paid:            { label: 'Confirmed — admission complete' },
+    roll_assigned:        { label: 'Roll assigned — subject selection pending' },
+    enrolled:             { label: 'Enrolled' },
+    rejected:             { label: 'Rejected' },
+    cancelled:            { label: 'Cancelled' },
+  }
 }
 
 export default function ApplicationDetail({ collegeId, appId }) {
@@ -62,6 +65,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
   const canReviewD  = canWrite('review_documents')
   const canFees     = canWrite('collect_fees')
   const canEditApp  = canWrite('edit_application')
+  const { collegeFeeEnabled, features: hookFeatures } = useCollegeFeatures(collegeId)
   const toast       = useToast()
   const [app, setApp]         = useState(null)
   const [loading, setLoading] = useState(true)
@@ -139,10 +143,14 @@ export default function ApplicationDetail({ collegeId, appId }) {
 
   async function doConfirm() {
     setFeeError('')
-    const validInst = installments.filter(i => i.amount !== '' && parseFloat(i.amount) > 0)
-    if (validInst.length === 0) { setFeeError('Enter at least one installment amount.'); return }
-    const instTotal = validInst.reduce((s, i) => s + parseFloat(i.amount), 0)
-    if (feeTotal != null && instTotal > feeTotal + 0.01) { setFeeError(`Installment total (₹${instTotal.toLocaleString('en-IN')}) cannot exceed fee total (₹${feeTotal.toLocaleString('en-IN')}).`); return }
+    const validInst = collegeFeeEnabled
+      ? installments.filter(i => i.amount !== '' && parseFloat(i.amount) > 0)
+      : []
+    if (collegeFeeEnabled && validInst.length === 0) { setFeeError('Enter at least one installment amount.'); return }
+    if (collegeFeeEnabled) {
+      const instTotal = validInst.reduce((s, i) => s + parseFloat(i.amount), 0)
+      if (feeTotal != null && instTotal > feeTotal + 0.01) { setFeeError(`Installment total (₹${instTotal.toLocaleString('en-IN')}) cannot exceed fee total (₹${feeTotal.toLocaleString('en-IN')}).`); return }
+    }
     setActing(true)
     setError('')
     try {
@@ -151,7 +159,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
         division:              division || null,
         document_ids_verified: app?.documents?.map(d => d.id) || [],
       })
-      toast.success('Admission confirmed. Student can now pay the college fee.')
+      toast.success(collegeFeeEnabled ? 'Admission confirmed. Student can now pay the college fee.' : 'Admission confirmed.')
       goBackToInbox()
     } catch (err) {
       const msg = err?.response?.data?.message || 'Action failed.'
@@ -164,9 +172,13 @@ export default function ApplicationDetail({ collegeId, appId }) {
   if (loading) return <div className="p-6"><SkeletonDetail /></div>
   if (!app)    return <p className="text-red-500 p-6">{error || 'Application not found.'}</p>
 
+  const STATUS_FLOW = buildStatusFlow(collegeFeeEnabled)
   const flowInfo = STATUS_FLOW[app.status] || { label: app.status }
   const docIds   = app.documents?.map(d => d.id) || []
   const d        = app   // alias for brevity
+  // Prefer the features embedded in the application detail (authoritative,
+  // never stale) over the separately-cached self-features hook.
+  const features = app.features || hookFeatures
 
   return (
     <section className="space-y-5 max-w-3xl">
@@ -203,7 +215,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
               Edit Application
             </button>
           )}
-          <StatusBadge status={d.status} />
+          <StatusBadge status={d.status} collegeFeeEnabled={collegeFeeEnabled} />
         </div>
       </div>
 
@@ -216,23 +228,54 @@ export default function ApplicationDetail({ collegeId, appId }) {
         <Row label="Course"        value={d.course_name} />
         <Row label="Year"          value={YEAR_LABEL[d.year_of_study]} />
         <Row label="Academic Year" value={d.academic_year} />
-        <Row label="Fees Category" value={d.fees_category} />
+        {collegeFeeEnabled && <Row label="Fees Category" value={d.fees_category} />}
       </Section>
 
       {/* ── Personal Details ── */}
       <Section title="Personal Details">
         <Row label="Full Name"     value={[d.app_surname, d.app_first_name, d.app_middle_name].filter(Boolean).join(' ')} />
+        {features?.admission_form?.name_as_on_aadhaar === true && (
+          <Row label="Name as on Aadhaar" value={d.app_name_as_on_aadhaar} />
+        )}
+        {features?.admission_form?.son_of === true && (
+          <Row label="S/o" value={d.app_son_of} />
+        )}
         <Row label="Mother's Name" value={d.app_mother_name} />
+        {features?.admission_form?.semester === true && (
+          <Row label="Semester" value={d.app_semester ? `Semester ${d.app_semester}` : ''} />
+        )}
+        {features?.admission_form?.date_of_admission === true && (
+          <Row label="Date of Admission" value={fmtDate(d.app_date_of_admission)} />
+        )}
+        {features?.admission_form?.diploma_direct_sy === true && (
+          <Row label="Diploma (Direct SY)" value={d.app_is_diploma_direct_sy ? 'Yes' : 'No'} />
+        )}
         <Row label="Gender"        value={d.app_sex} />
         <Row label="Mobile"        value={d.app_mobile} />
+        {d.app_parent_mobile && <Row label="Parent's Mobile" value={d.app_parent_mobile} />}
+        {d.app_land_line && <Row label="Land Line" value={d.app_land_line} />}
         <Row label="Email"         value={d.app_email} />
+        {d.app_guardian_relation && <Row label="Guardian's Relation" value={d.app_guardian_relation} />}
         <Row label="Category"       value={d.app_category} />
+        {features?.admission_form?.admitted_category === true && (
+          <Row label="Admitted Category" value={d.app_admitted_category} />
+        )}
+        {features?.admission_form?.admission_quota === true && (
+          <Row label="Admission Quota" value={d.app_admission_quota} />
+        )}
         <Row label="Special Status" value={d.app_special_status} />
         <Row
           label="Address"
           value={[d.app_address, d.app_taluka, d.app_district, d.app_state].filter(Boolean).join(', ')}
           wide
         />
+        {[d.app_native_address, d.app_native_taluka, d.app_native_district].some(Boolean) && (
+          <Row
+            label="Native Address"
+            value={[d.app_native_address, d.app_native_taluka, d.app_native_district].filter(Boolean).join(', ')}
+            wide
+          />
+        )}
       </Section>
 
       {/* ── Other Details ── */}
@@ -279,8 +322,8 @@ export default function ApplicationDetail({ collegeId, appId }) {
         <p className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</p>
       )}
 
-      {/* ── Fee Amounts (shown after confirmation — editable until student pays) ── */}
-      {['confirmed', 'fees_paid'].includes(d.status) && canFees && (
+      {/* ── Fee Amounts — hidden when college_fee feature is off ── */}
+      {collegeFeeEnabled && ['confirmed', 'fees_paid'].includes(d.status) && canFees && (
         <FeeAmountPanel
           collegeId={collegeId}
           appId={appId}
@@ -291,8 +334,8 @@ export default function ApplicationDetail({ collegeId, appId }) {
         />
       )}
 
-      {/* ── Collect Fee Payment ── */}
-      {((['confirmed', 'fees_paid'].includes(d.status) || !!d.has_pending_link) && canFees) && (
+      {/* ── Collect Fee Payment — hidden when college_fee feature is off ── */}
+      {collegeFeeEnabled && ((['confirmed', 'fees_paid'].includes(d.status) || !!d.has_pending_link) && canFees) && (
         <CollegeCollectPayPanel
           appId={appId}
           collegeId={collegeId}
@@ -335,19 +378,26 @@ export default function ApplicationDetail({ collegeId, appId }) {
       {canReview && ['doc_verified', 'scrutiny_accepted', 'doc_verification_pending'].includes(d.status) && (
         <div className="space-y-3">
           <p className="text-sm text-slate-600">
-            Student has been notified to visit the college. Once the student visits and documents are verified in person, set the fee and confirm admission.
+            {collegeFeeEnabled
+              ? 'Student has been notified to visit the college. Once the student visits and documents are verified in person, set the fee and confirm admission.'
+              : 'Student has been notified to visit the college. Once the student visits and documents are verified in person, confirm the admission.'
+            }
           </p>
           {!showConfirm ? (
             <div className="flex flex-wrap gap-3">
               <Button loading={acting} onClick={() => { setShowConfirm(true); setFeeError('') }}>
-                Student Visited — Set Fee &amp; Confirm
+                {collegeFeeEnabled ? 'Student Visited — Set Fee & Confirm' : 'Student Visited — Confirm Admission'}
               </Button>
               <Button variant="secondary" onClick={() => setShowCancel(v => !v)}>Cancel</Button>
             </div>
           ) : (
             <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-4">
-              <p className="text-sm font-semibold text-emerald-800">Verify Documents &amp; Set Fee Amounts</p>
-              <p className="text-xs text-emerald-700">Enter the fee details to confirm admission. The student will be notified to pay.</p>
+              <p className="text-sm font-semibold text-emerald-800">
+                {collegeFeeEnabled ? 'Verify Documents & Set Fee Amounts' : 'Verify Documents & Confirm Admission'}
+              </p>
+              {collegeFeeEnabled && (
+                <p className="text-xs text-emerald-700">Enter the fee details to confirm admission. The student will be notified to pay.</p>
+              )}
 
               {/* Division selector */}
               {divisions.length > 0 && (
@@ -388,10 +438,10 @@ export default function ApplicationDetail({ collegeId, appId }) {
                 </div>
               )}
 
-              {/* Fee breakdown table */}
-              {divisions.length > 0 && !division ? (
+              {/* Fee breakdown table — hidden when college_fee feature is off */}
+              {collegeFeeEnabled && divisions.length > 0 && !division ? (
                 <p className="text-xs text-slate-500 italic">← Select a division above to see the fee breakdown.</p>
-              ) : !feeTotalLoading && feeStudentType && (
+              ) : collegeFeeEnabled && !feeTotalLoading && feeStudentType && (
                 <p className="text-xs text-slate-500">
                   Showing fees for <span className="font-semibold text-slate-700">{feeStudentType === 'Grand' ? 'Grant' : feeStudentType === 'NonGrand' ? 'Non-Grant' : feeStudentType}</span> student type
                   {division && (() => {
@@ -400,7 +450,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
                   })()}
                 </p>
               )}
-              {divisions.length > 0 && !division ? null : feeTotalLoading ? (
+              {collegeFeeEnabled && (divisions.length > 0 && !division ? null : feeTotalLoading ? (
                 <p className="text-xs text-slate-400">Computing fee…</p>
               ) : feeBreakdown.length > 0 ? (
                 <div className="rounded-lg border border-emerald-200 overflow-hidden">
@@ -435,10 +485,10 @@ export default function ApplicationDetail({ collegeId, appId }) {
                 </div>
               ) : (
                 <p className="text-xs text-red-500">No fees configured for this division. Please set up Classwise Fees in Fees Master for this class and student type.</p>
-              )}
+              ))}
 
-              {/* Installment plan — only show once fee is loaded */}
-              {(divisions.length === 0 || division) && !feeTotalLoading && feeTotal != null && (
+              {/* Installment plan — only show once fee is loaded and college_fee is on */}
+              {collegeFeeEnabled && (divisions.length === 0 || division) && !feeTotalLoading && feeTotal != null && (
                 <InstallmentPlanInput
                   installments={installments}
                   onChange={setInstallments}
@@ -513,6 +563,8 @@ export default function ApplicationDetail({ collegeId, appId }) {
 
 const ACTION_META = {
   submitted:              { label: 'Application Submitted',           color: 'bg-blue-500',    actor: 'Student' },
+  application_fee_paid:   { label: 'Application Fee Paid',            color: 'bg-emerald-500', actor: 'College' },
+  application_updated:    { label: 'Application Updated',             color: 'bg-indigo-500',  actor: 'College' },
   correction_requested:   { label: 'Correction Requested',            color: 'bg-orange-500',  actor: 'College' },
   correction_resubmitted: { label: 'Correction Resubmitted',          color: 'bg-sky-500',     actor: 'Student' },
   accepted:               { label: 'Application Accepted',            color: 'bg-teal-500',    actor: 'College' },
@@ -539,7 +591,10 @@ function ActivityTimeline({ app }) {
       const isPartial = a.note && /remaining/i.test(a.note)
       label = isPartial ? 'College Fee Partially Paid' : 'College Fee Fully Paid'
     }
-    return { label, color: meta.color, actor: meta.actor, date: a.created_at, note: a.action === 'subject_selected' ? null : a.note }
+    const actor = a.actor_role
+      ? a.actor_role.charAt(0).toUpperCase() + a.actor_role.slice(1)
+      : meta.actor
+    return { label, color: meta.color, actor, date: a.created_at, note: a.action === 'subject_selected' ? null : a.note }
   })
 
   return (
@@ -708,14 +763,14 @@ function Row({ label, value, wide }) {
   )
 }
 
-function StatusBadge({ status }) {
+function StatusBadge({ status, collegeFeeEnabled }) {
   const colors = {
     submitted:            'bg-blue-100 text-blue-700',
     under_review:         'bg-blue-100 text-blue-700',
     correction_requested: 'bg-orange-100 text-orange-700',
     correction_done:      'bg-sky-100 text-sky-700',
     doc_verified:         'bg-teal-100 text-teal-700',
-    confirmed:            'bg-amber-100 text-amber-700',
+    confirmed:            collegeFeeEnabled ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700',
     fees_paid:            'bg-emerald-100 text-emerald-700',
     roll_assigned:        'bg-violet-100 text-violet-700',
     enrolled:             'bg-green-100 text-green-800',
@@ -728,7 +783,7 @@ function StatusBadge({ status }) {
     correction_requested: 'Correction Pending',
     correction_done:      'Correction Review',
     doc_verified:         'Student Awaited',
-    confirmed:            'Fees Pending',
+    confirmed:            collegeFeeEnabled ? 'Fees Pending' : 'Admission Confirmed',
     fees_paid:            'Confirmed',
     roll_assigned:        'Roll Assigned',
     enrolled:             'Enrolled',

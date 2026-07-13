@@ -18,39 +18,69 @@ const db        = require('./db')
 const mssql     = require('mssql')
 const { authenticate } = require('../middleware/auth')
 const logger    = require('../config/logger')
-const { fileTypeFromBuffer } = require('file-type')
+// file-type v22 is ESM-only; load it lazily via dynamic import from CommonJS.
+const fileTypeFromBuffer = async (buf) => (await import('file-type')).fileTypeFromBuffer(buf)
 
 // All document routes require authentication
 router.use(authenticate)
 
 // ── Upload storage ───────────────────────────────────────────
-const UPLOAD_ROOT = path.join(__dirname, '..', 'public', 'uploads', 'students')
+// Stored OUTSIDE the web root (not under public/) so uploads are never served
+// statically or executed. Files are streamed back through an authenticated
+// route (see routes/uploads.js) with nosniff + inline disposition.
+const UPLOAD_ROOT = path.join(__dirname, '..', 'uploads', 'students')
+const crypto = require('crypto')
+
+// Extension is decided from the detected content type after upload, not from
+// the client-supplied filename. Map the trusted mime -> safe extension.
+const MIME_TO_EXT = {
+  'image/jpeg': '.jpg',
+  'image/png':  '.png',
+  'image/webp': '.webp',
+  'application/pdf': '.pdf',
+}
+
+const EXT_TO_MIME = {
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.png': 'image/png', '.webp': 'image/webp', '.pdf': 'application/pdf',
+}
+
+// Resolve a stored file_path (e.g. "/uploads/students/12/abc.png") to an
+// absolute path under UPLOAD_ROOT, guarding against path traversal.
+function resolveUploadPath(filePath) {
+  const rel = String(filePath || '').replace(/^\/?uploads\/students\/?/, '')
+  const abs = path.join(UPLOAD_ROOT, rel)
+  // Ensure the resolved path stays inside UPLOAD_ROOT
+  if (!abs.startsWith(path.resolve(UPLOAD_ROOT))) return null
+  return abs
+}
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // req.body is not yet parsed when multer runs destination, so use query param
-    const studentId = req.query.student_id || 'unknown'
-    const dir = path.join(UPLOAD_ROOT, String(studentId))
+    // req.body is not yet parsed when multer runs destination, so use query param.
+    // Sanitize to digits only — student_id is numeric; this blocks path traversal.
+    const studentId = String(req.query.student_id || 'unknown').replace(/[^0-9]/g, '') || 'unknown'
+    const dir = path.join(UPLOAD_ROOT, studentId)
     fs.mkdirSync(dir, { recursive: true })
     cb(null, dir)
   },
   filename: (req, file, cb) => {
-    const ext  = path.extname(file.originalname).toLowerCase()
-    const base = path.basename(file.originalname, ext).replace(/[^a-z0-9_\-]/gi, '_').substring(0, 40)
-    const name = `${base}_${Date.now()}${ext}`
-    cb(null, name)
+    // Random, non-guessable name with NO user-controlled extension. The real
+    // extension is appended after magic-byte validation confirms the type.
+    cb(null, `${Date.now()}_${crypto.randomBytes(8).toString('hex')}`)
   },
 })
 
 const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
 const MAX_SIZE_MB  = 5
+const ALLOWED_TYPES_MESSAGE = 'Only JPG, PNG, WEBP, and PDF files are allowed.'
 
 const upload = multer({
   storage,
   limits: { fileSize: MAX_SIZE_MB * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (!ALLOWED_MIME.includes(file.mimetype)) {
-      return cb(new Error('Only JPG, PNG, WEBP, and PDF files are allowed.'))
+      return cb(new Error(ALLOWED_TYPES_MESSAGE))
     }
     cb(null, true)
   },
@@ -147,7 +177,20 @@ router.post('/student-documents', upload.single('file'), async (req, res) => {
     return res.status(400).json({ success: false, message: 'Invalid file type. Only JPG, PNG, WEBP, and PDF files are allowed.' })
   }
 
-  const relativePath = `/uploads/students/${student_id}/${req.file.filename}`
+  // Append the extension derived from the DETECTED type (not the client name),
+  // then rename the stored file to match.
+  const safeExt   = MIME_TO_EXT[detectedMime]
+  const finalName = `${req.file.filename}${safeExt}`
+  try {
+    fs.renameSync(req.file.path, path.join(path.dirname(req.file.path), finalName))
+  } catch (e) {
+    fs.unlink(req.file.path, () => {})
+    logger.error({ err: e }, 'failed to finalize upload')
+    return res.status(500).json({ success: false, message: 'Server error.' })
+  }
+
+  const sanitizedStudentId = String(student_id).replace(/[^0-9]/g, '')
+  const relativePath = `/uploads/students/${sanitizedStudentId}/${finalName}`
 
   try {
     // Always insert a new row — each upload creates its own student_document record.
@@ -194,8 +237,8 @@ router.delete('/student-documents/:id', async (req, res) => {
     }
 
     // Delete file from disk
-    const filePath = path.join(__dirname, '..', 'public', docRes.recordset[0].file_path)
-    if (fs.existsSync(filePath)) fs.unlink(filePath, () => {})
+    const filePath = resolveUploadPath(docRes.recordset[0].file_path)
+    if (filePath && fs.existsSync(filePath)) fs.unlink(filePath, () => {})
 
     await db.request()
       .input('id', mssql.Int, docId)
@@ -231,13 +274,20 @@ router.get('/student-documents/:id/file', async (req, res) => {
       return res.status(403).json({ success: false, message: 'Access denied.' })
     }
 
-    const absPath = path.join(__dirname, '..', 'public', file_path)
+    const absPath = resolveUploadPath(file_path)
 
-    if (!fs.existsSync(absPath)) {
+    if (!absPath || !fs.existsSync(absPath)) {
       return res.status(404).json({ success: false, message: 'File not found on server.' })
     }
 
-    res.setHeader('Content-Disposition', `inline; filename="${file_name}"`)
+    // Force a trusted content type from the stored extension and prevent MIME
+    // sniffing, so a file can never be interpreted as HTML/JS by the browser.
+    const ext  = path.extname(absPath).toLowerCase()
+    const mime = EXT_TO_MIME[ext] || 'application/octet-stream'
+    const safeName = String(file_name || 'file').replace(/[\r\n"]/g, '')
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.setHeader('Content-Type', mime)
+    res.setHeader('Content-Disposition', `inline; filename="${safeName}"`)
     return res.sendFile(absPath)
   } catch (err) {
     logger.error({ err })
@@ -272,8 +322,20 @@ router.get('/application-documents/:applicationId', async (req, res) => {
 
 // ── Multer error handler ─────────────────────────────────────
 router.use((err, req, res, next) => {
-  if (err instanceof multer.MulterError || err.message) {
+  if (err instanceof multer.MulterError) {
+    // Multer's own messages are safe (e.g. file too large); map the common one.
+    const msg = err.code === 'LIMIT_FILE_SIZE'
+      ? `File is too large. Maximum size is ${MAX_SIZE_MB} MB.`
+      : 'File upload failed. Please check the file and try again.'
+    return res.status(400).json({ success: false, message: msg })
+  }
+  if (err && err.message === ALLOWED_TYPES_MESSAGE) {
+    // Our own fileFilter rejection — safe, user-facing message.
     return res.status(400).json({ success: false, message: err.message })
+  }
+  if (err) {
+    logger.error({ err }, 'document upload error')
+    return res.status(400).json({ success: false, message: 'File upload failed. Please try again.' })
   }
   next(err)
 })

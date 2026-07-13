@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useApplicationsList } from '../hooks/useApplicationsList.js'
+import { useCollegeFeatures } from '../hooks/useCollegeFeatures.js'
 import { useSortableTable } from '../../../shared/hooks/useSortableTable.js'
 import Pagination from '../../../shared/components/Pagination.jsx'
 import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
@@ -38,16 +39,10 @@ const ALL_STATUSES = (() => {
   }))
 })()
 
-function useStatusCounts(apps) {
-  return useMemo(() => {
-    const counts = {}
-    apps.forEach(a => { counts[a.status] = (counts[a.status] || 0) + 1 })
-    return counts
-  }, [apps])
-}
 
 export default function ApplicationInbox({ collegeId, collegeName = '' }) {
   const navigate = useNavigate()
+  const { collegeFeeEnabled } = useCollegeFeatures(collegeId)
   const [searchParams, setSearchParams] = useSearchParams()
 
   // Filters persisted in URL so they survive navigation to app detail and back
@@ -77,11 +72,9 @@ export default function ApplicationInbox({ collegeId, collegeName = '' }) {
   const setFilterDivision = v => setParam('ib_div',    v)
   const setPendingLink    = v => setParam('ib_plink',  v ? '1' : '')
 
-  const { apps, loading, pagination, fetchApps } = useApplicationsList(collegeId, {
+  const { apps, loading, pagination, fetchApps, statusCounts, statusTotal } = useApplicationsList(collegeId, {
     page, filterStatus, filterCourse, filterYear, filterDivision, pendingLink,
   })
-
-  const statusCounts = useStatusCounts(apps)
 
   const courseOptions = useMemo(() => {
     const map = new Map()
@@ -186,11 +179,14 @@ export default function ApplicationInbox({ collegeId, collegeName = '' }) {
           onChange={e => setFilterStatus(e.target.value)}
           className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 sm:w-56"
         >
-          <option value="">All Statuses ({pagination.total})</option>
+          <option value="">All Statuses ({statusTotal})</option>
           {ALL_STATUSES.map(s => {
             const count = s.keys.reduce((sum, k) => sum + (statusCounts[k] || 0), 0)
+            const label = (!collegeFeeEnabled && s.keys.includes('confirmed') && !s.keys.includes('fees_paid'))
+              ? 'Admission Confirmed'
+              : s.label
             return (
-              <option key={s.value} value={s.value}>{s.label} ({count})</option>
+              <option key={s.value} value={s.value}>{label} ({count})</option>
             )
           })}
         </select>
@@ -297,7 +293,10 @@ export default function ApplicationInbox({ collegeId, collegeName = '' }) {
           </div>
 
           {filtered.map((app, i) => {
-            const meta = STATUS_META[app.status] || { label: app.status, color: 'bg-slate-100 text-slate-600' }
+            const baseMeta = STATUS_META[app.status] || { label: app.status, color: 'bg-slate-100 text-slate-600' }
+            const meta = (!collegeFeeEnabled && app.status === 'confirmed')
+              ? { label: 'Admission Confirmed', color: 'bg-emerald-100 text-emerald-700' }
+              : baseMeta
             const hasPendingLink = !!app.has_pending_link
             return (
               <button

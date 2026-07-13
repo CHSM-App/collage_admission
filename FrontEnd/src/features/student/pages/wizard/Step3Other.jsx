@@ -9,7 +9,7 @@ const maxBirthDate = (() => {
   const d = new Date(); d.setFullYear(d.getFullYear() - 16); return d.toISOString().slice(0, 10)
 })()
 
-export default function Step3Other({ data, errors, globalError, saving, onChange, onBack, onNext, extraFooter, readOnly }) {
+export default function Step3Other({ data, errors, globalError, saving, onChange, onBack, onNext, extraFooter, readOnly, features }) {
   function handleNext() {
     onNext({
       birth_date: data.birth_date, birth_place: data.birth_place,
@@ -26,6 +26,13 @@ export default function Step3Other({ data, errors, globalError, saving, onChange
       bank_name: data.bank_name, bank_branch: data.bank_branch,
     })
   }
+
+  const f = features?.admission_form ?? {}
+  const showAbc      = f.abc_id       !== false
+  const showPrn      = f.prn          !== false
+  const showBank     = f.bank_details !== false
+  const showHscFlags = f.hsc_subject_flags === true
+  const showHostel   = f.hostel_facility   === true
 
   const e = errors
 
@@ -96,22 +103,26 @@ export default function Step3Other({ data, errors, globalError, saving, onChange
             <FormField label="Aadhaar Number" name="aadhaar" value={data.aadhaar}
               onChange={onChange} error={e.aadhaar} required placeholder="123456789012"
               hint="12 digits, no spaces" maxLength={12} />
-            <FormField
-              label={`ABC ID (Academic Bank of Credits)${data.year_of_study > 1 ? ' *' : ''}`}
-              name="abc_id"
-              value={data.abc_id}
-              onChange={onChange}
-              error={e.abc_id}
-              required={data.year_of_study > 1}
-              placeholder={data.year_of_study > 1 ? 'Required for SY/TY' : 'Optional for FY'}
-              hint={data.year_of_study === 1 ? 'Optional — can be added later once issued' : 'Mandatory for SY and TY'}
-            />
-            <FormField
-              label={`PRN/ERN${data.year_of_study > 1 ? ' *' : ''}`}
-              name="prn" value={data.prn} onChange={onChange} error={e.prn}
-              placeholder={data.year_of_study > 1 ? 'Required for SY/TY' : 'Leave blank for FY'}
-              hint={data.year_of_study === 1 ? 'Assigned after FY enrollment — leave blank' : 'Mandatory for SY and TY'}
-            />
+            {showAbc && (
+              <FormField
+                label={`ABC ID (Academic Bank of Credits)${data.year_of_study > 1 ? ' *' : ''}`}
+                name="abc_id"
+                value={data.abc_id}
+                onChange={onChange}
+                error={e.abc_id}
+                required={data.year_of_study > 1}
+                placeholder={data.year_of_study > 1 ? 'Required for SY/TY' : 'Optional for FY'}
+                hint={data.year_of_study === 1 ? 'Optional — can be added later once issued' : 'Mandatory for SY and TY'}
+              />
+            )}
+            {showPrn && (
+              <FormField
+                label={`PRN/ERN${data.year_of_study > 1 ? ' *' : ''}`}
+                name="prn" value={data.prn} onChange={onChange} error={e.prn}
+                placeholder={data.year_of_study > 1 ? 'Required for SY/TY' : 'Leave blank for FY'}
+                hint={data.year_of_study === 1 ? 'Assigned after FY enrollment — leave blank' : 'Mandatory for SY and TY'}
+              />
+            )}
             <FormField
               label="University Application No."
               name="university_app_no"
@@ -123,22 +134,62 @@ export default function Step3Other({ data, errors, globalError, saving, onChange
           </div>
         </Section>
 
+        {/* HSC Subject Flags */}
+        {showHscFlags && (
+          <Section title="HSC Subjects">
+            <div className="flex flex-wrap gap-4">
+              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                <input type="checkbox" name="hsc_maths"
+                  checked={!!data.hsc_maths}
+                  onChange={e => onChange({ target: { name: 'hsc_maths', value: e.target.checked } })}
+                  className="h-4 w-4 accent-slate-800"
+                />
+                Passed with Maths at HSC
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                <input type="checkbox" name="hsc_biology"
+                  checked={!!data.hsc_biology}
+                  onChange={e => onChange({ target: { name: 'hsc_biology', value: e.target.checked } })}
+                  className="h-4 w-4 accent-slate-800"
+                />
+                Passed with Biology at HSC
+              </label>
+            </div>
+          </Section>
+        )}
+
+        {/* Hostel */}
+        {showHostel && (
+          <Section title="Hostel">
+            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+              <input type="checkbox" name="hostel_facility"
+                checked={!!data.hostel_facility}
+                onChange={e => onChange({ target: { name: 'hostel_facility', value: e.target.checked } })}
+                className="h-4 w-4 accent-slate-800"
+              />
+              Hostel Facility Required
+            </label>
+          </Section>
+        )}
+
         {/* Bank */}
-        <Section title="Bank Account Details (Optional)">
-          <p className="text-xs text-slate-400 mb-3">
-            If you provide any bank detail, Account Number and IFSC become mandatory.
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <FormField label="Account Number" name="bank_account" value={data.bank_account}
-              onChange={onChange} error={e.bank_account} placeholder="Your bank account number" />
-            <FormField label="IFSC Code" name="bank_ifsc" value={data.bank_ifsc}
-              onChange={onChange} error={e.bank_ifsc} placeholder="SBIN0001234" />
-            <FormField label="Bank Name" name="bank_name" value={data.bank_name}
-              onChange={onChange} placeholder="State Bank of India" />
-            <FormField label="Branch" name="bank_branch" value={data.bank_branch}
-              onChange={onChange} placeholder="Vengurla Main" />
-          </div>
-        </Section>
+        {showBank && (
+          <Section title="Bank Account Details (Optional)">
+            <p className="text-xs text-slate-400 mb-3">
+              If you provide any bank detail, Account Number and IFSC become mandatory.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <FormField label="Account Number" name="bank_account" value={data.bank_account}
+                onChange={onChange} error={e.bank_account} placeholder="Your bank account number" />
+              <FormField label="IFSC Code" name="bank_ifsc" value={data.bank_ifsc}
+                onChange={onChange} error={e.bank_ifsc} placeholder="SBIN0001234" />
+              <FormField label="Bank Name" name="bank_name" value={data.bank_name}
+                onChange={onChange} placeholder="State Bank of India" />
+              <FormField label="Branch" name="bank_branch" value={data.bank_branch}
+                onChange={onChange} placeholder="Vengurla Main" />
+            </div>
+          </Section>
+        )}
 
         {globalError && (
           <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{globalError}</p>

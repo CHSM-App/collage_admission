@@ -22,6 +22,10 @@ export const updateRole = (collegeId, roleId, data) =>
 export const deleteRole = (collegeId, roleId) =>
   api.delete(`admin/colleges/${collegeId}/roles/${roleId}`)
 
+// Features
+export const getCollegeFeatures = (collegeId) =>
+  api.get(`admin/colleges/${collegeId}/features`)
+
 // Users
 export const createUser = (collegeId, data) =>
   api.post(`admin/colleges/${collegeId}/users`, data)

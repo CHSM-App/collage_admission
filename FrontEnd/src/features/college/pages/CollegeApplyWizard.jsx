@@ -37,7 +37,8 @@ import Step3Other     from '../../student/pages/wizard/Step3Other.jsx'
 import Step4Exam      from '../../student/pages/wizard/Step4Exam.jsx'
 import Step5Documents from '../../student/pages/wizard/Step5Documents.jsx'
 
-const STEPS = ['Personal', 'Other Details', 'Exam Details', 'Documents', 'Review', 'Division & Fees']
+const ALL_STEPS     = ['Personal', 'Other Details', 'Exam Details', 'Documents', 'Review', 'Division & Fees']
+const STEPS_NO_FEE  = ['Personal', 'Other Details', 'Exam Details', 'Documents', 'Review']
 
 // Wizard step index → actual application step number for saving (offset by 1 vs student wizard)
 // Student wizard: step1=Context, step2=Personal, ...
@@ -88,7 +89,7 @@ function reducer(state, action) {
     case 'SET_STEP':       return { ...state, currentStep: action.step, errors: {}, globalError: '' }
     case 'INIT_APP':
       return { ...state, applicationId: action.applicationId, studentId: action.studentId,
-               appStatus: action.appStatus,
+               appStatus: action.appStatus, features: action.features || null,
                currentStep: action.currentStep, maxStep: action.currentStep, loading: false }
     case 'SET_DATA':       return { ...state, data: { ...state.data, ...action.patch } }
     case 'SET_MAX_STEP':   return { ...state, maxStep: Math.max(state.maxStep, action.step) }
@@ -105,6 +106,7 @@ export default function CollegeApplyWizard() {
 
   // ── Application fee state ───────────────────────────────────
   const [registrationNumber, setRegistrationNumber] = useState(null)
+  const [feeUiOpen, setFeeUiOpen] = useState(false)   // reveal fee-collection UI without submitting yet
   const [submitError, setSubmitError]               = useState('')
   const [feeCollected, setFeeCollected]             = useState(false)
   const [feeCollecting, setFeeCollecting]           = useState(false)
@@ -144,7 +146,7 @@ export default function CollegeApplyWizard() {
 
         // Fetch form data
         const formRes = await getApplicationForm(appId)
-        const { application: app, previous_exam, previous_exams, documents } = formRes.data.data
+        const { application: app, features, previous_exam, previous_exams, documents } = formRes.data.data
 
         if (!studentId) studentId = app.student_id
 
@@ -195,8 +197,10 @@ export default function CollegeApplyWizard() {
         const dbStep    = app.current_step || 2
         const wizStep   = Math.max(1, dbStep - 1)  // offset: college wizard has no Context step
         // After application fee is paid (status=submitted), jump straight to the Fees step (6)
-        const startStep = app.status === 'submitted' ? 6 : wizStep
-        dispatch({ type: 'INIT_APP', applicationId: appId, studentId, currentStep: startStep, appStatus: app.status })
+        // unless college_fee feature is off — in that case stay at step 5 (review)
+        const collegeFeeOff = features?.payment?.college_fee === false
+        const startStep = (app.status === 'submitted' && !collegeFeeOff) ? 6 : wizStep
+        dispatch({ type: 'INIT_APP', applicationId: appId, studentId, currentStep: startStep, appStatus: app.status, features })
       } catch (err) {
         dispatch({ type: 'SET_GLOBAL_ERR', message: err?.response?.data?.message || 'Failed to load application.' })
         dispatch({ type: 'SET_LOADING', value: false })
@@ -251,15 +255,20 @@ export default function CollegeApplyWizard() {
     dispatch({ type: 'SET_SAVING', value: true })
     try {
       await acceptDeclaration(state.applicationId, { accepted: true })
-      const appFee = parseFloat(state.data.application_fee) || 0
-      if (appFee > 0) {
-        // Show fee collection panel first; actual submit happens after fee paid
-        setRegistrationNumber('')
-      } else {
-        // No application fee — submit immediately
-        const submitRes = await submitApplication(state.applicationId)
-        setRegistrationNumber(submitRes.data.data?.registration_number || '')
+
+      // When an application fee is owed, DO NOT submit/confirm yet — the app must
+      // stay a draft until the fee is actually collected (recordApplicationFee
+      // performs the submission). This prevents the app being confirmed while the
+      // fee is still unpaid. We just reveal the fee-collection UI here.
+      const platformFeeOwed = state.features?.payment?.platform_fee !== false && appFee > 0
+      if (platformFeeOwed) {
+        setFeeUiOpen(true)   // reveal the fee-collection UI; submission happens on fee collection
+        return
       }
+
+      // No application fee → submit directly.
+      const submitRes = await submitApplication(state.applicationId)
+      setRegistrationNumber(submitRes.data.data?.registration_number || '')
     } catch (err) {
       const resp = err?.response?.data
       setSubmitError(resp?.message || 'Submission failed. Please try again.')
@@ -270,6 +279,10 @@ export default function CollegeApplyWizard() {
 
   // Called from CollegeReviewStep once application is submitted (app fee done or zero)
   function handleProceedToFees() {
+    if (state.features?.payment?.college_fee === false) {
+      navigate(`/college/dashboard?section=app&app_id=${state.applicationId}`)
+      return
+    }
     dispatch({ type: 'SET_MAX_STEP', step: 6 })
     dispatch({ type: 'SET_STEP', step: 6 })
   }
@@ -329,7 +342,7 @@ export default function CollegeApplyWizard() {
     }
   }
 
-  const { data, currentStep, loading, saving, errors, globalError, applicationId, studentId, appStatus } = state
+  const { data, currentStep, loading, saving, errors, globalError, applicationId, studentId, appStatus, features } = state
   // Edit mode: app already submitted — save changes and return, no re-submit
   const isEditMode = !!appStatus && appStatus !== 'draft'
 
@@ -352,7 +365,7 @@ export default function CollegeApplyWizard() {
     )
   }
 
-  const stepProps = { data, errors, globalError, saving, onChange: handleChange, setField }
+  const stepProps = { data, errors, globalError, saving, onChange: handleChange, setField, features }
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -382,7 +395,7 @@ export default function CollegeApplyWizard() {
       </header>
 
       <div className="mx-auto max-w-3xl px-4 py-6 space-y-6">
-        <StepIndicator steps={STEPS} current={currentStep} />
+        <StepIndicator steps={features?.payment?.college_fee === false ? STEPS_NO_FEE : ALL_STEPS} current={currentStep} />
 
         {globalError && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -449,8 +462,9 @@ export default function CollegeApplyWizard() {
               onSaveAndReturn={() => navigate(`/college/dashboard?section=app&app_id=${applicationId}`)}
               onProceedToFees={handleProceedToFees}
               onAddNew={() => navigate('/college/dashboard?section=add-application')}
-              submitted={registrationNumber !== null}
+              submitted={registrationNumber !== null || feeUiOpen}
               registrationNumber={registrationNumber}
+              features={state.features}
               appFee={appFee}
               feeCollected={feeCollected}
               linkSent={linkSent}
@@ -506,7 +520,7 @@ function SkipButton({ onClick, saving }) {
 // ── Review step (college-specific — shows fee info, all docs skippable) ──────
 function CollegeReviewStep({
   data, saving, submitError, isEditMode, onBack, onEditStep, onSubmit, onSaveAndReturn, onProceedToFees,
-  submitted, registrationNumber, appFee,
+  submitted, registrationNumber, features, appFee,
   feeCollected, linkSent, feeMode, setFeeMode, feeError, setFeeError,
   feeCollecting, onlinePaying, linkSending, linkPhone, setLinkPhone,
   onCollectCash, onPayOnline, onSendLink, onAddNew,
@@ -514,8 +528,11 @@ function CollegeReviewStep({
   const d = data
   const linkedMap = Object.fromEntries((d.linked_documents || []).map(doc => [doc.document_type_id, doc]))
 
-  // After submission: determine if we can proceed to Step 6
-  const appFeeHandled = feeCollected || !appFee || linkSent
+  // After submission: determine if the app fee (platform_fee) has been handled.
+  // platform_fee controls whether the college must collect the application fee before proceeding.
+  // college_fee controls the admission fee collection step (Step 6) — separate concept.
+  const platformFeeRequired = features?.payment?.platform_fee !== false && appFee > 0
+  const appFeeHandled = !platformFeeRequired || feeCollected || linkSent
 
   return (
     <div>
@@ -529,19 +546,39 @@ function CollegeReviewStep({
       <div className="px-5 py-5 space-y-4">
 
         {/* Personal */}
-        <ReviewSection
-          title="Personal Details"
-          onEdit={() => onEditStep(1)}
-          rows={[
-            ['Name', [d.surname, d.first_name, d.middle_name].filter(Boolean).join(' ')],
-            ["Mother's First Name", d.mother_name],
-            ['Gender', d.sex],
-            ['Mobile', d.mobile],
-            ['Email', d.email],
-            ['Category', d.app_category || d.category],
-            ['Address', [d.address, d.taluka, d.district, d.state].filter(Boolean).join(', ')],
-          ]}
-        />
+        {(() => {
+          const af = features?.admission_form || {}
+          const feesEnabled = features?.payment?.college_fee !== false
+          return (
+            <ReviewSection
+              title="Personal Details"
+              onEdit={() => onEditStep(1)}
+              rows={[
+                af.semester === true          && ['Semester', d.semester ? `Semester ${d.semester}` : ''],
+                af.date_of_admission === true && ['Date of Admission', d.date_of_admission],
+                af.diploma_direct_sy === true && ['Diploma (Direct SY)', d.is_diploma_direct_sy ? 'Yes' : 'No'],
+                ['Name', [d.surname, d.first_name, d.middle_name].filter(Boolean).join(' ')],
+                af.name_as_on_aadhaar === true && ['Name as on Aadhaar', d.name_as_on_aadhaar],
+                af.son_of === true            && ['S/o', d.son_of],
+                ["Mother's First Name", d.mother_name],
+                ['Gender', d.sex],
+                ['Mobile', d.mobile],
+                ['Parent\'s Mobile', d.parent_mobile],
+                ['Land Line', d.land_line],
+                ['Email', d.email],
+                ['Guardian\'s Relation', d.guardian_relation],
+                ['Category', d.app_category || d.category],
+                af.admitted_category === true && ['Admitted Category', d.admitted_category],
+                af.other_category === true    && ['Other Category', d.other_category],
+                af.admission_quota === true   && ['Admission Quota', d.admission_quota],
+                ['Special Status', d.special_status],
+                feesEnabled                   && ['Fees Category', d.fees_category],
+                ['Address', [d.address, d.taluka, d.district, d.state].filter(Boolean).join(', ')],
+                ['Native Address', [d.native_address, d.native_taluka, d.native_district].filter(Boolean).join(', ')],
+              ].filter(Boolean)}
+            />
+          )
+        })()}
 
         {/* Other */}
         <ReviewSection
@@ -550,10 +587,24 @@ function CollegeReviewStep({
           onEdit={() => onEditStep(2)}
           rows={[
             ['DOB', d.birth_date],
-            ['Aadhaar', d.aadhaar],
-            ['Father', d.father_full_name],
+            ['Birth Place', [d.birth_place, d.birth_taluka, d.birth_district, d.birth_state].filter(Boolean).join(', ')],
+            ['Nationality', d.nationality],
+            ['Marital Status', d.marital_status],
             ['Religion', d.religion],
+            ['Caste', d.caste],
+            ['Mother Tongue', d.mother_tongue],
             ['Blood Group', d.blood_group],
+            ['Height', d.height_cm ? `${d.height_cm} cm` : ''],
+            ['Weight', d.weight_kg ? `${d.weight_kg} kg` : ''],
+            ["Father's Name", d.father_full_name],
+            ['Son/Daughter No.', d.son_daughter_number],
+            ["Father's Occupation", d.father_occupation],
+            ['Annual Income', d.annual_income ? `₹${Number(d.annual_income).toLocaleString('en-IN')}` : ''],
+            ['Aadhaar', d.aadhaar],
+            ['ABC ID', d.abc_id],
+            ['PRN/ERN', d.prn],
+            ['University App No.', d.university_app_no],
+            ['Bank', [d.bank_name, d.bank_account, d.bank_ifsc].filter(Boolean).join(' · ')],
           ]}
         />
 
@@ -667,8 +718,8 @@ function CollegeReviewStep({
               </div>
             </div>
 
-            {/* App fee collection options */}
-            {appFee > 0 && !feeCollected && !linkSent && (
+            {/* App fee collection options — shown when platform_fee is enabled and fee not yet collected */}
+            {platformFeeRequired && !feeCollected && !linkSent && (
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 overflow-hidden">
                 <style>{`
                   @keyframes fee-slide-in  { from { opacity:0; transform:translateX(32px) } to { opacity:1; transform:translateX(0) } }
@@ -736,11 +787,14 @@ function CollegeReviewStep({
               </div>
             )}
 
-            {/* Proceed to Step 6 — shown once app fee is handled */}
+            {/* Proceed to Step 6 (or go to application if college_fee is off) — shown once app fee is handled */}
             {appFeeHandled && (
               <div className="flex flex-col sm:flex-row gap-2">
                 <Button onClick={onProceedToFees} className="sm:ml-auto">
-                  Proceed to Division &amp; Fee Collection →
+                  {features?.payment?.college_fee === false
+                    ? 'Go to Application →'
+                    : 'Proceed to Division & Fee Collection →'
+                  }
                 </Button>
               </div>
             )}
@@ -1381,16 +1435,13 @@ function ReviewSection({ title, optional, onEdit, rows }) {
       </div>
       <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
         {rows.map(([label, value], i) => (
-          value ? (
-            <div key={i} className="flex gap-2 text-sm min-w-0">
-              {label && <span className="shrink-0 text-slate-400 w-28">{label}:</span>}
-              <span className="text-slate-800 font-medium break-words min-w-0">{value}</span>
-            </div>
-          ) : null
+          <div key={i} className="flex gap-2 text-sm min-w-0">
+            {label && <span className="shrink-0 text-slate-400 w-28">{label}:</span>}
+            <span className={`break-words min-w-0 ${value ? 'text-slate-800 font-medium' : 'text-slate-400'}`}>
+              {value || '—'}
+            </span>
+          </div>
         ))}
-        {!hasData && (
-          <p className="text-sm text-slate-400 italic col-span-2">—</p>
-        )}
       </div>
     </div>
   )
@@ -1421,6 +1472,26 @@ function buildAutofill(app, lastApp, profile) {
     state:        ap('state')       || '',
     category:       ap('category')       || '',
     special_status: ap('special_status') || '',
+    admitted_category: ap('admitted_category') || '',
+    other_category:    ap('other_category')    || '',
+    admission_quota:   ap('admission_quota')   || '',
+    date_of_admission:    formatDate(ap('date_of_admission')) || '',
+    is_diploma_direct_sy: !!(app.app_is_diploma_direct_sy ?? lastApp.app_is_diploma_direct_sy),
+    name_as_on_aadhaar:   ap('name_as_on_aadhaar') || '',
+    son_of:               ap('son_of')             || '',
+    native_address:       ap('native_address')     || '',
+    native_taluka:        ap('native_taluka')      || '',
+    native_district:      ap('native_district')    || '',
+    parent_mobile:        ap('parent_mobile')      || '',
+    land_line:            ap('land_line')          || '',
+    guardian_relation:    ap('guardian_relation')  || '',
+    semester:             (app.app_semester ?? lastApp.app_semester) != null ? String(app.app_semester ?? lastApp.app_semester) : '',
+    father_surname:     ap('father_surname')     || '',
+    father_first_name:  ap('father_first_name')  || '',
+    father_middle_name: ap('father_middle_name') || '',
+    mother_surname:     ap('mother_surname')     || '',
+    mother_first_name:  ap('mother_first_name')  || '',
+    mother_middle_name: ap('mother_middle_name') || '',
     app_division:                 app.app_division                 || '',
     fees_category:                app.fees_category                || '',
     fees_category_override:       !!app.fees_category_override,
