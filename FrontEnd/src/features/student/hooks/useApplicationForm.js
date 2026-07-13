@@ -99,7 +99,10 @@ function buildAutofill(app, lastApp, profile, user) {
     return ''
   }
 
+  // Prefer this draft's value; fall back to the student's previous application.
   const appPrefix = (k) => app[`app_${k}`] ?? lastApp[`app_${k}`] ?? ''
+  // Same fallback for checkbox (BIT) fields, which must resolve to a real boolean.
+  const appBool = (k) => !!(app[`app_${k}`] ?? lastApp[`app_${k}`])
 
   return {
     college_id:    app.college_id,
@@ -127,28 +130,34 @@ function buildAutofill(app, lastApp, profile, user) {
     fees_category:   app.fees_category           || '',
     fees_category_override:        app.fees_category_override        || false,
     fees_category_override_remark: app.fees_category_override_remark || '',
+    // Admission-specific — belong to THIS application only, never carried over.
     division:            app.app_division            || '',
     degree_course_code:  app.app_degree_course_code  || '',
     admitted_category:   app.app_admitted_category   || '',
-    other_category:      app.app_other_category      || '',
     admission_quota:     app.app_admission_quota     || '',
     date_of_admission:   app.app_date_of_admission   ? String(app.app_date_of_admission).slice(0, 10) : '',
     is_diploma_direct_sy: !!app.app_is_diploma_direct_sy,
-    name_as_on_aadhaar:  app.app_name_as_on_aadhaar  || '',
-    son_of:              app.app_son_of              || '',
-    native_address:      app.app_native_address      || '',
-    native_taluka:       app.app_native_taluka       || '',
-    native_district:     app.app_native_district     || '',
-    parent_mobile:       app.app_parent_mobile       || '',
-    land_line:           app.app_land_line           || '',
-    guardian_relation:   app.app_guardian_relation   || '',
     semester:            app.app_semester != null ? String(app.app_semester) : '',
-    father_surname:      app.app_father_surname      || '',
-    father_first_name:   app.app_father_first_name   || '',
-    father_middle_name:  app.app_father_middle_name  || '',
-    mother_surname:      app.app_mother_surname      || '',
-    mother_first_name:   app.app_mother_first_name   || '',
-    mother_middle_name:  app.app_mother_middle_name  || '',
+
+    // Student-level — carried over from the previous application.
+    other_category:      appPrefix('other_category'),
+    name_as_on_aadhaar:  appPrefix('name_as_on_aadhaar'),
+    son_of:              appPrefix('son_of'),
+    native_address:      appPrefix('native_address'),
+    native_taluka:       appPrefix('native_taluka'),
+    native_district:     appPrefix('native_district'),
+    parent_mobile:       appPrefix('parent_mobile'),
+    land_line:           appPrefix('land_line'),
+    guardian_relation:   appPrefix('guardian_relation'),
+    father_surname:      appPrefix('father_surname'),
+    father_first_name:   appPrefix('father_first_name'),
+    father_middle_name:  appPrefix('father_middle_name'),
+    mother_surname:      appPrefix('mother_surname'),
+    mother_first_name:   appPrefix('mother_first_name'),
+    mother_middle_name:  appPrefix('mother_middle_name'),
+    hsc_maths:           appBool('hsc_maths'),
+    hsc_biology:         appBool('hsc_biology'),
+    hostel_facility:     appBool('hostel_facility'),
 
     birth_date:         formatDate(appPrefix('birth_date')) || formatDate(profile.birth_date) || '',
     birth_place:        appPrefix('birth_place')     || profile.birth_place    || '',

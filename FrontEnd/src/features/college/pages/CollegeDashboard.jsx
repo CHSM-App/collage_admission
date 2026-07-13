@@ -116,7 +116,9 @@ function Overview({ user, navAllowed, collegeFeeEnabled }) {
     { title: 'Roll Numbers',         desc: 'Generate roll numbers for confirmed students.',       section: 'rollnumbers',        accent: 'violet' },
     ...feeCards,
     { title: 'Faculty Master',       desc: 'Manage degree programs and university codes.',        section: 'master-faculty',     accent: 'slate' },
-    { title: 'Category Master',      desc: 'Manage castes, special statuses, and fees categories.', section: 'master-categories', accent: 'purple' },
+    { title: 'Category Master',      desc: collegeFeeEnabled
+        ? 'Manage castes, special statuses, and fees categories.'
+        : 'Manage castes and special statuses.',                 section: 'master-categories', accent: 'purple' },
   ]
   const cards = allCards.filter(c => navAllowed(c.section))
 

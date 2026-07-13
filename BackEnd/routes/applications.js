@@ -19,6 +19,7 @@ const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/p
 const logger   = require('../config/logger');
 const { body, validationResult } = require('express-validator');
 const auditLog = require('../middleware/auditLog');
+const { filledSeatsSql } = require('../constants/seatStatuses');
 
 function validate(req, res, next) {
   const errors = validationResult(req);
@@ -125,7 +126,7 @@ router.get('/', async (req, res) => {
           a.course_id,    COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
           COALESCE(c.application_fee, 0) AS application_fee, ap.total_seats,
           CASE WHEN JSON_VALUE(c.features_config, '$.payment.college_fee') = 'false' THEN 0 ELSE 1 END AS college_fee_enabled,
-          (SELECT COUNT(*) FROM applications ax WHERE ax.admission_period_id = ap.id AND ax.status <> 'draft') AS filled_seats
+          ${filledSeatsSql('ap', 'ax')} AS filled_seats
         ${joins} ${where}
         ORDER BY a.created_at DESC
         ${paginateQuery(offset, limit)}
@@ -152,7 +153,7 @@ router.get('/:id', async (req, res) => {
           c.name  AS college_name,  c.city   AS college_city,
           COALESCE(cr.degree_course_name, CAST(a.course_id AS NVARCHAR)) AS course_name,
           COALESCE(c.application_fee, 0) AS application_fee, ap.total_seats,
-          (SELECT COUNT(*) FROM applications ax WHERE ax.admission_period_id = ap.id AND ax.status <> 'draft') AS filled_seats,
+          ${filledSeatsSql('ap', 'ax')} AS filled_seats,
           ap.start_date, ap.end_date
         FROM applications a
         JOIN students       s  ON s.id       = a.student_id
@@ -230,7 +231,7 @@ router.post('/', createApplicationValidators, validate, async (req, res) => {
       .input('pid', parseInt(admission_period_id))
       .query(`
         SELECT id, total_seats,
-          (SELECT COUNT(*) FROM applications a WHERE a.admission_period_id = ap.id AND a.status <> 'draft') AS filled_seats,
+          ${filledSeatsSql('ap', 'a')} AS filled_seats,
           is_active, end_date
         FROM admission_periods ap WHERE id = @pid
       `);
@@ -328,9 +329,21 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// ── Simulate payment success → move draft → submitted ───────
-// In production this would be triggered by the payment gateway webhook.
-// For now a direct POST simulates a successful payment.
+// ── Submit an application (draft → submitted / confirmed) ────
+//
+// Admission rules enforced here:
+//
+//  1. An application cannot be submitted until the APPLICATION FEE is paid —
+//     unless the college has the platform fee disabled or the fee is 0.
+//
+//  2. STUDENT-submitted applications go to `submitted` and must then walk the
+//     full scrutiny pipeline (accept → student visited → division → fees set).
+//
+//  3. COLLEGE-filled applications are directly approved: they jump straight to
+//     `confirmed` (the college is reviewing inline, so scrutiny is skipped).
+//     • General college  → student then pays the college fee → `fees_paid` (success)
+//     • Agriculture      → `confirmed` IS admission success (no college fee)
+//
 router.post('/:id/submit', async (req, res) => {
   const appId = parseInt(req.params.id);
 
@@ -340,7 +353,13 @@ router.post('/:id/submit', async (req, res) => {
       .query(`
         SELECT a.id, a.status, a.student_id, a.college_id, a.course_id,
                a.year_of_study, a.academic_year, a.admission_period_id,
-               COALESCE(c.application_fee, 0) AS application_fee
+               a.created_by_role, a.application_fee_paid,
+               COALESCE(c.application_fee, 0) AS application_fee,
+               c.features_config,
+               (SELECT COUNT(*) FROM payments p
+                 WHERE p.application_id = a.id
+                   AND p.payment_type = 'application_fee'
+                   AND p.status = 'success') AS app_fee_payments
         FROM applications a
         JOIN admission_periods ap ON ap.id = a.admission_period_id
         JOIN colleges c ON c.id = a.college_id
@@ -357,24 +376,47 @@ router.post('/:id/submit', async (req, res) => {
       return res.status(400).json({ success: false, message: `Cannot submit application in status: ${app.status}` });
     }
 
+    const features = app.features_config ? JSON.parse(app.features_config) : null;
+    const platformFeeEnabled = features?.payment?.platform_fee !== false;
+    const feeAmount = parseFloat(app.application_fee) || 0;
+
+    // ── Rule 1: the application fee must be paid before submission ──
+    // The fee is "owed" only when the college charges one AND has the platform
+    // fee feature enabled. It counts as paid if the flag is set or a successful
+    // application_fee payment exists.
+    const feeOwed = platformFeeEnabled && feeAmount > 0;
+    const feePaid = !!app.application_fee_paid || Number(app.app_fee_payments) > 0;
+
+    if (feeOwed && !feePaid) {
+      return res.status(400).json({
+        success: false,
+        message: 'The application fee must be paid before the application can be submitted.',
+        requires_payment: true,
+        application_fee: feeAmount,
+      });
+    }
+
+    // ── Rules 2 & 3: where the application lands depends on WHO created it ──
+    const createdByCollege = app.created_by_role === 'college';
+    const targetStatus = createdByCollege ? 'confirmed' : 'submitted';
+
     // Generate registration number
     const regNum = await generateRegNumber(
       app.college_id, app.course_id, app.year_of_study, app.academic_year
     );
 
-    const hasFee = parseFloat(app.application_fee) > 0;
-
     const pool = await db;
     const tx   = pool.transaction();
     await tx.begin();
     try {
-      // Only insert a payment record when there is no application fee to collect later.
-      // When hasFee is true, the college will collect via record-application-fee.
-      if (!hasFee) {
+      // We only get here when the fee is already paid (Rule 1) or none is owed.
+      // When no fee was owed, record a zero-value payment row so the payment
+      // history is complete.
+      if (!feeOwed && !feePaid) {
         await tx.request()
           .input('appId',  mssql.Int,     appId)
           .input('ptype',  mssql.NVarChar,'application_fee')
-          .input('amount', mssql.Decimal, app.application_fee)
+          .input('amount', mssql.Decimal, feeAmount)
           .input('userId', mssql.Int,     req.user.id)
           .input('actor',  mssql.NVarChar, String(req.user.staff_id || req.user.id))
           .query(`
@@ -383,17 +425,21 @@ router.post('/:id/submit', async (req, res) => {
           `);
       }
 
+      // Rule 2 → 'submitted' (full scrutiny follows).
+      // Rule 3 → 'confirmed' (college-filled: directly approved).
       await tx.request()
         .input('id',     mssql.Int,      appId)
         .input('regNum', mssql.NVarChar, regNum)
         .input('actor',  mssql.NVarChar, String(req.user.staff_id || req.user.id))
-        .input('feePaid', mssql.Bit,     hasFee ? 0 : 1)
+        .input('status', mssql.NVarChar, targetStatus)
         .query(`
           UPDATE applications
-          SET status = 'confirmed',
+          SET status = @status,
               registration_number = @regNum,
-              application_fee_paid = @feePaid,
+              application_fee_paid = 1,
               submitted_at = GETDATE(),
+              confirmed_at = CASE WHEN @status = 'confirmed' THEN GETDATE() ELSE confirmed_at END,
+              approved_at  = CASE WHEN @status = 'confirmed' THEN GETDATE() ELSE approved_at END,
               updated_at   = GETDATE(),
               status_updated_at = GETDATE(),
               updated_by = @actor
@@ -406,12 +452,19 @@ router.post('/:id/submit', async (req, res) => {
       throw txErr;
     }
 
-    await logActivity(appId, 'submitted', req.user?.role === 'college' ? 'college' : 'student', null);
+    const actorRole = createdByCollege ? 'college' : 'student';
+    await logActivity(appId, 'submitted', actorRole, null);
+    if (createdByCollege) {
+      // Rule 3: college-filled applications are approved on submission.
+      await logActivity(appId, 'confirmed', 'college', 'Directly approved (application filled by college).');
+    }
 
     return res.json({
       success: true,
-      message: 'Application submitted successfully.',
-      data: { registration_number: regNum },
+      message: createdByCollege
+        ? 'Application submitted and approved.'
+        : 'Application submitted successfully.',
+      data: { registration_number: regNum, status: targetStatus },
     });
   } catch (err) {
     logger.error({ err });

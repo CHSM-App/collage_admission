@@ -115,9 +115,13 @@ router.get('/document-types', async (req, res) => {
 })
 
 // ── GET /student-documents?student_id= ──────────────────────
+// An id of 0 is a valid row id (identity seeds can start at 0) but is falsy in JS —
+// never use a plain `!id` check on an id.
+const missingId = (v) => v === undefined || v === null || v === '' || Number.isNaN(Number(v))
+
 router.get('/student-documents', async (req, res) => {
   const { student_id } = req.query
-  if (!student_id) return res.status(400).json({ success: false, message: 'student_id required.' })
+  if (missingId(student_id)) return res.status(400).json({ success: false, message: 'student_id required.' })
 
   try {
     const result = await db.request()
@@ -161,7 +165,7 @@ router.post('/student-documents', upload.single('file'), async (req, res) => {
   const student_id = req.query.student_id || req.body.student_id
   const { document_type_id } = req.body
 
-  if (!student_id || !document_type_id) {
+  if (missingId(student_id) || missingId(document_type_id)) {
     if (req.file) fs.unlink(req.file.path, () => {})
     return res.status(400).json({ success: false, message: 'student_id and document_type_id are required.' })
   }

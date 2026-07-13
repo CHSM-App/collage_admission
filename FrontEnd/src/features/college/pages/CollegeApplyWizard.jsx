@@ -1450,6 +1450,8 @@ function ReviewSection({ title, optional, onEdit, rows }) {
 // ── Helpers ──────────────────────────────────────────────────
 function buildAutofill(app, lastApp, profile) {
   const ap = (k) => app[`app_${k}`] ?? lastApp[`app_${k}`] ?? ''
+  // Checkbox (BIT) fields must resolve to a real boolean, not ''.
+  const apBool = (k) => !!(app[`app_${k}`] ?? lastApp[`app_${k}`])
   return {
     college_id:    app.college_id,
     college_name:  app.college_name,
@@ -1492,6 +1494,9 @@ function buildAutofill(app, lastApp, profile) {
     mother_surname:     ap('mother_surname')     || '',
     mother_first_name:  ap('mother_first_name')  || '',
     mother_middle_name: ap('mother_middle_name') || '',
+    hsc_maths:          apBool('hsc_maths'),
+    hsc_biology:        apBool('hsc_biology'),
+    hostel_facility:    apBool('hostel_facility'),
     app_division:                 app.app_division                 || '',
     fees_category:                app.fees_category                || '',
     fees_category_override:       !!app.fees_category_override,

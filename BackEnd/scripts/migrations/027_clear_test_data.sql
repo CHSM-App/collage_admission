@@ -59,14 +59,23 @@ ENABLE TRIGGER ALL ON chatbot_logs;
 GO
 
 -- ── 6. Reset identity seeds ───────────────────────────────────────────────────
-DBCC CHECKIDENT ('applications',             RESEED, 0);
-DBCC CHECKIDENT ('students',                 RESEED, 0);
-DBCC CHECKIDENT ('payments',                 RESEED, 0);
-DBCC CHECKIDENT ('receipt_counters',         RESEED, 0);
-DBCC CHECKIDENT ('application_activity_log', RESEED, 0);
-DBCC CHECKIDENT ('application_documents',    RESEED, 0);
-DBCC CHECKIDENT ('student_documents',        RESEED, 0);
-DBCC CHECKIDENT ('payment_link_tokens',      RESEED, 0);
-DBCC CHECKIDENT ('fee_installments',         RESEED, 0);
-DBCC CHECKIDENT ('otp_store',                RESEED, 0);
+-- ⚠️  Use `DBCC CHECKIDENT (t, RESEED)` (no value), NOT `RESEED, 0`.
+--
+-- On an EMPTY table, `RESEED, 0` makes the next inserted id **0** — not 1. SQL
+-- Server only adds the increment to the seed when rows already exist. An id of 0
+-- is a landmine in JS (`0` is falsy), so `if (!student_id)` wrongly reports a
+-- supplied id as "missing" — which broke the student application form.
+--
+-- The no-value form resets the seed to the table's original definition (1), so the
+-- next insert correctly gets id 1.
+DBCC CHECKIDENT ('applications',             RESEED);
+DBCC CHECKIDENT ('students',                 RESEED);
+DBCC CHECKIDENT ('payments',                 RESEED);
+DBCC CHECKIDENT ('receipt_counters',         RESEED);
+DBCC CHECKIDENT ('application_activity_log', RESEED);
+DBCC CHECKIDENT ('application_documents',    RESEED);
+DBCC CHECKIDENT ('student_documents',        RESEED);
+DBCC CHECKIDENT ('payment_link_tokens',      RESEED);
+DBCC CHECKIDENT ('fee_installments',         RESEED);
+DBCC CHECKIDENT ('otp_store',                RESEED);
 GO

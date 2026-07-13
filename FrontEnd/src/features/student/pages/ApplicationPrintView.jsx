@@ -115,7 +115,7 @@ export default function ApplicationPrintView({ appId, regNumber, onClose }) {
             <PRow label="Mother's Name"   value={app.app_mother_name} />
             {features?.admission_form?.semester === true && <PRow label="Semester" value={app.app_semester ? `Semester ${app.app_semester}` : ''} />}
             {features?.admission_form?.date_of_admission === true && <PRow label="Date of Admission" value={fmtDate(app.app_date_of_admission)} />}
-            {features?.admission_form?.diploma_direct_sy === true && <PRow label="Diploma (Direct SY)" value={app.app_is_diploma_direct_sy ? 'Yes' : 'No'} />}
+            {features?.admission_form?.diploma_direct_sy === true && <PRow label="Diploma (Direct SY)" value={yesNo(app.app_is_diploma_direct_sy)} />}
             <PRow label="Gender"          value={app.app_sex} />
             <PRow label="Mobile"          value={app.app_mobile} />
             {app.app_parent_mobile && <PRow label="Parent's Mobile" value={app.app_parent_mobile} />}
@@ -144,6 +144,15 @@ export default function ApplicationPrintView({ appId, regNumber, onClose }) {
             <PRow label="Father's Name"       value={app.app_father_full_name} />
             <PRow label="Father's Occupation" value={app.app_father_occupation} />
             <PRow label="Annual Income"       value={app.app_annual_income ? `₹${Number(app.app_annual_income).toLocaleString('en-IN')}` : '—'} />
+            {features?.admission_form?.hsc_subject_flags === true && (
+              <>
+                <PRow label="HSC Maths"   value={yesNo(app.app_hsc_maths)} />
+                <PRow label="HSC Biology" value={yesNo(app.app_hsc_biology)} />
+              </>
+            )}
+            {features?.admission_form?.hostel_facility === true && (
+              <PRow label="Hostel Facility Required" value={yesNo(app.app_hostel_facility)} />
+            )}
             {app.app_bank_account && <PRow label="Bank Account" value={`****${app.app_bank_account.slice(-4)}`} />}
           </PreviewSection>
 
@@ -358,6 +367,13 @@ function buildHTML(data, regNumber) {
       row('Father\'s Name',       app.app_father_full_name) +
       row('Father\'s Occupation', app.app_father_occupation) +
       row('Annual Income',        app.app_annual_income ? '&#8377;' + Number(app.app_annual_income).toLocaleString('en-IN') : '—') +
+      (af.hsc_subject_flags === true
+        ? row('HSC Maths',   yesNo(app.app_hsc_maths)) +
+          row('HSC Biology', yesNo(app.app_hsc_biology))
+        : '') +
+      (af.hostel_facility === true
+        ? row('Hostel Facility Required', yesNo(app.app_hostel_facility))
+        : '') +
       (app.app_bank_account ? row('Bank Account', '****' + app.app_bank_account.slice(-4)) : '')
   )}
 
@@ -417,4 +433,12 @@ function fmtDate(d) {
 function maskAadhaar(a) {
   if (!a || a.length < 4) return a || '—'
   return `XXXX XXXX ${a.slice(-4)}`
+}
+
+// A checkbox field is a BIT: true/false when the student answered, NULL when the
+// question was never filled in. Rendering NULL as "No" would state that they
+// actively declined, so an unanswered field shows the same "—" as any other.
+function yesNo(v) {
+  if (v === null || v === undefined) return '—'
+  return v ? 'Yes' : 'No'
 }

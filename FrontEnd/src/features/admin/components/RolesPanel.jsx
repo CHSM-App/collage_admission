@@ -28,19 +28,21 @@ const NAV_SECTIONS = [
       { key: 'add-application', label: 'Add Application',    desc: 'Submit an application on behalf of a student' },
       { key: 'rollnumbers',     label: 'Roll Numbers',       desc: 'Bulk generate roll numbers' },
       { key: 'fee-receipts',    label: 'Fee Receipts',       desc: 'View and collect college fee payments' },
+      { key: 'reports',         label: 'Reports',            desc: 'Fee collection reports by date, class, and year' },
     ],
   },
   {
     group: 'Masters',
     items: [
-      { key: 'master-faculty',   label: 'Program Master',    desc: 'Degree programs and university codes' },
+      { key: 'master-faculty',    label: 'Program Master',     desc: 'Degree programs and university codes' },
       // { key: 'master-class',     label: 'Class Master',      desc: 'Class/batch configuration' },
-      { key: 'master-bank',      label: 'Bank Master',       desc: 'Bank account details' },
-      { key: 'master-course',    label: 'Course Master',     desc: 'Course codes and names' },
-      { key: 'master-group',     label: 'Group Master',      desc: 'Student group categories' },
-      { key: 'master-division',  label: 'Division Master',   desc: 'Class divisions' },
-      { key: 'master-fees',      label: 'Fees Master',       desc: 'Fee heads, slabs, and class overrides' },
-      { key: 'master-documents', label: 'Required Documents',desc: 'Document checklist configuration' },
+      { key: 'master-bank',       label: 'Bank Master',        desc: 'Bank account details' },
+      { key: 'master-course',     label: 'Course Master',      desc: 'Course codes and names' },
+      { key: 'master-group',      label: 'Group Master',       desc: 'Student group categories' },
+      { key: 'master-division',   label: 'Division Master',    desc: 'Class divisions' },
+      { key: 'master-categories', label: 'Category Master',    desc: 'Castes, special statuses, and fees categories' },
+      { key: 'master-fees',       label: 'Fees Master',        desc: 'Fee heads, slabs, and class overrides' },
+      { key: 'master-documents',  label: 'Required Documents', desc: 'Document checklist configuration' },
     ],
   },
   {
@@ -52,6 +54,12 @@ const NAV_SECTIONS = [
 ]
 
 const ALL_NAV_ITEMS = NAV_SECTIONS.flatMap(s => s.items)
+
+// Rejects the shapes users actually typo: no @, nothing before/after the @, a dot
+// straight after the @ or straight before it, consecutive dots, and a TLD that is
+// missing or too short ("rahulgmail.@com", "a@b", "a@b.c" all fail).
+const EMAIL_RE = /^[^\s@.]+(\.[^\s@.]+)*@[^\s@.]+(\.[^\s@.]+)*\.[a-z]{2,}$/i
+const isValidEmail = (v) => EMAIL_RE.test(String(v || '').trim())
 
 const emptyPerms   = () => Object.fromEntries(ALL_PERMISSIONS.map(p => [p.key, false]))
 const emptyNav     = () => Object.fromEntries(ALL_NAV_ITEMS.map(n => [n.key, true]))   // new role: all visible by default
@@ -161,7 +169,16 @@ export default function RolesPanel({ college }) {
     if (!userForm.full_name.trim() || !userForm.email.trim() || !userForm.role_id) {
       setUserError('Name, email and role are required.'); return
     }
+    if (!isValidEmail(userForm.email)) {
+      setUserError('Enter a valid email address (e.g. rahul@college.edu.in).'); return
+    }
+    if (userForm.phone && userForm.phone.length !== 10) {
+      setUserError('Phone must be a 10-digit mobile number.'); return
+    }
     if (!editingUser && !userForm.password) { setUserError('Password is required for new users.'); return }
+    if (userForm.password && userForm.password.length < 6) {
+      setUserError('Password must be at least 6 characters.'); return
+    }
     setUserSaving(true); setUserError('')
     try {
       if (editingUser) {

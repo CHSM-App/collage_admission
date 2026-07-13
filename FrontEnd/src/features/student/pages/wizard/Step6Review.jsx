@@ -119,6 +119,15 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
           <Row label="Son/Daughter No."    value={data.son_daughter_number} />
           <Row label="Father's Occupation" value={data.father_occupation} />
           <Row label="Annual Income"       value={data.annual_income ? `₹${Number(data.annual_income).toLocaleString('en-IN')}` : ''} />
+          {features?.admission_form?.hsc_subject_flags === true && (
+            <>
+              <Row label="HSC Maths"   value={data.hsc_maths   ? 'Yes' : 'No'} />
+              <Row label="HSC Biology" value={data.hsc_biology ? 'Yes' : 'No'} />
+            </>
+          )}
+          {features?.admission_form?.hostel_facility === true && (
+            <Row label="Hostel Facility Required" value={data.hostel_facility ? 'Yes' : 'No'} />
+          )}
           <Row label="Aadhaar"             value={maskAadhaar(data.aadhaar)} />
           <Row label="ABC ID"              value={data.abc_id} />
           <Row label="PRN"                 value={data.prn} />

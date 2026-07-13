@@ -111,8 +111,11 @@ export default function Step3Other({ data, errors, globalError, saving, onChange
                 onChange={onChange}
                 error={e.abc_id}
                 required={data.year_of_study > 1}
-                placeholder={data.year_of_study > 1 ? 'Required for SY/TY' : 'Optional for FY'}
-                hint={data.year_of_study === 1 ? 'Optional — can be added later once issued' : 'Mandatory for SY and TY'}
+                placeholder="123456789012"
+                maxLength={12}
+                hint={data.year_of_study === 1
+                  ? '12 digits — optional, can be added later once issued'
+                  : '12 digits, no spaces — mandatory for SY and TY'}
               />
             )}
             {showPrn && (

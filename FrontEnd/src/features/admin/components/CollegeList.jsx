@@ -31,6 +31,13 @@ const TABS = [
 
 const LIMIT = 20
 
+// Onboarding fields the super admin can correct after a college is created.
+const EMPTY_DETAILS = { name: '', college_code: '', city: '', address: '', phone: '', email: '' }
+
+// Same rule the backend enforces — rejects "rahulgmail.@com", "a@b", "a@b.c".
+const EMAIL_RE = /^[^\s@.]+(\.[^\s@.]+)*@[^\s@.]+(\.[^\s@.]+)*\.[a-z]{2,}$/i
+const inputCls = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400'
+
 export default function CollegeList() {
   const [colleges,    setColleges]    = useState([])
   const [loading,     setLoading]     = useState(true)
@@ -43,6 +50,12 @@ export default function CollegeList() {
   const [toggling,    setToggling]    = useState(null)   // college id being toggled
   const [pagination,  setPagination]  = useState({ page: 1, totalPages: 1, total: 0 })
   const [page,        setPage]        = useState(1)
+
+  // Onboarding-details editor
+  const [detailEdit,   setDetailEdit]   = useState(false)
+  const [detailForm,   setDetailForm]   = useState(EMPTY_DETAILS)
+  const [detailSaving, setDetailSaving] = useState(false)
+  const [detailError,  setDetailError]  = useState('')
 
   function fetchColleges() {
     getAdminColleges(page, LIMIT)
@@ -62,8 +75,47 @@ export default function CollegeList() {
 
   useEffect(() => { fetchColleges() }, [page])
 
-  function selectCollege(c) { setSelected(c); setTab('roles'); setFeeEdit(false); setFeeMsg('') }
-  function goBack()          { setSelected(null) }
+  function selectCollege(c) {
+    setSelected(c); setTab('roles')
+    setFeeEdit(false); setFeeMsg('')
+    setDetailEdit(false); setDetailError('')
+  }
+  function goBack() { setSelected(null); setDetailEdit(false) }
+
+  function openDetailEdit() {
+    setDetailForm({
+      name:         selected.name         || '',
+      college_code: selected.college_code || '',
+      city:         selected.city         || '',
+      address:      selected.address      || '',
+      phone:        selected.phone        || '',
+      email:        selected.email        || '',
+    })
+    setDetailError('')
+    setDetailEdit(true)
+  }
+
+  async function saveDetails(e) {
+    e.preventDefault()
+    const f = detailForm
+    if (!f.name.trim())         { setDetailError('College name is required.'); return }
+    if (!f.college_code.trim()) { setDetailError('College code is required.'); return }
+    if (!f.city.trim())         { setDetailError('City is required.'); return }
+    if (!EMAIL_RE.test(f.email.trim())) {
+      setDetailError('Enter a valid college email address.'); return
+    }
+    if (f.phone && !/^[6-9]\d{9}$/.test(f.phone)) {
+      setDetailError('Phone must be a 10-digit number starting with 6–9.'); return
+    }
+    setDetailSaving(true); setDetailError('')
+    try {
+      await updateAdminCollege(selected.id, f)
+      setDetailEdit(false)
+      fetchColleges()
+    } catch (err) {
+      setDetailError(err?.response?.data?.message || 'Failed to update college details.')
+    } finally { setDetailSaving(false) }
+  }
 
   const feeMsgTimer = useRef(null)
 
@@ -174,8 +226,83 @@ export default function CollegeList() {
               </div>
             )}
             {feeMsg && <span className={`text-xs font-semibold ${feeMsg === 'Fee updated.' ? 'text-emerald-600' : 'text-red-600'}`}>{feeMsg}</span>}
+            <button
+              onClick={() => (detailEdit ? setDetailEdit(false) : openDetailEdit())}
+              className="text-xs font-semibold text-amber-600 hover:underline"
+            >
+              {detailEdit ? 'Cancel' : 'Edit details'}
+            </button>
           </div>
         </div>
+
+        {/* Onboarding details editor */}
+        {detailEdit && (
+          <form onSubmit={saveDetails} className="rounded-xl border border-amber-200 bg-white shadow-sm overflow-hidden">
+            <div className="px-5 py-3 bg-amber-50 border-b border-amber-100">
+              <p className="font-semibold text-slate-900">Edit College Details</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Correct the information captured during onboarding. To change the college type, use the
+                <strong> Features</strong> tab.
+              </p>
+            </div>
+
+            <div className="px-5 py-5 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                    College Name <span className="text-red-500">*</span>
+                  </label>
+                  <input value={detailForm.name} className={inputCls}
+                    onChange={e => setDetailForm(f => ({ ...f, name: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                    College Code <span className="text-red-500">*</span>
+                  </label>
+                  <input value={detailForm.college_code} className={inputCls}
+                    onChange={e => setDetailForm(f => ({ ...f, college_code: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                    City <span className="text-red-500">*</span>
+                  </label>
+                  <input value={detailForm.city} className={inputCls}
+                    onChange={e => setDetailForm(f => ({ ...f, city: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Phone</label>
+                  <input
+                    type="tel" inputMode="numeric" maxLength={10}
+                    value={detailForm.phone}
+                    placeholder="10-digit mobile"
+                    className={inputCls}
+                    onChange={e => setDetailForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 10) }))}
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Address</label>
+                  <input value={detailForm.address} className={inputCls}
+                    onChange={e => setDetailForm(f => ({ ...f, address: e.target.value }))} />
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                    Email <span className="text-red-500">*</span>
+                  </label>
+                  <input value={detailForm.email} className={inputCls}
+                    placeholder="office@college.edu.in"
+                    onChange={e => setDetailForm(f => ({ ...f, email: e.target.value }))} />
+                </div>
+              </div>
+
+              {detailError && <p className="text-sm text-red-600">{detailError}</p>}
+
+              <div className="flex gap-3 pt-1">
+                <Button type="submit" loading={detailSaving}>Save Changes</Button>
+                <Button variant="secondary" type="button" onClick={() => setDetailEdit(false)}>Cancel</Button>
+              </div>
+            </div>
+          </form>
+        )}
 
         {/* Tab strip */}
         <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">

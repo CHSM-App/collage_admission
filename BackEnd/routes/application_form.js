@@ -22,6 +22,7 @@ const db       = require('./db');
 const mssql    = require('mssql');
 const { authenticate } = require('../middleware/auth');
 const logger   = require('../config/logger');
+const { filledSeatsSql } = require('../constants/seatStatuses');
 
 // All application form routes require authentication
 router.use(authenticate);
@@ -40,9 +41,23 @@ async function logActivity(appId, action, actorRole, note = null) {
 const MIN_AGE_FOR_FY = 16; // years
 
 // ── Validation helpers ───────────────────────────────────────
-function validateAadhaar(v)  { return /^\d{12}$/.test(v); }
+// Aadhaar and the ABC (Academic Bank of Credits) ID are both exactly 12 digits.
+function validate12Digits(v) { return /^\d{12}$/.test(String(v ?? '').trim()); }
+const validateAadhaar = validate12Digits;
+const validateAbcId   = validate12Digits;
 function validateMobile(v)   { return /^[6-9]\d{9}$/.test(v); }
 function validateEmail(v)    { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+
+/**
+ * True when an id value is actually absent.
+ *
+ * IMPORTANT: never use a plain falsy check (`!id`) on an id — an id of **0** is
+ * falsy in JS but is a perfectly valid row id (SQL Server identity seeds can start
+ * at 0). Doing so wrongly reports a supplied id as "required".
+ */
+function missingId(v) {
+  return v === undefined || v === null || v === '' || Number.isNaN(Number(v));
+}
 
 function ageFrom(dob) {
   const d = new Date(dob);
@@ -65,11 +80,24 @@ function pick(obj, keys) {
 router.post('/applications/init', async (req, res) => {
   const { student_id, college_id, course_id, academic_year, year_of_study, admission_period_id } = req.body;
 
-  if (!student_id || !college_id || !course_id || !academic_year || !admission_period_id) {
+  if (missingId(student_id) || missingId(college_id) || missingId(course_id) ||
+      !academic_year || missingId(admission_period_id)) {
     return res.status(400).json({ success: false, message: 'student_id, college_id, course_id, academic_year, admission_period_id are required.' });
   }
 
   try {
+    // The account may no longer exist (e.g. deleted while the user still holds a
+    // valid session). Fail with a clear message instead of a raw FK violation.
+    const studentExists = await db.request()
+      .input('sid', mssql.Int, parseInt(student_id))
+      .query('SELECT 1 AS ok FROM students WHERE id = @sid');
+    if (!studentExists.recordset.length) {
+      return res.status(401).json({
+        success: false,
+        message: 'Your account was not found. Please log out and sign in again.',
+      });
+    }
+
     let yr = parseInt(year_of_study) || null;
 
     // Auto-determine year if not provided
@@ -97,7 +125,7 @@ router.post('/applications/init', async (req, res) => {
       .input('pid', mssql.Int, parseInt(admission_period_id))
       .query(`
         SELECT id, year_of_study, course_id, total_seats,
-          (SELECT COUNT(*) FROM applications a WHERE a.admission_period_id = ap.id AND a.status <> 'draft') AS filled_seats,
+          ${filledSeatsSql('ap')} AS filled_seats,
           is_active, end_date
         FROM admission_periods ap WHERE id = @pid
       `);
@@ -174,8 +202,8 @@ router.post('/applications/init', async (req, res) => {
           AND target.status        = 'draft'
         WHEN NOT MATCHED THEN
           INSERT (student_id, college_id, course_id, year_of_study, academic_year,
-                  admission_period_id, status, current_step, created_by)
-          VALUES (@sid, @col, @crs, @yr, @ay, @apid, 'draft', 1, @actor)
+                  admission_period_id, status, current_step, created_by, created_by_role)
+          VALUES (@sid, @col, @crs, @yr, @ay, @apid, 'draft', 1, @actor, 'student')
         WHEN MATCHED THEN
           UPDATE SET updated_by = @actor
         OUTPUT INSERTED.id, $action AS merge_action INTO @t (id, merge_action);
@@ -256,11 +284,20 @@ router.post('/applications/init', async (req, res) => {
 router.post('/applications/init-by-college', async (req, res) => {
   const { student_id, college_id, course_id, academic_year, year_of_study, admission_period_id } = req.body;
 
-  if (!student_id || !college_id || !course_id || !academic_year || !admission_period_id) {
+  if (missingId(student_id) || missingId(college_id) || missingId(course_id) ||
+      !academic_year || missingId(admission_period_id)) {
     return res.status(400).json({ success: false, message: 'student_id, college_id, course_id, academic_year, admission_period_id are required.' });
   }
 
   try {
+    // Guard: the selected student must still exist (avoids a raw FK violation).
+    const studentExists = await db.request()
+      .input('sid', mssql.Int, parseInt(student_id))
+      .query('SELECT 1 AS ok FROM students WHERE id = @sid');
+    if (!studentExists.recordset.length) {
+      return res.status(400).json({ success: false, message: 'Student not found. Please search and select the student again.' });
+    }
+
     // Always get year_of_study from the admission period — same as student init route
     const period = await db.request()
       .input('pid', mssql.Int, parseInt(admission_period_id))
@@ -272,7 +309,7 @@ router.post('/applications/init-by-college', async (req, res) => {
 
     const yr = period.recordset[0].year_of_study;
 
-    // Return existing draft if present (using correct year from period)
+    // Resume an existing draft if present (using correct year from period).
     const existing = await db.request()
       .input('sid', mssql.Int, parseInt(student_id))
       .input('col', mssql.Int, parseInt(college_id))
@@ -280,18 +317,33 @@ router.post('/applications/init-by-college', async (req, res) => {
       .input('yr',  mssql.Int, yr)
       .input('ay',  mssql.NVarChar, academic_year)
       .query(`
-        SELECT id, current_step FROM applications
+        SELECT id, current_step, created_by_role FROM applications
         WHERE student_id=@sid AND college_id=@col AND course_id=@crs
           AND year_of_study=@yr AND academic_year=@ay AND status='draft'
       `);
 
     if (existing.recordset.length > 0) {
+      const draft = existing.recordset[0];
+
+      // A draft the STUDENT started is theirs — the college must not take it over.
+      // Doing so would both hijack work the student is still doing and leave the
+      // application marked `created_by_role = 'student'`, sending a college-filled
+      // form through the full scrutiny pipeline instead of direct approval.
+      if (draft.created_by_role !== 'college') {
+        return res.status(409).json({
+          success: false,
+          message: 'This student has already started an application for this course and it is still in progress. Ask them to complete and pay for it, or cancel their draft first.',
+          student_draft: true,
+          application_id: draft.id,
+        });
+      }
+
       return res.json({
         success: true,
         data: {
-          application_id: existing.recordset[0].id,
+          application_id: draft.id,
           year_of_study: yr,
-          current_step: existing.recordset[0].current_step || 1,
+          current_step: draft.current_step || 1,
           resumed: true,
         },
       });
@@ -330,9 +382,9 @@ router.post('/applications/init-by-college', async (req, res) => {
         DECLARE @t TABLE (id INT);
         INSERT INTO applications
           (student_id, college_id, course_id, year_of_study, academic_year,
-           admission_period_id, status, current_step, created_by)
+           admission_period_id, status, current_step, created_by, created_by_role)
         OUTPUT INSERTED.id INTO @t
-        VALUES (@sid, @col, @crs, @yr, @ay, @apid, 'draft', 1, @actor);
+        VALUES (@sid, @col, @crs, @yr, @ay, @apid, 'draft', 1, @actor, 'college');
         SELECT id FROM @t;
       `);
 
@@ -476,7 +528,7 @@ router.get('/applications/:id/form', async (req, res) => {
 // ── GET /api/student-profile/autofill ───────────────────────
 router.get('/student-profile/autofill', async (req, res) => {
   const { student_id } = req.query;
-  if (!student_id) return res.status(400).json({ success: false, message: 'student_id required.' });
+  if (missingId(student_id)) return res.status(400).json({ success: false, message: 'student_id required.' });
 
   try {
     const profRes = await db.request()
@@ -488,20 +540,38 @@ router.get('/student-profile/autofill', async (req, res) => {
 
     const profile = profRes.recordset[0] || {};
 
-    // Most recent completed application for extra autofill
+    // Most recent completed application, used to prefill the next one.
+    //
+    // Carries over every field that describes the STUDENT and so stays true across
+    // applications. Deliberately NOT carried over are the fields that belong to a
+    // specific admission and must be filled in fresh each time:
+    //   app_division, app_degree_course_code, app_date_of_admission, app_semester,
+    //   app_is_diploma_direct_sy, app_admitted_category, app_admission_quota,
+    //   fees_category*  (these are set by the college during scrutiny)
     const lastAppRes = await db.request()
       .input('sid', mssql.Int, parseInt(student_id))
       .query(`
         SELECT TOP 1
+          -- Step 1 — personal
           app_surname, app_first_name, app_middle_name, app_mother_name,
           app_sex, app_mobile, app_email, app_address, app_taluka, app_district, app_state,
-          app_category, fees_category,
+          app_category, app_special_status,
+          app_name_as_on_aadhaar, app_son_of,
+          -- Step 2 — other details
           app_birth_date, app_birth_place, app_birth_taluka, app_birth_district, app_birth_state,
           app_nationality, app_marital_status, app_religion, app_caste, app_mother_tongue,
           app_height_cm, app_weight_kg, app_blood_group,
           app_father_full_name, app_son_daughter_no, app_father_occupation, app_annual_income,
           app_aadhaar, app_prn, app_abc_id, app_university_app_no,
-          app_bank_account, app_bank_ifsc, app_bank_name, app_bank_branch
+          app_bank_account, app_bank_ifsc, app_bank_name, app_bank_branch,
+          -- Parent name parts (migration 030)
+          app_father_surname, app_father_first_name, app_father_middle_name,
+          app_mother_surname, app_mother_first_name, app_mother_middle_name,
+          -- General-college fields (migration 034)
+          app_native_address, app_native_taluka, app_native_district,
+          app_parent_mobile, app_land_line, app_guardian_relation,
+          -- HSC subjects / hostel / category (migration 030)
+          app_hsc_maths, app_hsc_biology, app_hostel_facility, app_other_category
         FROM applications
         WHERE student_id = @sid AND status NOT IN ('draft','rejected','cancelled')
         ORDER BY created_at DESC
@@ -766,7 +836,10 @@ router.patch('/applications/:id/other-details', async (req, res) => {
   }
   if (!aadhaar)         errors.aadhaar         = 'Aadhaar number is required.';
   else if (!validateAadhaar(aadhaar)) errors.aadhaar = 'Aadhaar must be exactly 12 digits.';
+  // ABC ID is only REQUIRED from SY onward, but whenever one is supplied it must
+  // be a valid 12-digit id — including for an FY student who fills it in anyway.
   if (app.year_of_study > 1 && !abc_id) errors.abc_id = 'ABC ID is required for SY/TY students.';
+  else if (abc_id && !validateAbcId(abc_id)) errors.abc_id = 'ABC ID must be exactly 12 digits.';
   if (app.year_of_study > 1 && !prn) errors.prn = 'PRN is required for SY/TY students.';
 
   // Bank: if any one provided, account + IFSC become required
@@ -953,7 +1026,7 @@ router.post('/applications/:id/form-documents', async (req, res) => {
   if (!app) return;
 
   const { student_id, document_type_id, file_name, file_path } = req.body;
-  if (!student_id || !document_type_id || !file_name || !file_path) {
+  if (missingId(student_id) || missingId(document_type_id) || !file_name || !file_path) {
     return res.status(400).json({ success: false, message: 'student_id, document_type_id, file_name, file_path are required.' });
   }
 
@@ -1249,8 +1322,14 @@ router.post('/applications/:id/submit-direct', async (req, res) => {
     // Fetch app details needed to generate registration number
     const appInfoRes = await db.request()
       .input('id', mssql.Int, appId)
-      .query(`SELECT college_id, course_id, year_of_study, academic_year FROM applications WHERE id = @id`);
+      .query(`SELECT college_id, course_id, year_of_study, academic_year, created_by_role
+              FROM applications WHERE id = @id`);
     const ai = appInfoRes.recordset[0];
+
+    // A college-filled application is directly approved (the college reviewed it
+    // inline); a student-filled one goes to the scrutiny queue.
+    const createdByCollege = ai.created_by_role === 'college';
+    const targetStatus     = createdByCollege ? 'confirmed' : 'submitted';
 
     // Generate registration number (same logic as payment flow)
     const prefix = `${(ai.academic_year || '').replace('-', '')}-${String(ai.course_id).padStart(2, '0')}-${ai.year_of_study}`;
@@ -1265,12 +1344,15 @@ router.post('/applications/:id/submit-direct', async (req, res) => {
       .input('id',     mssql.Int,      appId)
       .input('regNum', mssql.NVarChar, regNum)
       .input('actor',  mssql.NVarChar, actor)
+      .input('status', mssql.NVarChar, targetStatus)
       .query(`
         UPDATE applications SET
-          status = 'submitted',
+          status = @status,
           registration_number = @regNum,
           declaration_accepted_at = GETDATE(),
           submitted_at = GETDATE(),
+          confirmed_at = CASE WHEN @status = 'confirmed' THEN GETDATE() ELSE confirmed_at END,
+          approved_at  = CASE WHEN @status = 'confirmed' THEN GETDATE() ELSE approved_at END,
           current_step = 6,
           updated_at = GETDATE(),
           updated_by = @actor,
@@ -1278,10 +1360,18 @@ router.post('/applications/:id/submit-direct', async (req, res) => {
         WHERE id = @id
       `);
 
-    const submitterRole = req.user?.role === 'college' ? 'college' : 'student';
+    const submitterRole = createdByCollege ? 'college' : 'student';
     await logActivity(appId, 'submitted', submitterRole, null);
+    if (createdByCollege) {
+      await logActivity(appId, 'confirmed', 'college', 'Directly approved (application filled by college).');
+    }
 
-    return res.json({ success: true, message: 'Application submitted successfully.', registration_number: regNum });
+    return res.json({
+      success: true,
+      message: createdByCollege ? 'Application submitted and approved.' : 'Application submitted successfully.',
+      registration_number: regNum,
+      status: targetStatus,
+    });
   } catch (err) {
     logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });

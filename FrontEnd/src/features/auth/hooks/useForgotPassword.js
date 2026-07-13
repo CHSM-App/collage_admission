@@ -3,7 +3,7 @@
  *   PHONE → OTP → PASSWORD → DONE
  */
 import { useState } from 'react'
-import { forgotPasswordSendOtp, forgotPasswordReset } from '../services/authService.js'
+import { forgotPasswordSendOtp, forgotPasswordVerifyOtp, forgotPasswordReset } from '../services/authService.js'
 import { validatePassword, validatePhone, formatPhone } from '../../../shared/hooks/usePasswordValidation.js'
 import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
 
@@ -40,16 +40,27 @@ export function useForgotPassword() {
     }
   }
 
-  // Step 2 — verify OTP (client-side only; real check on reset)
-  function handleVerifyOtp(e) {
+  // Step 2 — verify the OTP against the server before showing the password step.
+  // The server checks it WITHOUT consuming it, so handleReset can still redeem it.
+  // A wrong OTP — including the case where none was ever sent, because the number
+  // is not registered — must not get past this step.
+  async function handleVerifyOtp(e) {
     e?.preventDefault()
     setError('')
     if (otp.trim().length !== 6) {
       setError('Please enter the 6-digit OTP.')
       return
     }
-    setStep(STEPS.PASSWORD)
-    setInfo('')
+    setLoading(true)
+    try {
+      await forgotPasswordVerifyOtp(phone.trim(), otp.trim())
+      setStep(STEPS.PASSWORD)
+      setInfo('')
+    } catch (err) {
+      setError(getErrorMessage(err, 'Incorrect or expired OTP. Please try again.'))
+    } finally {
+      setLoading(false)
+    }
   }
 
   // Resend OTP

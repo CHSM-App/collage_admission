@@ -4,7 +4,10 @@ import { LOGIN_PATHS } from '../../../app/routePaths.js'
 import AuthLayout from '../../../layouts/AuthLayout.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import Input from '../../../shared/components/Input.jsx'
-import { collegeForgotPasswordSendOtp, collegeForgotPasswordReset } from '../services/authService.js'
+import {
+  collegeForgotPasswordSendOtp, collegeForgotPasswordVerifyOtp, collegeForgotPasswordReset,
+} from '../services/authService.js'
+import { validateEmail } from '../../../shared/hooks/usePasswordValidation.js'
 import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
 
 const STEPS = { EMAIL: 'email', OTP: 'otp', PASSWORD: 'password', DONE: 'done' }
@@ -29,7 +32,8 @@ export default function CollegeForgotPassword() {
   async function handleSendOtp(e) {
     e.preventDefault()
     setError(''); setInfo('')
-    if (!email.trim()) { setError('Please enter your email.'); return }
+    const emailErr = validateEmail(email)
+    if (emailErr) { setError(emailErr); return }
     setLoading(true)
     try {
       const res = await collegeForgotPasswordSendOtp(email.trim())
@@ -42,12 +46,23 @@ export default function CollegeForgotPassword() {
     }
   }
 
-  function handleVerifyOtp(e) {
+  // Verify the OTP server-side before showing the password step. The server checks
+  // it without consuming it, so the reset call can still redeem it. A wrong OTP —
+  // including the case where none was sent because the email is not registered —
+  // must not get past this step.
+  async function handleVerifyOtp(e) {
     e.preventDefault()
-    setError('')
+    setError(''); setInfo('')
     if (!/^\d{6}$/.test(otp)) { setError('Enter the 6-digit OTP.'); return }
-    // OTP is verified together with the password on reset — advance to the password step.
-    setStep(STEPS.PASSWORD)
+    setLoading(true)
+    try {
+      await collegeForgotPasswordVerifyOtp(email.trim(), otp)
+      setStep(STEPS.PASSWORD)
+    } catch (err) {
+      setError(getErrorMessage(err, 'Incorrect or expired OTP. Please try again.'))
+    } finally {
+      setLoading(false)
+    }
   }
 
   async function handleResend() {

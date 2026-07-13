@@ -48,10 +48,20 @@ describe('useStudentRegistration', () => {
     expect(result.current.otp).toBe('123456')
   })
 
+  it('handleSendOtp shows error on invalid email', async () => {
+    const { result } = renderHook(() => useStudentRegistration())
+    act(() => result.current.handleChange({ target: { name: 'email', value: 'rahulgmail.@com' } }))
+    await act(async () => { await result.current.handleSendOtp({ preventDefault: vi.fn() }) })
+    expect(result.current.error).toMatch(/email/i)
+    expect(result.current.step).toBe(REG_STEPS.FORM)
+  })
+
   it('handleSendOtp shows error on invalid phone', async () => {
     const { result } = renderHook(() => useStudentRegistration())
-    // Set invalid phone
-    act(() => result.current.handleChange({ target: { name: 'phone', value: '1234' } }))
+    act(() => {
+      result.current.handleChange({ target: { name: 'email', value: VALID_FORM.email } })
+      result.current.handleChange({ target: { name: 'phone', value: '1234' } })
+    })
     await act(async () => { await result.current.handleSendOtp({ preventDefault: vi.fn() }) })
     expect(result.current.error).toMatch(/phone/i)
     expect(result.current.step).toBe(REG_STEPS.FORM)
@@ -60,6 +70,7 @@ describe('useStudentRegistration', () => {
   it('handleSendOtp shows error on invalid password', async () => {
     const { result } = renderHook(() => useStudentRegistration())
     act(() => {
+      result.current.handleChange({ target: { name: 'email', value: VALID_FORM.email } })
       result.current.handleChange({ target: { name: 'phone', value: '9876543210' } })
       result.current.handleChange({ target: { name: 'password', value: 'weak' } })
     })
@@ -70,6 +81,7 @@ describe('useStudentRegistration', () => {
   it('handleSendOtp shows error when passwords do not match', async () => {
     const { result } = renderHook(() => useStudentRegistration())
     act(() => {
+      result.current.handleChange({ target: { name: 'email', value: VALID_FORM.email } })
       result.current.handleChange({ target: { name: 'phone', value: '9876543210' } })
       result.current.handleChange({ target: { name: 'password', value: 'Test@1234' } })
       result.current.handleChange({ target: { name: 'confirm_password', value: 'Different@1' } })

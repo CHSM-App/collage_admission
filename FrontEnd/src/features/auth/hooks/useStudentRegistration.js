@@ -4,7 +4,7 @@
  */
 import { useState } from 'react'
 import { authService, sendOtp, verifyOtp } from '../services/authService.js'
-import { validatePassword, validatePhone, formatPhone } from '../../../shared/hooks/usePasswordValidation.js'
+import { validatePassword, validatePhone, validateEmail, formatPhone } from '../../../shared/hooks/usePasswordValidation.js'
 import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
 
 export const REG_STEPS = { FORM: 'form', OTP: 'otp' }
@@ -38,6 +38,8 @@ export function useStudentRegistration() {
   async function handleSendOtp(e) {
     e?.preventDefault()
     setError('')
+    const emailErr = validateEmail(form.email)
+    if (emailErr) { setError(emailErr); return }
     const phoneErr = validatePhone(form.phone)
     if (phoneErr) { setError(phoneErr); return }
     const pwdErr = validatePassword(form.password)

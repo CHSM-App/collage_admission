@@ -30,6 +30,7 @@ const logger = require('../config/logger');
 const feeSvc   = require('../services/FeeDeterminationService');
 const rcptSvc  = require('../services/ReceiptNumberService');
 const { saveOtp, verifyAndConsumeOtp } = require('../services/otpService');
+const { filledSeatsSql } = require('../constants/seatStatuses');
 
 const YEAR_LEVEL_MAP = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' };
 
@@ -120,7 +121,7 @@ router.get('/:collegeId/admission-periods', async (req, res) => {
       .query(`
         SELECT ap.id, ap.year_of_study, ap.academic_year,
                ap.start_date, ap.end_date, ap.total_seats,
-               (SELECT COUNT(*) FROM applications a WHERE a.admission_period_id = ap.id AND a.status <> 'draft') AS filled_seats,
+               ${filledSeatsSql('ap', 'a')} AS filled_seats,
                ap.is_active, ap.is_disabled,
                fm.code_no AS course_id,
                CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name
@@ -779,29 +780,19 @@ router.post('/:collegeId/applications/:appId/approve', requireWrite('review_appl
       return res.status(400).json({ success: false, message: 'Application must be under review to accept.' });
     }
 
-    const pool1 = await db;
-    const tx1   = pool1.transaction();
-    await tx1.begin();
-    try {
-      await tx1.request()
-        .input('pid', mssqlShared.Int, appRes.recordset[0].admission_period_id)
-        .query('UPDATE admission_periods SET filled_seats = filled_seats + 1 WHERE id = @pid AND filled_seats < total_seats');
-
-      await tx1.request()
-        .input('id',    mssqlShared.Int,      parseInt(req.params.appId))
-        .input('actor', mssqlShared.NVarChar, String(req.user.staff_id || req.user.id))
-        .query(`
-          UPDATE applications
-          SET status = 'doc_verified', approved_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(),
-              correction_note = NULL, updated_by = @actor
-          WHERE id = @id
-        `);
-
-      await tx1.commit();
-    } catch (txErr) {
-      await tx1.rollback();
-      throw txErr;
-    }
+    // No seat is taken here. Accepting an application only moves it into document
+    // verification — the seat is counted once the admission is CONFIRMED. Filled
+    // seats are derived from application status (see constants/seatStatuses.js),
+    // so there is no counter to bump.
+    await db.request()
+      .input('id',    mssqlShared.Int,      parseInt(req.params.appId))
+      .input('actor', mssqlShared.NVarChar, String(req.user.staff_id || req.user.id))
+      .query(`
+        UPDATE applications
+        SET status = 'doc_verified', approved_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(),
+            correction_note = NULL, updated_by = @actor
+        WHERE id = @id
+      `);
 
     await logActivity(req.params.appId, 'accepted', 'college', null);
     getStudentForNotification(req.params.appId).then(s => s && whatsapp.notifyApplicationAccepted(s));
@@ -979,32 +970,17 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
     if (appRes.recordset.length === 0) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
-    // 'confirmed' is included so the college fee step is idempotent: when the
-    // application fee is collected first (recordApplicationFee sets status to
-    // 'confirmed'), confirming again just records the college-fee total /
-    // installments / division rather than erroring.
-    const CONFIRMABLE = ['submitted', 'doc_verified', 'scrutiny_accepted', 'doc_verification_pending', 'confirmed'];
+    // A STUDENT-submitted application must walk the scrutiny pipeline — the college
+    // has to accept it (`/approve`, -> doc_verified) before it can be confirmed.
+    // Confirming straight out of 'submitted' would skip that review.
+    //
+    // 'confirmed' is allowed so the college-fee step is idempotent: a COLLEGE-filled
+    // application is directly approved on application-fee payment, so it is already
+    // 'confirmed' — confirming again just records the college-fee total, installments
+    // and division rather than erroring.
+    const CONFIRMABLE = ['doc_verified', 'scrutiny_accepted', 'doc_verification_pending', 'confirmed'];
     if (!CONFIRMABLE.includes(appRes.recordset[0].status)) {
       return res.status(400).json({ success: false, message: 'Application must be accepted before it can be confirmed.' });
-    }
-
-    // Auto-approve submitted applications (college-created, no manual review needed)
-    if (appRes.recordset[0].status === 'submitted') {
-      try {
-        const pool0 = await db;
-        const tx0   = pool0.transaction();
-        await tx0.begin();
-        try {
-          await tx0.request()
-            .input('pid', mssqlShared.Int, appRes.recordset[0].admission_period_id || 0)
-            .query('UPDATE admission_periods SET filled_seats = filled_seats + 1 WHERE id = @pid AND filled_seats < total_seats');
-          await tx0.request()
-            .input('id',    mssqlShared.Int,      parseInt(req.params.appId))
-            .input('actor', mssqlShared.NVarChar, String(req.user.staff_id || req.user.id))
-            .query(`UPDATE applications SET status = 'doc_verified', approved_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(), updated_by = @actor WHERE id = @id`);
-          await tx0.commit();
-        } catch (e) { await tx0.rollback(); }
-      } catch (_) {}
     }
 
     // Does this college run a college-fee system? For colleges with college_fee
@@ -1061,7 +1037,9 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
         .input('actor', mssqlShared.NVarChar, actor)
         .query(`
           UPDATE applications
-          SET status = 'confirmed', confirmed_at = GETDATE(), updated_at = GETDATE(), status_updated_at = GETDATE(),
+          SET status = 'confirmed',
+              confirmed_at = COALESCE(confirmed_at, GETDATE()),
+              updated_at = GETDATE(), status_updated_at = GETDATE(),
               fee_total_amount = @total, fee_pay_now_amount = @now,
               app_division = COALESCE(@div, app_division), updated_by = @actor
           WHERE id = @id
@@ -1165,34 +1143,17 @@ router.post('/:collegeId/applications/:appId/cancel', requireWrite('review_appli
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
 
-    const { status, admission_period_id } = appRes.recordset[0];
-
-    const pool3 = await db;
-    const tx3   = pool3.transaction();
-    await tx3.begin();
-    try {
-      // Free the seat if one was held (doc_verified or later)
-      if (['doc_verified', 'scrutiny_accepted', 'doc_verification_pending', 'confirmed'].includes(status)) {
-        await tx3.request()
-          .input('pid', mssqlShared.Int, admission_period_id)
-          .query('UPDATE admission_periods SET filled_seats = filled_seats - 1 WHERE id = @pid AND filled_seats > 0');
-      }
-
-      await tx3.request()
-        .input('id',     mssqlShared.Int,      parseInt(req.params.appId))
-        .input('reason', mssqlShared.NVarChar,  reason || null)
-        .input('actor',  mssqlShared.NVarChar,  String(req.user.staff_id || req.user.id))
-        .query(`
-          UPDATE applications
-          SET status = 'cancelled', cancellation_reason = @reason, updated_at = GETDATE(), status_updated_at = GETDATE(), updated_by = @actor
-          WHERE id = @id
-        `);
-
-      await tx3.commit();
-    } catch (txErr) {
-      await tx3.rollback();
-      throw txErr;
-    }
+    // Cancelling frees the seat on its own: filled seats are derived from
+    // application status, and 'cancelled' is not a seat-holding status.
+    await db.request()
+      .input('id',     mssqlShared.Int,      parseInt(req.params.appId))
+      .input('reason', mssqlShared.NVarChar,  reason || null)
+      .input('actor',  mssqlShared.NVarChar,  String(req.user.staff_id || req.user.id))
+      .query(`
+        UPDATE applications
+        SET status = 'cancelled', cancellation_reason = @reason, updated_at = GETDATE(), status_updated_at = GETDATE(), updated_by = @actor
+        WHERE id = @id
+      `);
 
     await logActivity(req.params.appId, 'cancelled', 'college', reason || null);
 
@@ -1217,6 +1178,7 @@ router.post('/:collegeId/applications/:appId/record-application-fee', requirePer
       .input('cid', mssqlShared.Int, collegeId)
       .query(`
         SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study, a.academic_year,
+               a.created_by_role,
                COALESCE(c.application_fee, 0) AS application_fee
         FROM applications a
         JOIN colleges c ON c.id = a.college_id
@@ -1256,6 +1218,9 @@ router.post('/:collegeId/applications/:appId/record-application-fee', requirePer
       regNum = `${prefix}-${String(seq).padStart(4, '0')}`;
     }
 
+    const createdByCollege = app.created_by_role === 'college';
+    const targetStatus     = createdByCollege ? 'confirmed' : 'submitted';
+
     const pool = await db;
     const tx   = pool.transaction();
     await tx.begin();
@@ -1275,14 +1240,25 @@ router.post('/:collegeId/applications/:appId/record-application-fee', requirePer
             GETDATE(), 'college', @userId, @actor, @receiptNo)
         `);
 
+      // Where the application lands depends on WHO filled it in:
+      //   college-filled  -> directly approved ('confirmed'), scrutiny skipped
+      //   student-filled  -> 'submitted', then the full scrutiny pipeline
+      // An application already past 'submitted' keeps its current status —
+      // recording the fee must never drag it backwards.
       await tx.request()
         .input('id',     mssqlShared.Int,      appId)
         .input('regNum', mssqlShared.NVarChar,  regNum)
         .input('actor',  mssqlShared.NVarChar,  actor)
+        .input('status', mssqlShared.NVarChar,  targetStatus)
         .query(`
           UPDATE applications
-          SET status = 'confirmed', registration_number = @regNum,
+          SET status = CASE WHEN status IN ('draft', 'submitted') THEN @status ELSE status END,
+              registration_number = @regNum,
               application_fee_paid = 1, submitted_at = COALESCE(submitted_at, GETDATE()),
+              confirmed_at = CASE WHEN @status = 'confirmed' AND status IN ('draft','submitted')
+                                  THEN GETDATE() ELSE confirmed_at END,
+              approved_at  = CASE WHEN @status = 'confirmed' AND status IN ('draft','submitted')
+                                  THEN GETDATE() ELSE approved_at END,
               updated_at = GETDATE(), status_updated_at = GETDATE(),
               updated_by = @actor
           WHERE id = @id AND status IN ('draft', 'submitted', 'confirmed')
@@ -1295,8 +1271,17 @@ router.post('/:collegeId/applications/:appId/record-application-fee', requirePer
     }
 
     await logActivity(appId, 'application_fee_paid', 'college', `Cash application fee: ₹${fee.toLocaleString('en-IN')}`);
+    if (createdByCollege && ['draft', 'submitted'].includes(app.status)) {
+      await logActivity(appId, 'confirmed', 'college', 'Directly approved (application filled by college).');
+    }
 
-    return res.json({ success: true, message: `Application fee collected and application submitted.`, amount: fee, registration_number: regNum });
+    return res.json({
+      success: true,
+      message: 'Application fee collected and application submitted.',
+      amount: fee,
+      registration_number: regNum,
+      status: ['draft', 'submitted'].includes(app.status) ? targetStatus : app.status,
+    });
   } catch (err) {
     logger.error({ err }, 'record-application-fee error');
     return res.status(500).json({ success: false, message: 'Server error.' });

@@ -3,11 +3,14 @@ import { renderHook, act } from '@testing-library/react'
 import { useForgotPassword, STEPS } from '../../features/auth/hooks/useForgotPassword.js'
 
 vi.mock('../../features/auth/services/authService.js', () => ({
-  forgotPasswordSendOtp: vi.fn(),
-  forgotPasswordReset:   vi.fn(),
+  forgotPasswordSendOtp:   vi.fn(),
+  forgotPasswordVerifyOtp: vi.fn(),
+  forgotPasswordReset:     vi.fn(),
 }))
 
-import { forgotPasswordSendOtp, forgotPasswordReset } from '../../features/auth/services/authService.js'
+import {
+  forgotPasswordSendOtp, forgotPasswordVerifyOtp, forgotPasswordReset,
+} from '../../features/auth/services/authService.js'
 
 describe('useForgotPassword', () => {
   beforeEach(() => vi.clearAllMocks())
@@ -58,23 +61,44 @@ describe('useForgotPassword', () => {
     expect(result.current.error).toBe('Phone not found.')
   })
 
-  it('handleVerifyOtp shows error if OTP is not 6 digits', () => {
+  it('handleVerifyOtp shows error if OTP is not 6 digits', async () => {
     const { result } = renderHook(() => useForgotPassword())
     act(() => result.current.setOtp('123'))
-    act(() => result.current.handleVerifyOtp({ preventDefault: vi.fn() }))
+    await act(async () => { await result.current.handleVerifyOtp({ preventDefault: vi.fn() }) })
     expect(result.current.error).toBe('Please enter the 6-digit OTP.')
     expect(result.current.step).toBe(STEPS.PHONE)
+    expect(forgotPasswordVerifyOtp).not.toHaveBeenCalled()
   })
 
   it('handleVerifyOtp advances to PASSWORD step for valid OTP', async () => {
     forgotPasswordSendOtp.mockResolvedValueOnce({ data: { message: 'OTP sent.' } })
+    forgotPasswordVerifyOtp.mockResolvedValueOnce({ data: { message: 'OTP verified.' } })
     const { result } = renderHook(() => useForgotPassword())
     act(() => result.current.setPhone('9876543210'))
     await act(async () => { await result.current.handleSendOtp({ preventDefault: vi.fn() }) })
 
     act(() => result.current.setOtp('654321'))
-    act(() => result.current.handleVerifyOtp({ preventDefault: vi.fn() }))
+    await act(async () => { await result.current.handleVerifyOtp({ preventDefault: vi.fn() }) })
+    expect(forgotPasswordVerifyOtp).toHaveBeenCalledWith('9876543210', '654321')
     expect(result.current.step).toBe(STEPS.PASSWORD)
+  })
+
+  // The reported bug: an unregistered number gets no OTP, so ANY code was wrong —
+  // yet the user was still let through to the new-password screen.
+  it('handleVerifyOtp does NOT advance when the OTP is rejected', async () => {
+    forgotPasswordSendOtp.mockResolvedValueOnce({ data: { message: 'If this number is registered, an OTP has been sent.' } })
+    forgotPasswordVerifyOtp.mockRejectedValueOnce({
+      response: { data: { message: 'Incorrect or expired OTP. Please try again.' } },
+    })
+    const { result } = renderHook(() => useForgotPassword())
+    act(() => result.current.setPhone('9876543210'))
+    await act(async () => { await result.current.handleSendOtp({ preventDefault: vi.fn() }) })
+
+    act(() => result.current.setOtp('000000'))
+    await act(async () => { await result.current.handleVerifyOtp({ preventDefault: vi.fn() }) })
+
+    expect(result.current.step).toBe(STEPS.OTP)
+    expect(result.current.error).toBe('Incorrect or expired OTP. Please try again.')
   })
 
   it('handleReset shows error for invalid password', async () => {
@@ -86,7 +110,7 @@ describe('useForgotPassword', () => {
     act(() => result.current.setPhone('9876543210'))
     await act(async () => { await result.current.handleSendOtp({ preventDefault: vi.fn() }) })
     act(() => result.current.setOtp('654321'))
-    act(() => result.current.handleVerifyOtp({ preventDefault: vi.fn() }))
+    await act(async () => { await result.current.handleVerifyOtp({ preventDefault: vi.fn() }) })
 
     // Now try reset with weak password
     act(() => {
@@ -103,7 +127,7 @@ describe('useForgotPassword', () => {
     act(() => result.current.setPhone('9876543210'))
     await act(async () => { await result.current.handleSendOtp({ preventDefault: vi.fn() }) })
     act(() => result.current.setOtp('654321'))
-    act(() => result.current.handleVerifyOtp({ preventDefault: vi.fn() }))
+    await act(async () => { await result.current.handleVerifyOtp({ preventDefault: vi.fn() }) })
 
     act(() => {
       result.current.setNewPassword('Test@1234')
@@ -121,7 +145,7 @@ describe('useForgotPassword', () => {
     act(() => result.current.setPhone('9876543210'))
     await act(async () => { await result.current.handleSendOtp({ preventDefault: vi.fn() }) })
     act(() => result.current.setOtp('654321'))
-    act(() => result.current.handleVerifyOtp({ preventDefault: vi.fn() }))
+    await act(async () => { await result.current.handleVerifyOtp({ preventDefault: vi.fn() }) })
 
     act(() => {
       result.current.setNewPassword('Test@1234')
@@ -146,7 +170,7 @@ describe('useForgotPassword', () => {
     act(() => result.current.setPhone('9876543210'))
     await act(async () => { await result.current.handleSendOtp({ preventDefault: vi.fn() }) })
     act(() => result.current.setOtp('654321'))
-    act(() => result.current.handleVerifyOtp({ preventDefault: vi.fn() }))
+    await act(async () => { await result.current.handleVerifyOtp({ preventDefault: vi.fn() }) })
     act(() => {
       result.current.setNewPassword('Test@1234')
       result.current.setConfirmPassword('Test@1234')

@@ -36,11 +36,12 @@ async function saveOtp(normPhone, otp, purpose, pendingData) {
 }
 
 /**
- * Verify an OTP and mark it as used if valid.
+ * Shared OTP check. Expired OTPs are always burned; a valid one is burned only
+ * when `consume` is true.
  *
  * @returns {{ valid: boolean, reason?: string, pendingData?: object }}
  */
-async function verifyAndConsumeOtp(normPhone, otp, purpose) {
+async function checkOtpInternal(normPhone, otp, purpose, consume) {
   const result = await db.request()
     .input('phone',   mssql.NVarChar, normPhone)
     .input('purpose', mssql.NVarChar, purpose)
@@ -56,14 +57,34 @@ async function verifyAndConsumeOtp(normPhone, otp, purpose) {
 
   if (new Date() > new Date(row.expires_at)) {
     await db.request().input('id', mssql.Int, row.id).query('UPDATE otp_store SET used = 1 WHERE id = @id');
-    return { valid: false, reason: 'OTP has expired. Please request a new one.' };
+    return { valid: false, expired: true, reason: 'OTP has expired. Please request a new one.' };
   }
 
   const match = await bcrypt.compare(String(otp).trim(), row.otp_hash);
   if (!match) return { valid: false, reason: 'Incorrect OTP. Please try again.' };
 
-  await db.request().input('id', mssql.Int, row.id).query('UPDATE otp_store SET used = 1 WHERE id = @id');
+  if (consume) {
+    await db.request().input('id', mssql.Int, row.id).query('UPDATE otp_store SET used = 1 WHERE id = @id');
+  }
   return { valid: true, pendingData: row.pending_data ? JSON.parse(row.pending_data) : null };
 }
 
-module.exports = { saveOtp, verifyAndConsumeOtp };
+/**
+ * Verify an OTP and mark it as used if valid.
+ */
+function verifyAndConsumeOtp(normPhone, otp, purpose) {
+  return checkOtpInternal(normPhone, otp, purpose, true);
+}
+
+/**
+ * Verify an OTP WITHOUT consuming it, so a later step can still redeem it.
+ *
+ * Used to gate a multi-step flow (e.g. forgot-password) at the OTP screen: the
+ * user must not reach the new-password screen on an OTP that was never valid.
+ * The OTP is consumed only by the final action that actually changes state.
+ */
+function checkOtp(normPhone, otp, purpose) {
+  return checkOtpInternal(normPhone, otp, purpose, false);
+}
+
+module.exports = { saveOtp, verifyAndConsumeOtp, checkOtp };

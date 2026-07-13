@@ -17,6 +17,7 @@ const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/p
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const logger  = require('../config/logger');
 const { presetForType, isValidType, COLLEGE_TYPES } = require('../constants/collegePresets');
+const { filledSeatsSql } = require('../constants/seatStatuses');
 
 // ── Generate next college code (CL001, CL002, …) ────────────
 async function generateCollegeCode() {
@@ -183,7 +184,7 @@ router.get('/by-code/:code', async (req, res) => {
           ap.id, ap.year_of_study, ap.academic_year,
           ap.start_date, ap.end_date,
           ap.total_seats,
-          (SELECT COUNT(*) FROM applications a WHERE a.admission_period_id = ap.id AND a.status <> 'draft') AS filled_seats,
+          ${filledSeatsSql('ap', 'a')} AS filled_seats,
           ap.is_active,
           fm.code_no AS course_id,
           CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name,
@@ -258,7 +259,7 @@ router.get('/:id/admission-periods', async (req, res) => {
           ap.id, ap.year_of_study, ap.academic_year,
           ap.start_date, ap.end_date,
           ap.total_seats,
-          (SELECT COUNT(*) FROM applications a WHERE a.admission_period_id = ap.id AND a.status <> 'draft') AS filled_seats,
+          ${filledSeatsSql('ap', 'a')} AS filled_seats,
           ap.is_active,
           fm.code_no AS course_id,
           CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name) AS course_name,

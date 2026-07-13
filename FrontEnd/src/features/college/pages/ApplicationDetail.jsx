@@ -220,7 +220,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
       </div>
 
       {/* ── Activity Timeline ── */}
-      <ActivityTimeline app={d} />
+      <ActivityTimeline app={d} collegeFeeEnabled={collegeFeeEnabled} />
 
       {/* ── Application Context ── */}
       <Section title="Application Context">
@@ -248,7 +248,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
           <Row label="Date of Admission" value={fmtDate(d.app_date_of_admission)} />
         )}
         {features?.admission_form?.diploma_direct_sy === true && (
-          <Row label="Diploma (Direct SY)" value={d.app_is_diploma_direct_sy ? 'Yes' : 'No'} />
+          <Row label="Diploma (Direct SY)" value={yesNo(d.app_is_diploma_direct_sy)} />
         )}
         <Row label="Gender"        value={d.app_sex} />
         <Row label="Mobile"        value={d.app_mobile} />
@@ -296,6 +296,15 @@ export default function ApplicationDetail({ collegeId, appId }) {
         <Row label="Father's Name"       value={d.app_father_full_name} />
         <Row label="Father's Occupation" value={d.app_father_occupation} />
         <Row label="Annual Income"       value={d.app_annual_income ? `₹${Number(d.app_annual_income).toLocaleString('en-IN')}` : '—'} />
+        {features?.admission_form?.hsc_subject_flags === true && (
+          <>
+            <Row label="HSC Maths"   value={yesNo(d.app_hsc_maths)} />
+            <Row label="HSC Biology" value={yesNo(d.app_hsc_biology)} />
+          </>
+        )}
+        {features?.admission_form?.hostel_facility === true && (
+          <Row label="Hostel Facility Required" value={yesNo(d.app_hostel_facility)} />
+        )}
         {d.app_bank_account && (
           <>
             <Row label="Bank Account" value={`****${d.app_bank_account.slice(-4)}`} />
@@ -569,6 +578,8 @@ const ACTION_META = {
   correction_resubmitted: { label: 'Correction Resubmitted',          color: 'bg-sky-500',     actor: 'Student' },
   accepted:               { label: 'Application Accepted',            color: 'bg-teal-500',    actor: 'College' },
   rejected:               { label: 'Application Rejected',            color: 'bg-red-500',     actor: 'College' },
+  // Label depends on the college: see ActivityTimeline. A college with no college
+  // fee (agriculture) has nothing to "set", and `confirmed` IS admission success.
   confirmed:              { label: 'Documents Verified — Fees Set',   color: 'bg-amber-500',   actor: 'College' },
   fee_instalment_paid:    { label: 'Fee Instalment Paid',             color: 'bg-emerald-400', actor: 'Student' },
   fees_paid:              { label: 'College Fee Fully Paid',          color: 'bg-emerald-600', actor: 'Student' },
@@ -580,21 +591,27 @@ const ACTION_META = {
   payment_link_opened:    { label: 'Payment Link Opened by Student',  color: 'bg-green-400',   actor: 'Student' },
 }
 
-function ActivityTimeline({ app }) {
+function ActivityTimeline({ app, collegeFeeEnabled = true }) {
   const [open, setOpen] = useState(true)
   const activity = app.activity || []
 
   const entries = activity.map(a => {
     const meta = ACTION_META[a.action] || { label: a.action, color: 'bg-slate-400', actor: a.actor_role }
     let label = meta.label
+    let color = meta.color
     if (a.action === 'fees_paid') {
       const isPartial = a.note && /remaining/i.test(a.note)
       label = isPartial ? 'College Fee Partially Paid' : 'College Fee Fully Paid'
     }
+    if (a.action === 'confirmed' && !collegeFeeEnabled) {
+      // No college fee to set — confirming IS the successful admission.
+      label = 'Admission Confirmed'
+      color = 'bg-emerald-600'
+    }
     const actor = a.actor_role
       ? a.actor_role.charAt(0).toUpperCase() + a.actor_role.slice(1)
       : meta.actor
-    return { label, color: meta.color, actor, date: a.created_at, note: a.action === 'subject_selected' ? null : a.note }
+    return { label, color, actor, date: a.created_at, note: a.action === 'subject_selected' ? null : a.note }
   })
 
   return (
@@ -1206,6 +1223,14 @@ function DocPreviewModal({ doc, onClose }) {
 function fmtDate(d) {
   if (!d) return '—'
   try { return new Date(d).toLocaleDateString('en-IN') } catch { return d }
+}
+
+// A checkbox field is a BIT: true/false when it was answered, NULL when it was
+// never filled in. Rendering NULL as "No" would state that the student actively
+// declined, so an unanswered field shows "—" like every other blank field.
+function yesNo(v) {
+  if (v === null || v === undefined) return '—'
+  return v ? 'Yes' : 'No'
 }
 
 function maskAadhaar(a) {

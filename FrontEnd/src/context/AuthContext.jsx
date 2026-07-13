@@ -43,8 +43,10 @@ applyStoredToken()
 export function AuthProvider({ children }) {
   const [authState, setAuthState] = useState(readStoredAuth)
 
-  // Silently refresh the token on app load if the user has an active session,
-  // and then every 6 hours so the token never expires while the user is active.
+  // Silently refresh the token on app load, then hourly.
+  // NOTE: sessions have an ABSOLUTE daily deadline (see SESSION_EXPIRY_HOUR on the
+  // backend). A refresh re-issues a token but can never extend it past that
+  // deadline — so once it passes, refresh 401s and the user is logged out below.
   useEffect(() => {
     if (!authState.isAuthenticated) return
     const refresh = () => api.post('auth/refresh').then(res => {
@@ -63,7 +65,8 @@ export function AuthProvider({ children }) {
       delete api.defaults.headers.common['Authorization']
     })
     refresh()
-    const interval = setInterval(refresh, 6 * 60 * 60 * 1000) // every 6 hours
+    // Hourly (not 6-hourly) so an expired daily session is detected promptly.
+    const interval = setInterval(refresh, 60 * 60 * 1000)
     return () => clearInterval(interval)
   }, [authState.isAuthenticated])
 

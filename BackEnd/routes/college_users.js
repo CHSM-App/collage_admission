@@ -28,6 +28,12 @@ const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/p
 const logger  = require('../config/logger');
 const { presetForType, isValidType, COLLEGE_TYPES } = require('../constants/collegePresets');
 
+// Rejects the shapes users actually typo: no @, nothing before/after the @, a dot
+// straight after the @ or straight before it, consecutive dots, and a missing or
+// too-short TLD ("rahulgmail.@com", "a@b", "a@b.c" all fail).
+const EMAIL_RE = /^[^\s@.]+(\.[^\s@.]+)*@[^\s@.]+(\.[^\s@.]+)*\.[a-z]{2,}$/i;
+const isValidEmail = (v) => EMAIL_RE.test(String(v || '').trim());
+
 const ALL_PERMISSIONS = [
   'submit_application',
   'review_application',
@@ -99,6 +105,57 @@ router.put('/colleges/:id', authenticate, requireAdmin, async (req, res) => {
     }
   }
 
+  // Update the onboarding profile (name, code, contact, address).
+  // Only the fields actually sent are changed; the rest are left alone.
+  const PROFILE_FIELDS = ['name', 'college_code', 'city', 'address', 'phone', 'email'];
+  const profile = {};
+  for (const f of PROFILE_FIELDS) {
+    if (req.body[f] !== undefined) profile[f] = req.body[f];
+  }
+
+  if (Object.keys(profile).length > 0) {
+    if (profile.name !== undefined && !String(profile.name).trim()) {
+      return res.status(400).json({ success: false, message: 'College name cannot be empty.' });
+    }
+    if (profile.college_code !== undefined && !String(profile.college_code).trim()) {
+      return res.status(400).json({ success: false, message: 'College code cannot be empty.' });
+    }
+    if (profile.city !== undefined && !String(profile.city).trim()) {
+      return res.status(400).json({ success: false, message: 'City cannot be empty.' });
+    }
+    if (profile.email !== undefined && !isValidEmail(profile.email)) {
+      return res.status(400).json({ success: false, message: 'Enter a valid college email address.' });
+    }
+    if (profile.phone) {
+      const cleanPhone = String(profile.phone).replace(/\D/g, '');
+      if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+        return res.status(400).json({ success: false, message: 'Phone must be a 10-digit number starting with 6–9.' });
+      }
+      profile.phone = cleanPhone;
+    }
+
+    try {
+      const r = db.request()
+        .input('id',    mssql.Int,      id)
+        .input('actor', mssql.NVarChar, String(req.user.id));
+      const sets = [];
+      for (const [f, v] of Object.entries(profile)) {
+        const val = typeof v === 'string' ? v.trim() : v;
+        r.input(f, mssql.NVarChar, val === '' ? null : val);
+        sets.push(`${f} = @${f}`);
+      }
+      await r.query(
+        `UPDATE colleges SET ${sets.join(', ')}, updated_by = @actor WHERE id = @id`);
+      return res.json({ success: true, message: 'College details updated.' });
+    } catch (err) {
+      if (err.number === 2627 || err.number === 2601) {
+        return res.status(409).json({ success: false, message: 'That college code or email is already in use.' });
+      }
+      logger.error({ err });
+      return res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  }
+
   // Update application fee
   if (application_fee === undefined || application_fee === null || application_fee === '') {
     return res.status(400).json({ success: false, message: 'application_fee is required.' });
@@ -147,7 +204,8 @@ router.get('/colleges', authenticate, requireAdmin, async (req, res) => {
     const total    = countRes.recordset[0].total;
 
     const dataRes = await db.request().query(`
-      SELECT c.id, c.name, c.city, c.email, c.college_code, c.application_fee, c.is_enabled, c.college_type,
+      SELECT c.id, c.name, c.city, c.address, c.phone, c.email, c.college_code,
+             c.application_fee, c.is_enabled, c.college_type,
              (SELECT COUNT(*) FROM college_users cu WHERE cu.college_id = c.id AND cu.is_active = 1) AS active_users,
              (SELECT COUNT(*) FROM college_roles cr WHERE cr.college_id = c.id) AS roles_count
       FROM colleges c
@@ -174,7 +232,7 @@ router.get('/colleges/:collegeId/roles', authenticate, requireAdmin, async (req,
            FROM college_role_permissions p
            WHERE p.role_id = r.id
            FOR JSON PATH) AS permissions_json,
-          (SELECT u.id, u.full_name, u.email, u.is_active
+          (SELECT u.id, u.full_name, u.email, u.phone, u.is_active
            FROM college_users u
            WHERE u.role_id = r.id
            FOR JSON PATH) AS users_json
@@ -373,6 +431,12 @@ router.post('/colleges/:collegeId/users', authenticate, requireAdmin, async (req
   if (!full_name?.trim() || !email?.trim() || !password || !role_id) {
     return res.status(400).json({ success: false, message: 'full_name, email, password and role_id are required.' });
   }
+  if (!isValidEmail(email)) {
+    return res.status(400).json({ success: false, message: 'Enter a valid email address.' });
+  }
+  if (String(password).length < 6) {
+    return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
+  }
   const cleanPhone = phone ? String(phone).replace(/\D/g, '') : null;
   if (cleanPhone && !/^[6-9]\d{9}$/.test(cleanPhone)) {
     return res.status(400).json({ success: false, message: 'Phone must be a 10-digit number starting with 6–9.' });
@@ -414,6 +478,14 @@ router.put('/colleges/:collegeId/users/:userId', authenticate, requireAdmin, asy
   if (cleanPhone && !/^[6-9]\d{9}$/.test(cleanPhone)) {
     return res.status(400).json({ success: false, message: 'Phone must be a 10-digit number starting with 6–9.' });
   }
+  // Only validate the fields that were actually sent — a partial update such as
+  // toggling `is_active` must not be rejected for omitting an email or password.
+  if (email !== undefined && !isValidEmail(email)) {
+    return res.status(400).json({ success: false, message: 'Enter a valid email address.' });
+  }
+  if (password && String(password).length < 6) {
+    return res.status(400).json({ success: false, message: 'Password must be at least 6 characters.' });
+  }
   try {
     let hashClause = '';
     const req2 = db.request()
@@ -447,6 +519,9 @@ router.put('/colleges/:collegeId/users/:userId', authenticate, requireAdmin, asy
 
     return res.json({ success: true, message: 'User updated.' });
   } catch (err) {
+    if (err.number === 2627 || err.number === 2601) {
+      return res.status(409).json({ success: false, message: 'A user with this email already exists.' });
+    }
     logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }

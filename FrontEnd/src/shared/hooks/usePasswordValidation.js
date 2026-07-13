@@ -19,6 +19,19 @@ export function validatePhone(phone) {
   return null
 }
 
+// Rejects the shapes users actually typo: no @, nothing before/after the @, a dot
+// straight after the @ or straight before it, consecutive dots, and a missing or
+// too-short TLD ("rahulgmail.@com", "a@b", "a@b.c" all fail).
+export const EMAIL_RE = /^[^\s@.]+(\.[^\s@.]+)*@[^\s@.]+(\.[^\s@.]+)*\.[a-z]{2,}$/i
+
+export function validateEmail(email) {
+  if (!String(email || '').trim()) return 'Email address is required.'
+  if (!EMAIL_RE.test(String(email).trim())) {
+    return 'Enter a valid email address (e.g. rahul@example.com).'
+  }
+  return null
+}
+
 export function formatPhone(value) {
   return value.replace(/\D/g, '').slice(0, 10)
 }

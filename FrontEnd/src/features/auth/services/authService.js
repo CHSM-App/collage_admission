@@ -44,12 +44,19 @@ export const verifyOtp = (phone, otp) =>
 export const forgotPasswordSendOtp = (phone) =>
   api.post('auth/forgot-password/send-otp', { phone })
 
+// Checks the OTP without consuming it, so the reset call can still redeem it.
+export const forgotPasswordVerifyOtp = (phone, otp) =>
+  api.post('auth/forgot-password/verify-otp', { phone, otp })
+
 export const forgotPasswordReset = (data) =>
   api.post('auth/forgot-password/reset', data)
 
 // College (admin + staff) forgot password — identify by email, OTP to phone.
 export const collegeForgotPasswordSendOtp = (email) =>
   api.post('auth/forgot-password/college/send-otp', { email })
+
+export const collegeForgotPasswordVerifyOtp = (email, otp) =>
+  api.post('auth/forgot-password/college/verify-otp', { email, otp })
 
 export const collegeForgotPasswordReset = (data) =>
   api.post('auth/forgot-password/college/reset', data)

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { usePermissions } from '../../hooks/usePermissions.js'
+import { useCollegeFeatures } from '../../hooks/useCollegeFeatures.js'
 import { useToast } from '../../../../context/ToastContext.jsx'
 import { getErrorMessage } from '../../../../shared/hooks/useNetworkError.js'
 import {
@@ -17,10 +18,22 @@ export default function CategoryMaster({ collegeId }) {
   const { canWrite } = usePermissions()
   const rw           = canWrite('masters')
   const toast        = useToast()
+  // Fees categories only exist to price the college fee. A college that does not
+  // charge one (agriculture) has no use for the tab.
+  const { collegeFeeEnabled } = useCollegeFeatures(collegeId)
 
   const [master, setMaster]   = useState(null)
   const [loading, setLoading] = useState(true)
   const [tab, setTab]         = useState('castes')
+
+  const TABS = [
+    { key: 'castes',   label: 'Castes' },
+    { key: 'statuses', label: 'Special Statuses' },
+    ...(collegeFeeEnabled ? [{ key: 'fees', label: 'Fees Categories' }] : []),
+  ]
+
+  // Never leave the user stranded on a tab that no longer exists.
+  const activeTab = TABS.some(t => t.key === tab) ? tab : 'castes'
 
   function load() {
     setLoading(true)
@@ -42,14 +55,10 @@ export default function CategoryMaster({ collegeId }) {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-slate-200">
-        {[
-          { key: 'castes',   label: 'Castes' },
-          { key: 'statuses', label: 'Special Statuses' },
-          { key: 'fees',     label: 'Fees Categories' },
-        ].map(t => (
+        {TABS.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition -mb-px ${
-              tab === t.key
+              activeTab === t.key
                 ? 'border-slate-800 text-slate-900'
                 : 'border-transparent text-slate-500 hover:text-slate-700'
             }`}>
@@ -58,15 +67,15 @@ export default function CategoryMaster({ collegeId }) {
         ))}
       </div>
 
-      {tab === 'castes'   && <CastesTab   master={master} collegeId={collegeId} rw={rw} onReload={load} toast={toast} />}
-      {tab === 'statuses' && <StatusesTab master={master} collegeId={collegeId} rw={rw} onReload={load} toast={toast} />}
-      {tab === 'fees'     && <FeesCatsTab master={master} collegeId={collegeId} rw={rw} onReload={load} toast={toast} />}
+      {activeTab === 'castes'   && <CastesTab   master={master} collegeId={collegeId} rw={rw} onReload={load} toast={toast} collegeFeeEnabled={collegeFeeEnabled} />}
+      {activeTab === 'statuses' && <StatusesTab master={master} collegeId={collegeId} rw={rw} onReload={load} toast={toast} collegeFeeEnabled={collegeFeeEnabled} />}
+      {activeTab === 'fees'     && <FeesCatsTab master={master} collegeId={collegeId} rw={rw} onReload={load} toast={toast} />}
     </div>
   )
 }
 
 // ── Castes Tab ────────────────────────────────────────────────
-function CastesTab({ master, collegeId, rw, onReload, toast }) {
+function CastesTab({ master, collegeId, rw, onReload, toast, collegeFeeEnabled = true }) {
   const [modal, setModal] = useState(null) // null | 'new' | row
   const [form, setForm]   = useState({ caste_name: '', is_gen_type: false, display_order: 1 })
   const [saving, setSaving] = useState(false)
@@ -113,14 +122,14 @@ function CastesTab({ master, collegeId, rw, onReload, toast }) {
               <th className="px-3 py-1 text-center w-12 border-r border-slate-200">Order</th>
               <th className="px-3 py-1 text-left border-r border-slate-200">Caste Name</th>
               <th className="px-3 py-1 text-center w-20 border-r border-slate-200">Gen. Type</th>
-              <th className="px-3 py-1 text-left border-r border-slate-200">Fees Category</th>
+              {collegeFeeEnabled && <th className="px-3 py-1 text-left border-r border-slate-200">Fees Category</th>}
               <th className="px-3 py-1 text-center w-16 border-r border-slate-200">Status</th>
               {rw && <th className="px-3 py-1 w-20" />}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
             {master.castes.length === 0 && (
-              <tr><td colSpan={rw ? 6 : 5} className="px-4 py-6 text-center text-slate-400">No castes configured yet.</td></tr>
+              <tr><td colSpan={(collegeFeeEnabled ? 5 : 4) + (rw ? 1 : 0)} className="px-4 py-6 text-center text-slate-400">No castes configured yet.</td></tr>
             )}
             {master.castes.map(r => {
               const fc = feesCatForCaste(r.id)
@@ -131,9 +140,11 @@ function CastesTab({ master, collegeId, rw, onReload, toast }) {
                   <td className="px-3 py-1 text-center border-r border-slate-200">
                     {r.is_gen_type ? <span className="text-xs bg-indigo-100 text-indigo-700 rounded-full px-2 py-0.5 font-semibold">Gen.</span> : <span className="text-slate-300">—</span>}
                   </td>
-                  <td className="px-3 py-1 border-r border-slate-200">
-                    {fc ? <span className="text-xs bg-slate-100 text-slate-700 rounded-full px-2 py-0.5">{fc.category_name}</span> : <span className="text-xs text-slate-400">Not mapped</span>}
-                  </td>
+                  {collegeFeeEnabled && (
+                    <td className="px-3 py-1 border-r border-slate-200">
+                      {fc ? <span className="text-xs bg-slate-100 text-slate-700 rounded-full px-2 py-0.5">{fc.category_name}</span> : <span className="text-xs text-slate-400">Not mapped</span>}
+                    </td>
+                  )}
                   <td className="px-3 py-1 text-center border-r border-slate-200">
                     <span className={`text-xs font-semibold rounded-full px-2 py-0.5 ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                       {r.is_active ? 'Active' : 'Off'}
@@ -169,7 +180,7 @@ function CastesTab({ master, collegeId, rw, onReload, toast }) {
 }
 
 // ── Special Statuses Tab ──────────────────────────────────────
-function StatusesTab({ master, collegeId, rw, onReload, toast }) {
+function StatusesTab({ master, collegeId, rw, onReload, toast, collegeFeeEnabled = true }) {
   const [modal, setModal]   = useState(null)
   const [form, setForm]     = useState({ status_name: '', display_order: 1 })
   const [saving, setSaving] = useState(false)
@@ -214,14 +225,14 @@ function StatusesTab({ master, collegeId, rw, onReload, toast }) {
             <tr>
               <th className="px-3 py-1 text-center w-12 border-r border-slate-200">Order</th>
               <th className="px-3 py-1 text-left border-r border-slate-200">Status Name</th>
-              <th className="px-3 py-1 text-left border-r border-slate-200">Fees Category</th>
+              {collegeFeeEnabled && <th className="px-3 py-1 text-left border-r border-slate-200">Fees Category</th>}
               <th className="px-3 py-1 text-center w-16 border-r border-slate-200">Status</th>
               {rw && <th className="px-3 py-1 w-20" />}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
             {master.specialStatuses.length === 0 && (
-              <tr><td colSpan={rw ? 5 : 4} className="px-4 py-6 text-center text-slate-400">No special statuses configured yet.</td></tr>
+              <tr><td colSpan={(collegeFeeEnabled ? 4 : 3) + (rw ? 1 : 0)} className="px-4 py-6 text-center text-slate-400">No special statuses configured yet.</td></tr>
             )}
             {master.specialStatuses.map(r => {
               const fc = feesCatForStatus(r.id)
@@ -229,9 +240,11 @@ function StatusesTab({ master, collegeId, rw, onReload, toast }) {
                 <tr key={r.id} className={`hover:bg-blue-50 transition ${!r.is_active ? 'opacity-40' : ''}`}>
                   <td className="px-3 py-1 text-center text-slate-500 border-r border-slate-200">{r.display_order}</td>
                   <td className="px-3 py-1 font-medium text-slate-900 border-r border-slate-200">{r.status_name}</td>
-                  <td className="px-3 py-1 border-r border-slate-200">
-                    {fc ? <span className="text-xs bg-slate-100 text-slate-700 rounded-full px-2 py-0.5">{fc.category_name}</span> : <span className="text-xs text-slate-400">Not mapped</span>}
-                  </td>
+                  {collegeFeeEnabled && (
+                    <td className="px-3 py-1 border-r border-slate-200">
+                      {fc ? <span className="text-xs bg-slate-100 text-slate-700 rounded-full px-2 py-0.5">{fc.category_name}</span> : <span className="text-xs text-slate-400">Not mapped</span>}
+                    </td>
+                  )}
                   <td className="px-3 py-1 text-center border-r border-slate-200">
                     <span className={`text-xs font-semibold rounded-full px-2 py-0.5 ${r.is_active ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                       {r.is_active ? 'Active' : 'Off'}

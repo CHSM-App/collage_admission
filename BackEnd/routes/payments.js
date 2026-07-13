@@ -196,7 +196,7 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
       .query(`
         SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study, a.academic_year,
                a.admission_period_id, a.fee_total_amount, a.fee_pay_now_amount,
-               a.app_division,
+               a.app_division, a.created_by_role,
                COALESCE(c.application_fee, 0) AS application_fee
         FROM applications a
         JOIN admission_periods ap ON ap.id = a.admission_period_id
@@ -246,6 +246,15 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
   }
 
   if (paymentType === 'application_fee') {
+    // Paying the application fee submits the application. Where it lands depends
+    // on WHO filled the form in:
+    //   'college' -> directly approved ('confirmed'); scrutiny is skipped because
+    //                the college reviewed it inline while filling it.
+    //   'student' -> 'submitted'; the full scrutiny pipeline follows
+    //                (accept -> student visited -> division -> fees set).
+    const createdByCollege = app.created_by_role === 'college';
+    const targetStatus     = createdByCollege ? 'confirmed' : 'submitted';
+
     const pool = await db;
     const tx   = pool.transaction();
     await tx.begin();
@@ -280,14 +289,22 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
             WHERE gateway_txnid = @txnid AND application_id = @appId AND status = 'pending'
           `);
 
+        // An application already past 'submitted' keeps its current status —
+        // paying the fee must never drag it backwards through the pipeline.
         await tx.request()
           .input('id',     mssql.Int,      appId)
           .input('regNum', mssql.NVarChar, regNum)
           .input('actor',  mssql.NVarChar, actorStr)
+          .input('status', mssql.NVarChar, targetStatus)
           .query(`
             UPDATE applications
-            SET status = 'confirmed', registration_number = @regNum,
+            SET status = CASE WHEN status IN ('draft', 'submitted') THEN @status ELSE status END,
+                registration_number = @regNum,
                 application_fee_paid = 1, submitted_at = COALESCE(submitted_at, GETDATE()),
+                confirmed_at = CASE WHEN @status = 'confirmed' AND status IN ('draft','submitted')
+                                    THEN GETDATE() ELSE confirmed_at END,
+                approved_at  = CASE WHEN @status = 'confirmed' AND status IN ('draft','submitted')
+                                    THEN GETDATE() ELSE approved_at END,
                 updated_at = GETDATE(), status_updated_at = GETDATE(),
                 updated_by = @actor
             WHERE id = @id AND status IN ('draft', 'submitted', 'confirmed')
@@ -304,7 +321,7 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
       await tx.rollback();
       throw e;
     }
-    return { alreadyProcessed, regNum };
+    return { alreadyProcessed, regNum, directApproved: createdByCollege && !alreadyProcessed };
   }
 
   // college_fee
@@ -1219,6 +1236,9 @@ async function handlePayUReturn(req, res) {
     // Post-commit side effects
     if (payType === 'application_fee') {
       await logActivity(appId, 'submitted', origin === 'college' ? 'college' : 'student', null);
+      if (result.directApproved) {
+        await logActivity(appId, 'confirmed', 'college', 'Directly approved (application filled by college).');
+      }
       const regParam    = result.regNum ? `&reg=${encodeURIComponent(result.regNum)}` : '';
       const originParam = origin === 'college' ? '&origin=college' : '';
       return res.redirect(frontendUrl(`/payment-result?status=success&app_id=${appId}&payment_type=application_fee${regParam}${originParam}${viaParam}`));
@@ -1308,6 +1328,9 @@ async function handlePayUWebhook(req, res) {
     // Side effects
     if (payType === 'application_fee') {
       await logActivity(appId, 'submitted', 'student', 'PayU webhook');
+      if (result.directApproved) {
+        await logActivity(appId, 'confirmed', 'college', 'Directly approved (application filled by college).');
+      }
     } else if (result.firstPaid || result.fullyPaid) {
       await logActivity(appId, 'fees_paid', 'student', `PayU webhook: ₹${result.totalPaid?.toLocaleString('en-IN')} paid`);
       if (result.firstPaid) getStudentForNotification(appId).then(s => s && whatsapp.notifyAdmissionConfirmed(s, appId));

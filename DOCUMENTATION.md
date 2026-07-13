@@ -203,7 +203,9 @@ collage_admission/
 │   ├── jobs/
 │   │   └── otpCleanup.js             ← node-cron job: deletes expired OTPs every 5 min
 │   ├── scripts/
-│   │   ├── migrate.js                ← Migration runner (idempotent)
+│   │   ├── migrate.js                ← Migration runner (idempotent, .sql only)
+│   │   ├── run_sql.js                ← Paste-and-run arbitrary SQL (dev tool)
+│   │   ├── fix_identity_seeds.js     ← Wipes students/applications, reseeds ids to start at 1
 │   │   ├── seed.sql                  ← Seed data for dev/staging
 │   │   ├── create_admin.sql          ← SQL to create the first super admin account
 │   │   └── migrations/
@@ -348,6 +350,8 @@ npm run dev
 | `DB_SERVER` | Yes | SQL Server host (e.g. `localhost` or IP) |
 | `DB_PORT` | Yes | SQL Server port, default `1433` |
 | `JWT_SECRET` | Yes | 64-byte hex string for signing JWTs. Generate with: `node -e "console.log(require('crypto').randomBytes(64).toString('hex'))"` |
+| `SESSION_EXPIRY_HOUR` | No | Hour of day (`0`–`23`, local time) at which **all sessions expire** — everyone is logged out daily. Currently **`3`** (3 AM). Default `0` (midnight). See [Session Expiry](#session-expiry-daily-logout). |
+| `RL_*` (rate limits) | No | Optional overrides for every rate-limit threshold — e.g. `RL_AUTH_MAX_IP`, `RL_AUTH_MAX_ACCOUNT`, `RL_PUBLIC_MAX`, `RL_AUTHED_MAX`, `RL_AUTH_WINDOW_MIN`. All have sensible defaults; see [middleware/rateLimits.js](BackEnd/middleware/rateLimits.js) and [Section 23](#23-security-implementation). |
 | `CORS_ORIGIN` | Yes | Comma-separated frontend origins allowed (e.g. `http://localhost:5173,https://yourdomain.com`) |
 | `NODE_ENV` | Yes | `development` or `production` |
 | `PAYU_KEY` | Yes | PayU merchant key |
@@ -678,7 +682,7 @@ Defines the window during which students can apply for a specific course.
 | `start_date` | DATE | Applications open from |
 | `end_date` | DATE | Applications close on |
 | `total_seats` | INT | |
-| `filled_seats` | INT DEFAULT 0 | Incremented when roll is assigned |
+| `filled_seats` | INT DEFAULT 0 | **Unused.** Filled seats are derived from application status at read time — see [Rule 6](#26-key-business-rules). The column is retained only because the audit triggers and `$Arc` archive reference it. |
 | `is_active` | BIT DEFAULT 1 | |
 | `is_disabled` | BIT DEFAULT 0 | Admin can disable without deleting |
 | `created_at` | DATETIME2 | |
@@ -699,6 +703,7 @@ The central table. One row per student application. Contains both status-machine
 | `academic_year` | e.g. `'2024-25'` |
 | `admission_period_id` FK | |
 | `status` | See [Status Machine](#13-application-state-machine-status-flow) |
+| `created_by_role` | `'student'` or `'college'` — who filled the form in. Stamped at creation, never changed. Decides whether the application walks the scrutiny pipeline or is directly approved. See [Section 13](#13-application-state-machine-status-flow). |
 | `correction_note` | Message from college requesting correction |
 | `rejection_reason` | Reason if rejected |
 | `cancellation_reason` | |
@@ -942,8 +947,37 @@ Migrations live in `BackEnd/scripts/migrations/`. Most are `.sql`; a few are `.j
 | `037_students_email_non_unique.sql` | Drops the UNIQUE constraint on `students.email` — duplicate student emails are now allowed (phone stays unique). |
 | `038_college_users_phone.sql` | Adds `phone` to `college_users` (staff) so staff can receive a password-reset OTP. |
 | `039_otp_college_reset_purpose.sql` | Adds `college_password_reset` as a valid `otp_store.purpose` (college admin/staff forgot-password). |
+| `040_applications_created_by_role.sql` | Adds `applications.created_by_role` (`student`/`college`, default `student`). Drives whether an application walks the scrutiny pipeline or is directly approved — see [Section 13](#13-application-state-machine-status-flow). |
+| `041_filled_seats_derived.sql` | Seats now fill on **confirmation**, not on application. Zeroes the stale `admission_periods.filled_seats` counter, which is no longer maintained — filled seats are derived from application status. See [Rule 6](#26-key-business-rules). |
 
 > **Important:** On a brand-new database, run `001` first, then everything in order. On an existing database, run from wherever you left off. The `.sql` migrations are idempotent (safe to re-run); the `.js` re-alignment scripts are also safe to re-run (they only change rows that differ from the preset).
+
+### Rules for writing migrations
+
+**`npm run migrate` only runs `.sql` files.** `scripts/migrate.js` filters on
+`.endsWith('.sql')`, so `.js` migrations must be run by hand:
+
+```bash
+node scripts/migrations/032_realign_admission_form_to_type.js
+node scripts/migrations/035_realign_college_fee_to_type.js
+```
+
+Both only re-align **existing** colleges' `features_config` to their `college_type`, so on
+a database with no colleges yet there is nothing to align.
+
+**Never put `USE <database>;` in a migration.** Migrations must run against whatever
+database the connection points at (`DB_NAME` in `.env`).
+
+**Reseed identities with `DBCC CHECKIDENT (t, RESEED)` — never `RESEED, 0`.** On an empty
+table, `RESEED, 0` makes the next inserted row get id **`0`**; the no-value form correctly
+starts at **`1`**. IDs must always start at 1 (`0` is falsy in JavaScript and breaks id
+checks). When verifying, check **`IDENT_SEED`** (must be `1`), not `IDENT_CURRENT` — the
+latter still reports `0` on a freshly-reseeded empty table.
+
+To repair a database whose ids already start at 0, run
+[`scripts/fix_identity_seeds.js`](BackEnd/scripts/fix_identity_seeds.js) — it wipes
+students/applications and reseeds those tables to start at 1 (colleges, staff, roles,
+masters and fees are kept). ⚠️ Destructive.
 
 ---
 
@@ -988,9 +1022,14 @@ Every protected route uses the `authenticate` middleware from [BackEnd/middlewar
   "role": "student",
   "email": "student@example.com",
   "iat": 1234567890,
-  "exp": 1235172690
+  "exp": 1235172690,
+  "sxp": 1235172690
 }
 ```
+
+> **`sxp` (session expiry)** — the **absolute daily deadline** (epoch seconds). See
+> [Session Expiry](#session-expiry-daily-logout). `/auth/refresh` re-issues a token but
+> can **never** extend it past `sxp`, so every user is logged out once a day.
 
 For college staff:
 ```json
@@ -1029,7 +1068,7 @@ Base URL: `http://localhost:8000` (or your production domain)
 | POST | `/auth/forgot-password/college/send-otp` | Public | **College** reset — identified by **email** (admin or staff); OTP goes to the phone on file |
 | POST | `/auth/forgot-password/college/reset` | Public | **College** reset — verify OTP + set new password on the matching account |
 | POST | `/auth/logout` | Authenticated | Clear auth cookie |
-| POST | `/auth/refresh` | Authenticated | Refresh JWT cookie (extend session) |
+| POST | `/auth/refresh` | Authenticated | Re-issue the JWT. **Cannot extend a session past its daily `sxp` deadline** — returns 401 once that passes. |
 
 ---
 
@@ -1200,11 +1239,42 @@ All master data CRUD endpoints. All require college access.
 
 ### How it works
 
-1. User logs in → backend creates JWT → sets it as httpOnly cookie `auth_token` (7-day expiry)
-2. Frontend stores only `{ user, role }` in `localStorage` (NO token stored in localStorage — only in httpOnly cookie)
-3. Every API request sends the cookie automatically (Axios has `withCredentials: true`)
-4. Frontend `AuthContext` refreshes the cookie every 6 hours to keep the session alive
-5. On 401, Axios interceptor clears local auth state and redirects to login
+1. User logs in → backend creates a JWT → sets it as the httpOnly cookie `auth_token`.
+   The token expires at the **next daily boundary** (see below), not after a fixed window.
+2. Frontend stores only `{ user, role }` in `localStorage` (NO token in localStorage — it's in the httpOnly cookie).
+3. Every API request sends the cookie automatically (Axios has `withCredentials: true`).
+   *(Cross-origin / LAN dev uses an `Authorization: Bearer` header instead.)*
+4. Frontend `AuthContext` calls `POST /auth/refresh` on load and then **hourly**.
+5. On 401, the Axios interceptor clears local auth state and redirects to login.
+
+### Session Expiry (daily logout)
+
+**Every session expires at a fixed hour each day** — all users are logged out daily.
+
+- **Config:** `SESSION_EXPIRY_HOUR` in `BackEnd/.env` — hour of day `0–23`, local time.
+  Currently **`3`** (3:00 AM). Default if unset: `0` (midnight).
+- At login the token is signed to expire at the **next occurrence of that hour**, and the
+  deadline is embedded in the token as the **`sxp`** claim (epoch seconds).
+- **`/auth/refresh` honours `sxp` and can never extend a session past it.** It re-issues a
+  token with the *same* deadline. Once `sxp` passes, refresh returns **401**
+  (*"Your session has expired for the day. Please log in again."*) and the user must log in.
+- The auth cookie's `maxAge` matches the same deadline.
+- Applies to **all roles** — student, college admin, college staff, super admin.
+
+> ⚠️ **Why the `sxp` claim exists:** simply shortening the token lifetime would *not*
+> produce a daily logout — the frontend auto-refresh would keep minting fresh tokens
+> indefinitely. The absolute `sxp` deadline is what actually forces the logout, even for a
+> user who is actively working in the app.
+
+**Examples** (with `SESSION_EXPIRY_HOUR=3`):
+
+| Login time | Session expires |
+|---|---|
+| 1:50 PM Mon | **3:00 AM Tue** |
+| 1:00 AM Tue (before 3 AM) | **3:00 AM Tue** (same day) |
+
+Relevant code: `signSessionToken()` / `nextExpiryDate()` in [BackEnd/routes/auth.js](BackEnd/routes/auth.js);
+refresh loop in [FrontEnd/src/context/AuthContext.jsx](FrontEnd/src/context/AuthContext.jsx).
 
 ### Middleware Guards
 
@@ -1442,21 +1512,47 @@ Some fields (Native Address, Parent's Mobile, Land Line, Guardian's Relation) ar
 
 ## 13. Application State Machine (Status Flow)
 
+### The three admission rules
+
+Where an application goes is decided by two things: **whether the application fee is paid**, and **who filled the form in** (`applications.created_by_role`, set to `'student'` or `'college'` when the application is created and never changed afterwards).
+
+**Rule 1 — no submission without the application fee.**
+An application stays in `draft` until the application fee is paid. Paying the fee *is* what submits it. The only exception is when the college owes no fee: either the `payment.platform_fee` feature is disabled for that college, or its `application_fee` is 0 — then the application submits without payment and a ₹0 payment row is recorded so the payment history stays complete.
+
+**Rule 2 — a student-submitted application walks the full scrutiny pipeline.**
+It lands in `submitted` and the college must accept it, mark the student as visited, pick a division and set fees before it can be confirmed. Confirming straight out of `submitted` is rejected.
+
+**Rule 3 — a college-filled application is directly approved.**
+The college is reviewing it inline as it fills the form, so scrutiny is skipped: paying the application fee takes it straight to `confirmed`.
+
+What "admission successful" means then depends on the college type:
+
+| Who filled the form | General college | Agriculture college |
+|---|---|---|
+| **Student** | app fee → full scrutiny → college fee → `fees_paid` | app fee → full scrutiny → `confirmed` |
+| **College** | app fee → **direct approve** → college fee → `fees_paid` | app fee → **direct approve** → `confirmed` |
+
+Agriculture colleges have `payment.college_fee` disabled, so there is no college-fee step — `confirmed` **is** admission success. General colleges charge a college fee, so success is `fees_paid`.
+
+These rules are enforced in `routes/payments.js` (online application-fee payment — both the PayU return and the webhook), `routes/college_admin.js` (`record-application-fee` for cash, and `confirm`), and `routes/applications.js` (`POST /:id/submit`). All of them branch on `created_by_role` and never move an application backwards: an application already past `submitted` keeps its current status when a fee is posted again.
+
+### Full status flow
+
 The `status` column in `applications` follows this flow:
 
 ```
-         ┌──────────────────────────────────────────────────────┐
-         │                                                      │
   STUDENT REGISTERS → STARTS APPLICATION
          │
          ▼
      [draft]  ─── student fills form steps ───►  payment_pending
          │                                              │
-         │                                   Student pays platform fee
-         │                                              │
-         ▼                                              ▼
-   (stays draft                               [submitted]
-    if no payment)                                  │
+         │                                Student pays the application fee
+         │                                (Rule 1 — nothing submits without it,
+         │                                 unless the college charges no fee)
+         ▼                                              │
+   (stays draft                                         ▼
+    while unpaid)                               [submitted]
+                                                   │
                                             College receives it
                                                    │
                                                    ▼
@@ -1510,31 +1606,35 @@ The `status` column in `applications` follows this flow:
 
 Additionally, any application can be moved to `[cancelled]` at any non-terminal stage.
 
-### The college-side shortcut (important)
+### The college-side shortcut (Rule 3)
 
-The long path above is the **student-submitted** review pipeline. When a **college** creates and submits an application on a walk-in student's behalf (Flow B), it does **not** go through the manual `under_review → scrutiny_accepted → doc_verified` steps — the college is already reviewing it inline. Instead:
+The long path above is the **student-submitted** pipeline (`created_by_role = 'student'`). When a **college** creates and submits an application on a walk-in student's behalf (Flow B, `created_by_role = 'college'`), it does **not** go through the manual `under_review → scrutiny_accepted → doc_verified` steps — the college is already reviewing it inline. Instead:
 
 ```
-[draft] ──college submits + collects application fee──► [confirmed] ──college fee paid──► [fees_paid] ──► ...
+[draft] ──application fee paid──► [confirmed] ──college fee paid──► [fees_paid] ──► ...
+                                       ▲
+                          for an agriculture college this
+                          is already admission success
 ```
 
-- Collecting the **application fee** (`recordApplicationFee`) moves the app straight to **`confirmed`**.
+- Paying the **application fee** — by cash (`record-application-fee`) or online (the PayU return / webhook) — moves the application straight to **`confirmed`**.
 - The "Confirm & Collect Fee" step then records the college fee on the already-`confirmed` application. The confirm endpoint accepts `confirmed` status for exactly this reason (it is **idempotent** — confirming again just saves the fee total / installments / division rather than erroring).
+- The confirm endpoint does **not** accept `submitted`. A student-submitted application must be accepted through `/approve` first; confirming it directly would skip the scrutiny Rule 2 requires.
 
 ### Status descriptions
 
 | Status | Who sets it | Meaning |
 |---|---|---|
-| `draft` | System | Application started but not submitted (form incomplete or fee not paid) |
+| `draft` | System | Application started but not submitted (form incomplete, or the application fee is unpaid) |
 | `payment_pending` | System | Form complete, awaiting payment |
-| `submitted` | System | Platform fee paid, application sent to college |
+| `submitted` | System | Application fee paid by a **student**; application sent to the college for scrutiny |
 | `under_review` | College | College has opened the application |
 | `correction_requested` | College | College wants student to fix something (with note) |
 | `correction_done` | Student | Student has made corrections and resubmitted |
 | `scrutiny_accepted` | College | Application passed initial scrutiny |
 | `doc_verification_pending` | College | Waiting for document verification |
 | `doc_verified` | College | All documents checked and verified |
-| `confirmed` | College | Admission confirmed, fee set |
+| `confirmed` | College / System | Admission confirmed and the college fee set. Set by the college at the end of scrutiny, or automatically on application-fee payment for a college-filled application (Rule 3). For an **agriculture** college this is the final success state — there is no college fee. |
 | `fees_paid` | System | College fee paid by student |
 | `roll_assigned` | College | Roll number assigned |
 | `enrolled` | College/System | Student fully enrolled |
@@ -1996,7 +2096,8 @@ The `requireCollegeAccess` middleware also does a **live database check** on eve
 - JWT stored as **httpOnly cookie** — not accessible to JavaScript, prevents XSS theft
 - `Secure` flag set in production (HTTPS only)
 - `SameSite: Strict` to prevent CSRF
-- 7-day token expiry, refreshed every 6 hours by frontend
+- **Daily session expiry** — every session ends at `SESSION_EXPIRY_HOUR` (currently **3:00 AM**), so all users are logged out once a day. A token refresh can **never** extend a session past that absolute `sxp` deadline. See [Session Expiry](#session-expiry-daily-logout).
+- Frontend silently refreshes the token hourly (within the daily window only)
 - `JWT_SECRET` validated at startup — server refuses to start without it
 
 ### Input Validation
@@ -2121,7 +2222,9 @@ These are important rules that aren't obvious from reading the code alone:
 
 5. **Correction Flow**: When a college requests correction, the student can edit the form and resubmit. The application status returns to `correction_done` and the college reviews again.
 
-6. **Admission Period Seats**: `filled_seats` in `admission_periods` is incremented when a roll number is assigned (not when the application is submitted or confirmed). This is the correct point to count a seat as filled.
+6. **A Seat Is Filled Only on Confirmation**: A seat is counted once the college **confirms** a student's admission — statuses `confirmed`, `fees_paid`, `roll_assigned`, `enrolled`. Applying does not take a seat, and neither does being accepted for document verification: those students may still be rejected, withdraw, or never turn up, so holding seats for them would wrongly show a course as full and block genuine applicants. `rejected` and `cancelled` are not seat-holding, which is what frees a seat back up. The rule is the same for **both college types** — agriculture ends at `confirmed`, general continues to `fees_paid`, so counting from `confirmed` onward covers both.
+
+   Filled seats are **derived** from application status at read time (`BackEnd/constants/seatStatuses.js` defines the set and builds the subquery every seat query uses). There is no counter to increment, so the count cannot drift out of sync the way a stored tally can. `admission_periods.filled_seats` is a leftover column and is no longer maintained.
 
 7. **College Disabled Check**: The `requireCollegeAccess` middleware performs a live database check on every request. Disabling a college via admin immediately blocks all college logins without needing to wait for JWT expiry.
 
@@ -2135,7 +2238,7 @@ These are important rules that aren't obvious from reading the code alone:
 
 12. **Chatbot Strictness**: The Gemini prompt explicitly instructs the AI to only answer from the provided knowledge base context. If the answer isn't in the knowledge base, it must say so. This prevents hallucination and keeps the bot on-topic.
 
-13. **Application Not Submitted Until Fee Paid**: When a college admin fills in an application on behalf of a student (via `CollegeApplyWizard`), the application stays in `draft` status until the application fee is paid. The application is only transitioned to `submitted` at the point of fee payment — either by cash recording or online payment. This ensures the college does not accidentally submit a fee-unpaid application.
+13. **Nothing Submits Until the Application Fee Is Paid**: Every application — whether the student filled it in or the college did on their behalf — stays in `draft` until the application fee is paid. Paying the fee *is* the act of submitting: the status only moves at the point of payment (cash recorded by the college, or online via PayU). The sole exception is a college that owes no fee (`payment.platform_fee` disabled, or `application_fee` = 0); those submit without payment and get a ₹0 payment row so the payment history stays complete. See [Section 13](#13-application-state-machine-status-flow).
 
 14. **Payment Link Single-Use Guarantee**: A WhatsApp payment link token is consumed (`used=1`) only when `commitPayment()` runs successfully. If a student opens the link, reaches PayU, but the payment fails, the token remains valid and the student can click the link again. However, once payment succeeds, the token is permanently invalidated.
 
@@ -2143,7 +2246,7 @@ These are important rules that aren't obvious from reading the code alone:
 
 16. **College Type Drives the Form**: A college's `college_type` (`general`/`agriculture`) is picked at onboarding and writes the `features_config` JSON. The form, reviews, validation, and fee steps all read `features_config` — never `college_type` directly. Changing the type re-applies the preset. General colleges have a college-fee system; agriculture colleges do not. See [Section 12a](#12a-college-types--features-config).
 
-17. **College-Side Direct Confirm**: When a college fills an application itself and collects the application fee, the app jumps straight to `confirmed` (no manual review pipeline). The "Confirm & Collect Fee" endpoint therefore accepts an already-`confirmed` application and is idempotent — it records the college fee / installments / division rather than erroring. This is different from Rule 13, which applies to the *student self-service* flow where the app stays `draft` until fee payment.
+17. **Who Filled the Form Decides the Path**: `applications.created_by_role` (`student` | `college`) is stamped when the application is created and never changes. It is the flag every downstream step branches on. A **student**-filled application lands in `submitted` on fee payment and must walk the full scrutiny pipeline — the college has to accept it (`/approve`) before it can be confirmed, and confirming straight out of `submitted` is rejected. A **college**-filled application is directly approved: paying the application fee takes it straight to `confirmed`, skipping scrutiny, because the college reviewed it inline while filling it. The "Confirm & Collect Fee" endpoint therefore accepts an already-`confirmed` application and is idempotent — it records the college fee / installments / division rather than erroring. Posting a fee never drags an application backwards: one already past `submitted` keeps its current status. For an **agriculture** college (no college fee) `confirmed` is the final success state; for a **general** college success is `fees_paid`. See the matrix in [Section 13](#13-application-state-machine-status-flow).
 
 18. **Semester Options Follow the Year (agriculture)**: The Semester field's options are derived from the admission year — FY → 1,2 · SY → 3,4 · TY → 5,6, etc. "Diploma Student (Direct SY)" is only offered for **SY** admissions; when checked, semesters 1 & 2 are removed (the student enters at SY). A stale semester selection is cleared automatically when the year or DSY flag changes.
 
@@ -2158,6 +2261,8 @@ These are important rules that aren't obvious from reading the code alone:
 23. **College Forgot Password (admin + staff)**: Colleges reset by **email** (not phone, unlike students). The backend resolves the email to either a college admin (`colleges.admin_email` → OTP to the **college's** phone) or a staff member (`college_users.email` → OTP to the **staff member's own** phone, added in migration 038). Unknown emails get a generic response (no account enumeration); an account with **no phone on file** is told to contact its college admin. The reset updates whichever account matched (`colleges.admin_password_hash` or `college_users.password_hash`).
 
 24. **Inbox Status Counts Ignore the Status Filter**: In the college application inbox, the per-status counts in the dropdown are computed by the **backend** over the full set (`status_counts` / `status_total`), applying every filter **except** status. So selecting one status no longer zeroes out the other counts. Course/year/division filters still narrow the counts (intentional).
+
+25. **Everyone Is Logged Out Daily**: Sessions expire at `SESSION_EXPIRY_HOUR` (currently **3:00 AM**) — an **absolute** deadline carried in the token as `sxp`. `/auth/refresh` re-issues a token but can never push past it, so even an actively-working user is logged out at that hour. Applies to all roles. See [Session Expiry](#session-expiry-daily-logout).
 
 ---
 

@@ -12,10 +12,11 @@
 --      (activity log is append-only — no updates or deletes expected).
 --
 -- Safe to re-run — all DROP/CREATE blocks are guarded.
+--
+-- NOTE: Do NOT add a `USE <database>` statement here. Migrations must run against
+-- whatever database the connection is already pointed at (DB_NAME in .env).
+-- A hardcoded USE silently redirects the migration to the wrong database.
 -- ============================================================
-
-USE college_db;
-GO
 
 -- ============================================================
 -- 1. Recreate payments$Arc with PayU columns

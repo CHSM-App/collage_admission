@@ -13,7 +13,7 @@ const db        = require('./db');
 const whatsapp  = require('../services/whatsapp');
 const mssql     = require('mssql');
 const logger    = require('../config/logger');
-const { saveOtp, verifyAndConsumeOtp } = require('../services/otpService');
+const { saveOtp, verifyAndConsumeOtp, checkOtp } = require('../services/otpService');
 const { body, validationResult } = require('express-validator');
 const auditLog = require('../middleware/auditLog');
 
@@ -41,19 +41,61 @@ function validatePassword(password) {
 const JWT_SECRET = process.env.JWT_SECRET;
 const IS_PROD    = process.env.NODE_ENV === 'production';
 
+// ── Daily session expiry ─────────────────────────────────────
+// Every session expires at a fixed hour each day (default: midnight, local time),
+// so all users are logged out daily. This is an ABSOLUTE deadline: /auth/refresh
+// re-issues a token but can never push the expiry past it.
+//
+// SESSION_EXPIRY_HOUR — hour of day (0-23) at which sessions expire. Default 0 (midnight).
+const SESSION_EXPIRY_HOUR = (() => {
+  const h = parseInt(process.env.SESSION_EXPIRY_HOUR, 10);
+  return Number.isInteger(h) && h >= 0 && h <= 23 ? h : 0;
+})();
+
+/** Date of the next daily expiry boundary (the next SESSION_EXPIRY_HOUR from now). */
+function nextExpiryDate() {
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(SESSION_EXPIRY_HOUR, 0, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1); // already passed today → tomorrow
+  return next;
+}
+
+/** Seconds from now until the next daily expiry (min 60s so a token is never useless). */
+function secondsUntilExpiry(deadline = nextExpiryDate()) {
+  return Math.max(60, Math.floor((deadline.getTime() - Date.now()) / 1000));
+}
+
+/**
+ * Sign a token that expires at the next daily boundary.
+ * The absolute deadline is embedded as `sxp` (session expiry, epoch seconds) so
+ * /auth/refresh can honour it and never extend a session past it.
+ */
+function signSessionToken(claims) {
+  const deadline = nextExpiryDate();
+  const sxp = Math.floor(deadline.getTime() / 1000);
+  return {
+    token: jwt.sign({ ...claims, sxp }, JWT_SECRET, { expiresIn: secondsUntilExpiry(deadline) }),
+    deadline,
+  };
+}
+
 // httpOnly cookie options — token never accessible to JS.
 // Cookie is kept as a convenience for same-origin deployments (production).
 // Cross-origin / LAN dev uses Authorization: Bearer header instead (see AuthContext).
-const COOKIE_OPTS = {
+const COOKIE_BASE = {
   httpOnly: true,
   secure:   IS_PROD,
   sameSite: IS_PROD ? 'strict' : 'lax',
-  maxAge:   7 * 24 * 60 * 60 * 1000, // 7 days in ms
   path:     '/',
 };
 
-function setAuthCookie(res, token) {
-  res.cookie('auth_token', token, COOKIE_OPTS);
+// Cookie expires exactly when the token does (the daily boundary).
+function setAuthCookie(res, token, deadline) {
+  res.cookie('auth_token', token, {
+    ...COOKIE_BASE,
+    maxAge: Math.max(60_000, (deadline?.getTime() ?? nextExpiryDate().getTime()) - Date.now()),
+  });
 }
 
 // Rate limiters (login, register, OTP) are centralized in
@@ -95,8 +137,8 @@ router.post('/login/student', ...authLimiter, studentLoginValidators, validate, 
       return res.status(401).json({ message: 'Invalid phone number or password.' });
     }
 
-    const token = jwt.sign({ id: student.id, role: 'student' }, JWT_SECRET, { expiresIn: '7d' });
-    setAuthCookie(res, token);
+    const { token, deadline } = signSessionToken({ id: student.id, role: 'student' });
+    setAuthCookie(res, token, deadline);
 
     return res.json({
       message: 'Login successful',
@@ -133,8 +175,8 @@ router.post('/login/college', ...authLimiter, emailLoginValidators, validate, as
       if (!match) return res.status(401).json({ message: 'Invalid email or password.' });
       if (!college.is_enabled) return res.status(403).json({ message: 'This college account has been disabled. Please contact the platform administrator.' });
 
-      const token = jwt.sign({ id: college.id, role: 'college', is_staff: false }, JWT_SECRET, { expiresIn: '7d' });
-      setAuthCookie(res, token);
+      const { token, deadline } = signSessionToken({ id: college.id, role: 'college', is_staff: false });
+      setAuthCookie(res, token, deadline);
 
       return res.json({
         message: 'Login successful',
@@ -194,12 +236,10 @@ router.post('/login/college', ...authLimiter, emailLoginValidators, validate, as
       }
     });
 
-    const token = jwt.sign(
-      { id: staff.college_id, role: 'college', is_staff: true, staff_id: staff.id, permissions, nav_visibility },
-      JWT_SECRET,
-      { expiresIn: '7d' }
+    const { token, deadline } = signSessionToken(
+      { id: staff.college_id, role: 'college', is_staff: true, staff_id: staff.id, permissions, nav_visibility }
     );
-    setAuthCookie(res, token);
+    setAuthCookie(res, token, deadline);
 
     return res.json({
       message: 'Login successful',
@@ -241,8 +281,8 @@ router.post('/login/admin', ...authLimiter, emailLoginValidators, validate, asyn
     if (!match) {
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
-    const token = jwt.sign({ id: admin.id, role: 'admin' }, JWT_SECRET, { expiresIn: '7d' });
-    setAuthCookie(res, token);
+    const { token, deadline } = signSessionToken({ id: admin.id, role: 'admin' });
+    setAuthCookie(res, token, deadline);
     return res.json({
       message: 'Login successful',
       token,
@@ -303,12 +343,10 @@ router.post('/login/college-user', ...authLimiter, emailLoginValidators, validat
       }
     });
 
-    const token = jwt.sign(
-      { id: user.college_id, role: 'college', is_staff: true, staff_id: user.id, permissions, nav_visibility },
-      JWT_SECRET,
-      { expiresIn: '7d' }
+    const { token, deadline } = signSessionToken(
+      { id: user.college_id, role: 'college', is_staff: true, staff_id: user.id, permissions, nav_visibility }
     );
-    setAuthCookie(res, token);
+    setAuthCookie(res, token, deadline);
 
     return res.json({
       message: 'Login successful',
@@ -568,6 +606,39 @@ router.post('/forgot-password/send-otp', otpLimiter,
   }
 });
 
+// ── Forgot password — verify OTP (does NOT consume it) ───────
+// POST /auth/forgot-password/verify-otp   body: { phone, otp }
+//
+// Gates the OTP screen so the user cannot reach the new-password screen with an
+// OTP that was never valid — including the case where no OTP was ever sent
+// because the phone is not registered. The OTP stays valid for the /reset call,
+// which is what actually consumes it.
+router.post('/forgot-password/verify-otp', ...authLimiter,
+  body('phone').matches(/^[6-9]\d{9}$/).withMessage('A valid 10-digit phone number is required.'),
+  body('otp').isString().trim().matches(/^\d{6}$/).withMessage('OTP must be a 6-digit number.'),
+  validate,
+  async (req, res) => {
+  const { phone, otp } = req.body;
+  const normPhone = whatsapp.normalisePhone(phone.trim());
+
+  try {
+    const { valid, reason, expired } = await checkOtp(normPhone, otp, 'password_reset');
+    if (!valid) {
+      // An unregistered number has no OTP on file. Saying "no OTP found" there
+      // would reveal that the number is not registered, so a missing OTP and a
+      // wrong OTP are reported identically. Expiry is safe to state plainly —
+      // it only ever happens for a number that really did receive an OTP.
+      return res.status(400).json({
+        message: expired ? reason : 'Incorrect or expired OTP. Please try again.',
+      });
+    }
+    return res.json({ message: 'OTP verified.' });
+  } catch (err) {
+    logger.error({ err }, 'Forgot password OTP verify error');
+    return res.status(500).json({ message: 'Server error. Please try again.' });
+  }
+});
+
 const forgotPasswordResetValidators = [
   body('phone').matches(/^[6-9]\d{9}$/).withMessage('A valid 10-digit phone number is required.'),
   body('otp').isString().trim().matches(/^\d{6}$/).withMessage('OTP must be a 6-digit number.'),
@@ -664,6 +735,39 @@ router.post('/forgot-password/college/send-otp', otpLimiter,
   }
 });
 
+// POST /auth/forgot-password/college/verify-otp   body: { email, otp }
+//
+// Gates the OTP screen without consuming the OTP — see the student
+// /forgot-password/verify-otp route above for the reasoning.
+router.post('/forgot-password/college/verify-otp', ...authLimiter,
+  body('email').isEmail().normalizeEmail().withMessage('A valid email address is required.'),
+  body('otp').isString().trim().matches(/^\d{6}$/).withMessage('OTP must be a 6-digit number.'),
+  validate,
+  async (req, res) => {
+  const { email, otp } = req.body;
+  // Unknown email and wrong OTP must be indistinguishable, or this endpoint
+  // becomes a way to discover which emails are registered.
+  const genericFail = { message: 'Incorrect or expired OTP. Please try again.' };
+
+  try {
+    const account = await resolveCollegeAccount(email);
+    if (!account || !account.phoneRaw) return res.status(400).json(genericFail);
+
+    const normPhone = whatsapp.normalisePhone(String(account.phoneRaw).replace(/\D/g, ''));
+    const { valid, reason, expired, pendingData } = await checkOtp(normPhone, otp, 'college_password_reset');
+    if (!valid) return res.status(400).json(expired ? { message: reason } : genericFail);
+
+    // Same guard the reset route applies: the OTP must belong to THIS account.
+    if (!pendingData || pendingData.email !== email.trim().toLowerCase()) {
+      return res.status(400).json(genericFail);
+    }
+    return res.json({ message: 'OTP verified.' });
+  } catch (err) {
+    logger.error({ err }, 'College forgot-password OTP verify error');
+    return res.status(500).json({ message: 'Server error. Please try again.' });
+  }
+});
+
 // POST /auth/forgot-password/college/reset   body: { email, otp, new_password }
 router.post('/forgot-password/college/reset', ...authLimiter,
   body('email').isEmail().normalizeEmail().withMessage('A valid email address is required.'),
@@ -721,22 +825,41 @@ router.post('/refresh', (req, res) => {
   }
   if (!token) return res.status(401).json({ message: 'No session found.' });
 
+  const clearAndReject = (msg) => {
+    res.clearCookie('auth_token', { ...COOKIE_BASE });
+    return res.status(401).json({ message: msg });
+  };
+
   try {
     const payload = jwt.verify(token, JWT_SECRET);
     // Strip JWT metadata fields before re-signing
-    const { iat, exp, ...claims } = payload;
-    const newToken = jwt.sign(claims, JWT_SECRET, { expiresIn: '7d' });
-    setAuthCookie(res, newToken);
-    return res.json({ message: 'Session refreshed.', token: newToken });
+    const { iat, exp, sxp, ...claims } = payload;
+
+    // Absolute daily deadline: a refresh may NEVER extend a session past `sxp`.
+    // Once that moment passes, the user must log in again.
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (sxp && nowSec >= sxp) {
+      return clearAndReject('Your session has expired for the day. Please log in again.');
+    }
+
+    // Re-issue a token that still expires at the SAME deadline (not a fresh window).
+    const deadline = sxp ? new Date(sxp * 1000) : nextExpiryDate();
+    const secs = Math.max(60, Math.floor((deadline.getTime() - Date.now()) / 1000));
+    const newToken = jwt.sign(
+      { ...claims, sxp: Math.floor(deadline.getTime() / 1000) },
+      JWT_SECRET,
+      { expiresIn: secs },
+    );
+    setAuthCookie(res, newToken, deadline);
+    return res.json({ message: 'Session refreshed.', token: newToken, expires_at: deadline.toISOString() });
   } catch {
-    res.clearCookie('auth_token', { httpOnly: true, secure: IS_PROD, sameSite: IS_PROD ? 'strict' : 'lax', path: '/' });
-    return res.status(401).json({ message: 'Session expired. Please log in again.' });
+    return clearAndReject('Session expired. Please log in again.');
   }
 });
 
 // ── Logout ──────────────────────────────────────────────────
 router.post('/logout', (req, res) => {
-  res.clearCookie('auth_token', { httpOnly: true, secure: IS_PROD, sameSite: IS_PROD ? 'strict' : 'lax', path: '/' });
+  res.clearCookie('auth_token', { ...COOKIE_BASE });
   return res.json({ message: 'Logged out.' });
 });
 
