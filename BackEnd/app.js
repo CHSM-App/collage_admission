@@ -21,6 +21,7 @@ var mastersRouter        = require('./routes/masters');
 var collegeUsersRouter   = require('./routes/college_users');
 var notificationsRouter  = require('./routes/notifications');
 var certificatesRouter   = require('./routes/certificates');
+var examsRouter          = require('./routes/exams');
 var chatRouter           = require('./routes/chat');
 var indexRouter          = require('./routes/index');
 
@@ -90,6 +91,7 @@ app.use('/masters',       publicLimiter, mastersRouter);
 app.use('/admin',         authedLimiter, collegeUsersRouter);
 app.use('/notifications', authedLimiter, notificationsRouter);
 app.use('/certificates',  authedLimiter, certificatesRouter);
+app.use('/exams',         authedLimiter, examsRouter);
 app.use('/chat',          authedLimiter, chatRouter);
 app.use('/',              authedLimiter, documentsRouter);
 

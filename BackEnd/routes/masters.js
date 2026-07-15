@@ -23,6 +23,7 @@ const router   = express.Router()
 const db       = require('./db')
 const mssql    = require('mssql')
 const feeSvc   = require('../services/FeeDeterminationService')
+const feeLock  = require('../services/FeeLockService')
 const { authenticate, requireCollegeAccess, requirePerm, requireWrite } = require('../middleware/auth')
 const logger   = require('../config/logger')
 
@@ -878,6 +879,12 @@ router.put('/:collegeId/fees/:id', requirePerm('masters'), async (req, res) => {
     cat4_description, is_active,
   } = req.body
   try {
+    // Fees are frozen once admission is open for any class charging this head.
+    const blocked = await feeLock.guardFeeHeadWrite({
+      user: req.user, collegeId: cid(req), feesCode: parseInt(req.params.id),
+    })
+    if (blocked) return res.status(blocked.status).json(blocked.body)
+
     const r = await db.request()
       .input('id',    mssql.Int,      parseInt(req.params.id))
       .input('cid',   mssql.Int,      cid(req))
@@ -942,6 +949,16 @@ router.delete('/:collegeId/fees/classwise', requirePerm('masters'), async (req, 
   if (!faculty_master_id || !year_level || !student_type || !fees_code || !academic_year)
     return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, student_type, fees_code, academic_year required.' })
   try {
+    // Removing a classwise row lowers the class total — same freeze applies.
+    const blocked = await feeLock.guardClasswiseWrite({
+      user:            req.user,
+      collegeId:       cid(req),
+      facultyMasterId: parseInt(faculty_master_id),
+      yearLevel:       year_level,
+      academicYear:    academic_year,
+    })
+    if (blocked) return res.status(blocked.status).json(blocked.body)
+
     const result = await db.request()
       .input('cid', mssql.Int,      cid(req))
       .input('fid', mssql.Int,      parseInt(faculty_master_id))
@@ -960,6 +977,12 @@ router.delete('/:collegeId/fees/classwise', requirePerm('masters'), async (req, 
 
 router.delete('/:collegeId/fees/:id', requirePerm('masters'), async (req, res) => {
   try {
+    // Deactivating a head drops it from the total of every class that charges it.
+    const blocked = await feeLock.guardFeeHeadWrite({
+      user: req.user, collegeId: cid(req), feesCode: parseInt(req.params.id),
+    })
+    if (blocked) return res.status(blocked.status).json(blocked.body)
+
     await db.request()
       .input('id',  mssql.Int, parseInt(req.params.id))
       .input('cid', mssql.Int, cid(req))
@@ -978,6 +1001,16 @@ router.post('/:collegeId/fees/classwise/save', requirePerm('masters'), async (re
     return res.status(422).json({ success: false, message: `student_type must be one of: ${VALID_STUDENT_TYPES.join(', ')}` })
   const actor = String(req.user.staff_id || req.user.id)
   try {
+    // Fees for a class are frozen for the academic year once its admission is open.
+    const blocked = await feeLock.guardClasswiseWrite({
+      user:            req.user,
+      collegeId:       cid(req),
+      facultyMasterId: parseInt(faculty_master_id),
+      yearLevel:       year_level,
+      academicYear:    academic_year,
+    })
+    if (blocked) return res.status(blocked.status).json(blocked.body)
+
     for (const row of rows) {
       await db.request()
         .input('cid',   mssql.Int,      cid(req))
@@ -1093,6 +1126,69 @@ router.get('/:collegeId/fees/configured', requireCollegeAccess, async (req, res)
     })
   } catch (e) {
     logger.error({ err: e }, 'fees configured check')
+    res.status(500).json({ success: false, message: e.message })
+  }
+})
+
+// GET /masters/:collegeId/fees/lock-status?faculty_master_id=&year_level=&academic_year=
+// Whether this class's fees are frozen because admission is already open for it.
+// Used by FeesMaster to put the classwise sheet into read-only mode.
+router.get('/:collegeId/fees/lock-status', requireCollegeAccess, async (req, res) => {
+  const { faculty_master_id, year_level, academic_year } = req.query
+  if (!faculty_master_id || !year_level || !academic_year)
+    return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, academic_year required.' })
+  try {
+    const periods = await feeLock.lockingPeriods({
+      collegeId:       cid(req),
+      facultyMasterId: parseInt(faculty_master_id),
+      yearLevel:       year_level,
+      academicYear:    academic_year,
+    })
+    res.json({
+      success: true,
+      data: {
+        locked:       periods.length > 0,
+        can_override: feeLock.isSuperAdmin(req.user),
+        periods,
+      },
+    })
+  } catch (e) {
+    logger.error({ err: e }, 'fees lock status')
+    res.status(500).json({ success: false, message: e.message })
+  }
+})
+
+// GET /masters/:collegeId/fees/freeze-preview?faculty_master_id=&year_level=&academic_year=
+// The fee totals that opening admission is about to freeze, per student type.
+// Shown in the confirmation dialog on AdmissionPeriods before the period is created.
+router.get('/:collegeId/fees/freeze-preview', requireCollegeAccess, async (req, res) => {
+  const { faculty_master_id, year_level, academic_year } = req.query
+  if (!faculty_master_id || !year_level || !academic_year)
+    return res.status(422).json({ success: false, message: 'faculty_master_id, year_level, academic_year required.' })
+  try {
+    const STUDENT_TYPES = ['Grand', 'NonGrand']
+    const results = await Promise.all(STUDENT_TYPES.map(st =>
+      feeSvc.compute({
+        collegeId:       cid(req),
+        facultyMasterId: parseInt(faculty_master_id),
+        yearLevel:       year_level,
+        caste:           'OPEN',
+        studentType:     st,
+        academicYear:    academic_year,
+        isNewStudent:    true,
+        pool:            db,
+      })
+    ))
+    res.json({
+      success: true,
+      data: STUDENT_TYPES.map((st, i) => ({
+        student_type: st,
+        total_fee:    results[i].totalFee || 0,
+        breakdown:    results[i].breakdown || [],
+      })).filter(r => r.total_fee > 0),
+    })
+  } catch (e) {
+    logger.error({ err: e }, 'fees freeze preview')
     res.status(500).json({ success: false, message: e.message })
   }
 })

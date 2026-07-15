@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getCollegeAdminAdmissionPeriods, createAdmissionPeriod, updateAdmissionPeriod } from '../../../services/collegeAdminService.js'
-import { getFaculty, checkFeesConfigured } from '../../../services/masterService.js'
+import { getFaculty, checkFeesConfigured, getFeeFreezePreview } from '../../../services/masterService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
 import { useCollegeFeatures } from '../hooks/useCollegeFeatures.js'
@@ -40,6 +40,10 @@ export default function AdmissionPeriods({ collegeId }) {
     course_id: '', year_of_study: '1', academic_year: CURRENT_AY,
     start_date: '', end_date: '', total_seats: '',
   })
+
+  // Fee-freeze confirmation — opening admission locks this class's fees for the year
+  const [confirmOpen, setConfirmOpen]     = useState(false)
+  const [freezePreview, setFreezePreview] = useState([])
 
   // Edit state (end_date only)
   const [editingId, setEditingId]     = useState(null)
@@ -138,13 +142,39 @@ export default function AdmissionPeriods({ collegeId }) {
         return
       }
     }
+
+    // Opening admission freezes this class's fees for the academic year, so show
+    // the fee about to be frozen and make the admin confirm before we create it.
+    if (collegeFeeEnabled) {
+      try {
+        const yearLevel = YEAR_LABEL[form.year_of_study]
+        const pv = await getFeeFreezePreview(collegeId, form.course_id, yearLevel, form.academic_year)
+        setFreezePreview(pv.data?.data || [])
+      } catch {
+        setFreezePreview([])   // preview is informational — a failure here shouldn't block
+      }
+      setSaving(false)
+      setConfirmOpen(true)
+      return
+    }
+
+    await submitPeriod()
+  }
+
+  // Actual create — reached either straight from handleCreate (no college fee) or
+  // after the admin confirms the fee freeze.
+  async function submitPeriod() {
+    setSaving(true)
+    setError('')
     try {
       await createAdmissionPeriod(collegeId, form)
+      setConfirmOpen(false)
       setShowForm(false)
       setForm({ course_id: '', year_of_study: '1', academic_year: CURRENT_AY, start_date: '', end_date: '', total_seats: '' })
       fetchData()
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to create period.'))
+      setConfirmOpen(false)
     } finally {
       setSaving(false)
     }
@@ -287,9 +317,81 @@ export default function AdmissionPeriods({ collegeId }) {
                 className="w-full rounded-md border border-slate-200 px-3 py-2 text-sm" />
             </div>
           </div>
+          {collegeFeeEnabled && (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              <span className="font-semibold">Note:</span> Opening admission locks this class's fees
+              for {form.academic_year}. They cannot be changed afterwards.
+            </p>
+          )}
           {error && <p className="text-sm text-red-600">{error}</p>}
           <Button type="submit" loading={saving}>Create Period</Button>
         </form>
+      )}
+
+      {confirmOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-lg bg-white shadow-xl">
+            <div className="border-b border-slate-200 px-5 py-4">
+              <p className="text-base font-semibold text-slate-950">⚠️ Fees will be locked</p>
+            </div>
+
+            <div className="space-y-4 px-5 py-4 text-sm text-slate-700">
+              <p>
+                You are about to open admission for{' '}
+                <span className="font-semibold text-slate-950">
+                  {selectedCourse
+                    ? `${selectedCourse.degree_course_code} — ${selectedCourse.degree_course_name}`
+                    : `Course #${form.course_id}`}
+                  {' · '}{YEAR_LABEL[form.year_of_study]}{' · '}{form.academic_year}
+                </span>.
+              </p>
+
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
+                Once admission is open, the fees for this class are <span className="font-semibold">locked for
+                the whole academic year</span> and can no longer be edited in Fees Master. Students must be
+                charged the fee they applied under. Only the platform administrator can change it afterwards.
+              </p>
+
+              {freezePreview.length > 0 ? (
+                <div>
+                  <p className="mb-2 font-semibold text-slate-950">Fees being locked</p>
+                  <table className="w-full text-sm">
+                    <tbody>
+                      {freezePreview.map(f => (
+                        <tr key={f.student_type} className="border-t border-slate-100">
+                          <td className="py-1.5 text-slate-600">
+                            {f.student_type === 'Grand' ? 'Granted' : 'Non-Granted'}
+                          </td>
+                          <td className="py-1.5 text-right font-semibold text-slate-950">
+                            ₹{Number(f.total_fee).toLocaleString('en-IN')}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="mt-1 text-xs text-slate-500">Open-category (Cat-1) total, per new student.</p>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">Could not load the fee preview — verify the fee sheet in Fees Master before continuing.</p>
+              )}
+
+              <p>Please double-check the fee sheet is final before you continue.</p>
+            </div>
+
+            <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setConfirmOpen(false)}
+                className="rounded-md border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Cancel — review fees
+              </button>
+              <Button onClick={submitPeriod} loading={saving}>
+                Yes, lock fees &amp; open admission
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
 
       {loading && <SkeletonTable rows={4} cols={5} />}

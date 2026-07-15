@@ -30,6 +30,7 @@ const sidebarItems = {
     { label: 'Admission Inbox',   to: `${DASHBOARD_PATHS.college}?section=inbox`,                perm: 'review_application' },
     { label: 'Admission',         to: `${DASHBOARD_PATHS.college}?section=add-application`,      perm: 'submit_application' },
     { label: 'Roll Numbers',      to: `${DASHBOARD_PATHS.college}?section=rollnumbers`,          perm: 'assign_subjects' },
+    { label: 'Exam Registration', to: `${DASHBOARD_PATHS.college}?section=exam-registration`,    perm: 'exams' },
     { label: 'Fee Receipts',      to: `${DASHBOARD_PATHS.college}?section=fee-receipts`,         perm: 'collect_fees' },
     { label: 'Reports',           to: `${DASHBOARD_PATHS.college}?section=reports`,              perm: 'collect_fees' },
     { label: 'Masters',           to: null, group: 'masters' },

@@ -16,6 +16,7 @@ import FeesMaster          from './masters/FeesMaster.jsx'
 import DocumentsMaster     from './masters/DocumentsMaster.jsx'
 import ClassMaster         from './masters/ClassMaster.jsx'
 import CategoryMaster      from './masters/CategoryMaster.jsx'
+import ExamRegistration    from './ExamRegistration.jsx'
 import FeeReceipts         from './FeeReceipts.jsx'
 import Reports             from './Reports.jsx'
 import Certificates from './certificates/Certificates.jsx'
@@ -73,6 +74,10 @@ export default function CollegeDashboard() {
     if (!navAllowed('rollnumbers')) return <NavBlocked />
     return <>{readOnly('assign_subjects') && <ReadOnlyBanner label="Roll Numbers" />}<RollNumbers collegeId={user?.id} readOnly={readOnly('assign_subjects')} /></>
   }
+  if (section === 'exam-registration') {
+    if (!navAllowed('exam-registration')) return <NavBlocked />
+    return <>{readOnly('exams') && <ReadOnlyBanner label="Exam Registration" />}<ExamRegistration collegeId={user?.id} readOnly={readOnly('exams')} /></>
+  }
   if (section === 'add-application') {
     if (!navAllowed('add-application')) return <NavBlocked />
     if (readOnly('submit_application')) return (
@@ -114,6 +119,7 @@ function Overview({ user, navAllowed, collegeFeeEnabled }) {
     { title: 'Application Inbox',    desc: 'Review, approve, or reject student applications.',   section: 'inbox',              accent: 'teal' },
     { title: 'Add Application',      desc: 'Fill in the admission form on behalf of a student.', section: 'add-application',    accent: 'indigo' },
     { title: 'Roll Numbers',         desc: 'Generate roll numbers for confirmed students.',       section: 'rollnumbers',        accent: 'violet' },
+    { title: 'Exam Registration',    desc: 'Register confirmed students for their semester exams.', section: 'exam-registration', accent: 'amber' },
     ...feeCards,
     { title: 'Faculty Master',       desc: 'Manage degree programs and university codes.',        section: 'master-faculty',     accent: 'slate' },
     { title: 'Category Master',      desc: collegeFeeEnabled
@@ -178,6 +184,7 @@ function ActionCard({ title, desc, section, accent }) {
     slate:  'hover:border-slate-300 hover:bg-slate-50',
     rose:   'hover:border-rose-300 hover:bg-rose-50',
     green:  'hover:border-green-300 hover:bg-green-50',
+    amber:  'hover:border-amber-300 hover:bg-amber-50',
   }
   const dots = {
     blue:   'bg-blue-600',
@@ -188,6 +195,7 @@ function ActionCard({ title, desc, section, accent }) {
     slate:  'bg-slate-600',
     rose:   'bg-rose-500',
     green:  'bg-green-600',
+    amber:  'bg-amber-500',
   }
 
   return (

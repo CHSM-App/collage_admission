@@ -252,6 +252,16 @@ export const getClasswiseFeesLive = (collegeId, facultyId, yearLevel, studentTyp
 export const checkFeesConfigured = (collegeId, facultyMasterId, yearLevel, academicYear) =>
   api.get(`masters/${collegeId}/fees/configured?faculty_master_id=${facultyMasterId}&year_level=${encodeURIComponent(yearLevel)}&academic_year=${encodeURIComponent(academicYear)}`)
 
+// ─── Fee lock (not cached — must always reflect current periods) ──
+
+// Is this class's fee sheet frozen because its admission is already open?
+export const checkFeesLocked = (collegeId, facultyMasterId, yearLevel, academicYear) =>
+  api.get(`masters/${collegeId}/fees/lock-status?faculty_master_id=${facultyMasterId}&year_level=${encodeURIComponent(yearLevel)}&academic_year=${encodeURIComponent(academicYear)}`)
+
+// The fee totals that opening admission is about to freeze — shown in the warning dialog.
+export const getFeeFreezePreview = (collegeId, facultyMasterId, yearLevel, academicYear) =>
+  api.get(`masters/${collegeId}/fees/freeze-preview?faculty_master_id=${facultyMasterId}&year_level=${encodeURIComponent(yearLevel)}&academic_year=${encodeURIComponent(academicYear)}`)
+
 // ─── Fees compute (not cached — always live) ──────────────────
 
 export const computeFees = (collegeId, data) =>

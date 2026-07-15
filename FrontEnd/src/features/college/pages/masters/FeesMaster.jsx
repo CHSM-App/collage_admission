@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { getFeesList, createFees, updateFees, deleteFees, getBankLedgers, getFaculty, getClasswiseFees, getClasswiseFeesLive, saveClasswiseFees, deleteClasswiseFee, getCategoryMaster, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
+import { getFeesList, createFees, updateFees, deleteFees, getBankLedgers, getFaculty, getClasswiseFees, getClasswiseFeesLive, saveClasswiseFees, deleteClasswiseFee, getCategoryMaster, checkFeesLocked, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
 import { useToast } from '../../../../context/ToastContext.jsx'
@@ -99,6 +99,7 @@ export default function FeesMaster({ collegeId }) {
   const [cwSaving, setCwSaving]       = useState(false)
   const [cwError, setCwError]         = useState('')
   const [cwSuccess, setCwSuccess]     = useState('')
+  const [cwLock, setCwLock]           = useState(null)   // { locked, can_override, periods }
   const cwSavingRef = useRef(false)
 
   const CW_STUDENT_TYPES = ['Grand', 'NonGrand', 'Outsider']
@@ -294,11 +295,29 @@ export default function FeesMaster({ collegeId }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwLoadKey])
 
+  // Fees for a class are frozen once its admission has been opened for that
+  // academic year — students must be charged the fee they applied under.
+  useEffect(() => {
+    if (activeTab !== 'classwise' || !cwSelFac) { setCwLock(null); return }
+    checkFeesLocked(collegeId, cwSelFac, cwSelYear, cwSelAY)
+      .then(r => setCwLock(r.data?.data || null))
+      .catch(() => setCwLock(null))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cwLoadKey])
+
+  // Read-only unless the viewer is the super-admin, who may override.
+  const cwLocked = !!cwLock?.locked && !cwLock?.can_override
+
   function updateCw(feesCode, field, val) {
+    if (cwLocked) return
     setCwRows(rs => rs.map(r => r.fees_code === feesCode ? { ...r, [field]: val } : r))
   }
 
   async function saveCw() {
+    if (cwLocked) {
+      setCwError('Fees for this class are locked — admission is already open for this academic year.')
+      return
+    }
     cwSavingRef.current = true
     setCwSaving(true); setCwError(''); setCwSuccess('')
     try {
@@ -379,9 +398,10 @@ export default function FeesMaster({ collegeId }) {
             </button>
           )}
           {activeTab === 'classwise' && (
-            <button onClick={saveCw} disabled={cwSaving || cwHeadRows.length === 0}
+            <button onClick={saveCw} disabled={cwSaving || cwLocked || cwHeadRows.length === 0}
+              title={cwLocked ? 'Fees are locked — admission is already open for this class.' : undefined}
               className="px-4 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700 disabled:opacity-50">
-              {cwSaving ? 'Saving…' : 'Save'}
+              {cwSaving ? 'Saving…' : cwLocked ? '🔒 Locked' : 'Save'}
             </button>
           )}
         </div>
@@ -510,6 +530,21 @@ export default function FeesMaster({ collegeId }) {
               </div>
             </div>
           </div>
+
+          {cwLock?.locked && (
+            <p className={`mb-3 text-sm rounded-lg px-3 py-2 border ${
+              cwLock.can_override
+                ? 'text-amber-900 bg-amber-50 border-amber-200'
+                : 'text-slate-700 bg-slate-50 border-slate-200'
+            }`}>
+              🔒 <span className="font-semibold">Fees locked for {cwSelAY}.</span>{' '}
+              Admission has been opened for this class, so its fees are frozen for the academic year —
+              students must be charged the fee they applied under.
+              {cwLock.can_override
+                ? ' As platform administrator you can still override this; the change will be logged.'
+                : ' Contact the platform administrator if a correction is genuinely required.'}
+            </p>
+          )}
 
           {cwError   && <p className="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{cwError}</p>}
           {cwSuccess && <p className="mb-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{cwSuccess}</p>}

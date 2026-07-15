@@ -15,6 +15,7 @@ const ALL_PERMISSIONS = [
   { key: 'manage_admission_periods', label: 'Manage Admission Periods',     desc: 'Open, close, and edit admission periods (academic year, seats, dates)' },
   { key: 'masters',                 label: 'Manage Masters',                desc: 'Add/edit program, course, bank, fee, and document masters' },
   { key: 'certificates',            label: 'Issue Certificates',            desc: 'Generate bonafide, character, and no objection certificates for students' },
+  { key: 'exams',                   label: 'Exam Registration & Marks',     desc: 'Register confirmed students for semester exams and enter their marks' },
 ]
 
 // ── Nav visibility definitions ────────────────────────────────
@@ -27,6 +28,7 @@ const NAV_SECTIONS = [
       { key: 'inbox',           label: 'Application Inbox',  desc: 'Review and process student applications' },
       { key: 'add-application', label: 'Add Application',    desc: 'Submit an application on behalf of a student' },
       { key: 'rollnumbers',     label: 'Roll Numbers',       desc: 'Bulk generate roll numbers' },
+      { key: 'exam-registration', label: 'Exam Registration', desc: 'Register confirmed students for semester exams' },
       { key: 'fee-receipts',    label: 'Fee Receipts',       desc: 'View and collect college fee payments' },
       { key: 'reports',         label: 'Reports',            desc: 'Fee collection reports by date, class, and year' },
     ],
