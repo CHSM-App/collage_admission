@@ -79,7 +79,7 @@ export default function DashboardLayout() {
   const permissions   = user?.permissions || {}
 
   // College feature flags — hide fee-related nav when college_fee is off
-  const { collegeFeeEnabled } = useCollegeFeatures(role === 'college' ? user?.id : null)
+  const { collegeFeeEnabled, isAgriculture } = useCollegeFeatures(role === 'college' ? user?.id : null)
 
   // ── Notifications (student only) ──────────────────────────
   const { notifications, unread, markSeen, clearAll } = useNotifications(
@@ -152,6 +152,13 @@ export default function DashboardLayout() {
       }
       return navVisibility[navKey(item.to)] !== false
     })
+  }
+
+  // Agriculture colleges have no separate roll-number step — the registration
+  // number is used as the roll number, so hide the Roll Numbers page.
+  if (role === 'college' && isAgriculture) {
+    const navKey = (to) => to ? new URLSearchParams(to.split('?')[1] || '').get('section') || 'overview' : null
+    currentItems = currentItems.filter(item => navKey(item.to) !== 'rollnumbers')
   }
 
   // Hide fee-related sidebar items when college_fee feature is off

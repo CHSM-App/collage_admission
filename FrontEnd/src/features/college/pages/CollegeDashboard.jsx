@@ -14,7 +14,6 @@ import GroupMaster         from './masters/GroupMaster.jsx'
 import DivisionMaster      from './masters/DivisionMaster.jsx'
 import FeesMaster          from './masters/FeesMaster.jsx'
 import DocumentsMaster     from './masters/DocumentsMaster.jsx'
-import ClassMaster         from './masters/ClassMaster.jsx'
 import CategoryMaster      from './masters/CategoryMaster.jsx'
 import ExamRegistration    from './ExamRegistration.jsx'
 import FeeReceipts         from './FeeReceipts.jsx'
@@ -44,7 +43,7 @@ export default function CollegeDashboard() {
   const appId   = searchParams.get('app_id')
   const { user } = useAuthContext()
   const { canWrite } = usePermissions()
-  const { collegeFeeEnabled } = useCollegeFeatures(user?.id)
+  const { collegeFeeEnabled, isAgriculture } = useCollegeFeatures(user?.id)
 
   const readOnly = (perm) => !canWrite(perm)
 
@@ -52,6 +51,8 @@ export default function CollegeDashboard() {
   const navVis = user?.is_staff ? (user?.nav_visibility || {}) : null
   const navAllowed = (key) => {
     if (!collegeFeeEnabled && ['fee-receipts', 'reports', 'master-fees'].includes(key)) return false
+    // Agriculture: reg-no is the roll-no, so there's no separate Roll Numbers page.
+    if (isAgriculture && key === 'rollnumbers') return false
     return !navVis || navVis[key] !== false
   }
 
@@ -91,7 +92,6 @@ export default function CollegeDashboard() {
 
   const masterReadOnly = readOnly('masters')
   if (section === 'master-faculty')   return navAllowed('master-faculty')   ? <>{masterReadOnly && <ReadOnlyBanner label="Program Master" />}<FacultyMaster   collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
-  // if (section === 'master-class')     return navAllowed('master-class')     ? <ClassMaster collegeId={user?.id} />                                                                                                              : <NavBlocked />
   if (section === 'master-bank')      return navAllowed('master-bank')      ? <>{masterReadOnly && <ReadOnlyBanner label="Bank Master" />}<BankMaster          collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
   if (section === 'master-course')    return navAllowed('master-course')    ? <>{masterReadOnly && <ReadOnlyBanner label="Course Master" />}<CourseMaster      collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />
   if (section === 'master-group')     return navAllowed('master-group')     ? <>{masterReadOnly && <ReadOnlyBanner label="Group Master" />}<GroupMaster        collegeId={user?.id} readOnly={masterReadOnly} /></>   : <NavBlocked />

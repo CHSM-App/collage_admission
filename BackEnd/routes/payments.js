@@ -32,6 +32,7 @@ const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const auditLog  = require('../middleware/auditLog');
 const rcptSvc   = require('../services/ReceiptNumberService');
+const regNumberService = require('../services/RegistrationNumberService');
 
 const YEAR_LEVEL_MAP = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' };
 
@@ -98,18 +99,6 @@ async function getStudentForNotification(appId) {
     logger.warn({ err: e }, 'getStudentForNotification failed');
     return null;
   }
-}
-
-async function generateRegNumber(collegeId, courseId, year, academicYear, requestObj) {
-  const prefix = `${academicYear.replace('-', '')}-${String(courseId).padStart(2, '0')}-${year}`;
-  const result = await requestObj
-    .input('regPrefix', mssql.NVarChar, `${prefix}-%`)
-    .query(`
-      SELECT COUNT(*) AS cnt FROM applications
-      WHERE registration_number LIKE @regPrefix AND registration_number IS NOT NULL
-    `);
-  const seq = (result.recordset[0].cnt || 0) + 1;
-  return `${prefix}-${String(seq).padStart(4, '0')}`;
 }
 
 // ── Helper: compute college fee total ────────────────────────
@@ -197,6 +186,7 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
         SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study, a.academic_year,
                a.admission_period_id, a.fee_total_amount, a.fee_pay_now_amount,
                a.app_division, a.created_by_role,
+               c.college_type, c.college_code,
                COALESCE(c.application_fee, 0) AS application_fee
         FROM applications a
         JOIN admission_periods ap ON ap.id = a.admission_period_id
@@ -268,9 +258,15 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
         alreadyProcessed = true;
         await tx.rollback();
       } else {
-        regNum = await generateRegNumber(
-          app.college_id, app.course_id, app.year_of_study, app.academic_year, tx.request()
-        );
+        regNum = await regNumberService.generate({
+          request:     tx.request(),
+          collegeId:   app.college_id,
+          collegeType: app.college_type,
+          collegeCode: app.college_code,
+          courseId:    app.course_id,
+          yearOfStudy: app.year_of_study,
+          academicYear: app.academic_year,
+        });
 
         const receiptNoAF = await rcptSvc.next({ tx, pool, collegeId: app.college_id, paymentType: 'application_fee' });
 
@@ -289,17 +285,23 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
             WHERE gateway_txnid = @txnid AND application_id = @appId AND status = 'pending'
           `);
 
+        // Agriculture colleges have no separate roll-number step — the
+        // registration number IS the roll number, assigned here at confirmation.
+        const rollNum = app.college_type === 'agriculture' ? regNum : null;
+
         // An application already past 'submitted' keeps its current status —
         // paying the fee must never drag it backwards through the pipeline.
         await tx.request()
-          .input('id',     mssql.Int,      appId)
-          .input('regNum', mssql.NVarChar, regNum)
-          .input('actor',  mssql.NVarChar, actorStr)
-          .input('status', mssql.NVarChar, targetStatus)
+          .input('id',      mssql.Int,      appId)
+          .input('regNum',  mssql.NVarChar, regNum)
+          .input('rollNum', mssql.NVarChar, rollNum)
+          .input('actor',   mssql.NVarChar, actorStr)
+          .input('status',  mssql.NVarChar, targetStatus)
           .query(`
             UPDATE applications
             SET status = CASE WHEN status IN ('draft', 'submitted') THEN @status ELSE status END,
                 registration_number = @regNum,
+                roll_number = COALESCE(@rollNum, roll_number),
                 application_fee_paid = 1, submitted_at = COALESCE(submitted_at, GETDATE()),
                 confirmed_at = CASE WHEN @status = 'confirmed' AND status IN ('draft','submitted')
                                     THEN GETDATE() ELSE confirmed_at END,

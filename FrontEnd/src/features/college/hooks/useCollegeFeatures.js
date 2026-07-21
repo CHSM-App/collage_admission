@@ -30,6 +30,8 @@ export function useCollegeFeatures(collegeId) {
   }, [collegeId])
 
   const collegeFeeEnabled = features?.payment?.college_fee !== false
+  const collegeType       = features?.college_type || 'general'
+  const isAgriculture     = collegeType === 'agriculture'
 
-  return { features, loading, collegeFeeEnabled }
+  return { features, loading, collegeFeeEnabled, collegeType, isAgriculture }
 }

@@ -695,7 +695,7 @@ The central table. One row per student application. Contains both status-machine
 | Column | Notes |
 |---|---|
 | `id` INT PK | |
-| `registration_number` | Generated when platform fee is paid (format: `REG-{year}-{id}`) |
+| `registration_number` | Assigned at submission/confirmation via an atomic per-scope counter. Format depends on `college_type` — see [Section 13a](#13a-registration--roll-numbers). |
 | `student_id` FK | |
 | `college_id` FK | |
 | `course_id` FK | |
@@ -709,7 +709,7 @@ The central table. One row per student application. Contains both status-machine
 | `cancellation_reason` | |
 | `fee_total_amount` | Set by college at confirmation step |
 | `fee_pay_now_amount` | Partial amount student must pay now |
-| `roll_number` | Assigned by college after full payment |
+| `roll_number` | **General:** sequential integer assigned by the college's Roll Numbers batch after fees are paid. **Agriculture:** set equal to `registration_number` automatically at confirmation (no separate step). See [Section 13a](#13a-registration--roll-numbers). |
 | `application_fee_paid` BIT | |
 | `college_fee_paid` BIT | |
 | `current_step` INT | Which step the wizard is on (1–6) |
@@ -949,6 +949,9 @@ Migrations live in `BackEnd/scripts/migrations/`. Most are `.sql`; a few are `.j
 | `039_otp_college_reset_purpose.sql` | Adds `college_password_reset` as a valid `otp_store.purpose` (college admin/staff forgot-password). |
 | `040_applications_created_by_role.sql` | Adds `applications.created_by_role` (`student`/`college`, default `student`). Drives whether an application walks the scrutiny pipeline or is directly approved — see [Section 13](#13-application-state-machine-status-flow). |
 | `041_filled_seats_derived.sql` | Seats now fill on **confirmation**, not on application. Zeroes the stale `admission_periods.filled_seats` counter, which is no longer maintained — filled seats are derived from application status. See [Rule 6](#26-key-business-rules). |
+| `042_exam_registration.sql` | Adds exam-registration tables/columns. |
+| `043_role_perm_exams.sql` | Adds the `exams` permission to the role/permission model. |
+| `044_registration_counters.sql` | Adds the `registration_counters` table for atomic, race-safe registration-number serials, backfilled from existing numbers. See [Section 13a](#13a-registration--roll-numbers). |
 
 > **Important:** On a brand-new database, run `001` first, then everything in order. On an existing database, run from wherever you left off. The `.sql` migrations are idempotent (safe to re-run); the `.js` re-alignment scripts are also safe to re-run (they only change rows that differ from the preset).
 
@@ -1145,7 +1148,7 @@ All routes require college role. Staff also need appropriate permissions.
 | POST | `/college-admin/:collegeId/applications/:appId/reject` | College (write) | Reject application |
 | POST | `/college-admin/:collegeId/applications/:appId/confirm` | College (write) | Confirm admission + set fee |
 | POST | `/college-admin/:collegeId/applications/:appId/verify-docs` | College (write) | Mark documents verified |
-| POST | `/college-admin/:collegeId/roll-numbers/generate` | College (write) | Auto-generate roll numbers |
+| POST | `/college-admin/:collegeId/roll-numbers/generate` | College (write) | Auto-generate roll numbers (general only — rejects agriculture, where reg-no is the roll-no). See [13a](#13a-registration--roll-numbers). |
 | POST | `/college-admin/:collegeId/applications/:appId/assign-roll` | College (write) | Manually assign roll number |
 | GET | `/college-admin/:collegeId/export-applications` | College | Export applications as Excel/CSV |
 | POST | `/college-admin/:collegeId/applications/:appId/record-application-fee` | College (write) | Record cash application fee payment — submits application and generates registration number |
@@ -1640,6 +1643,67 @@ The long path above is the **student-submitted** pipeline (`created_by_role = 's
 | `enrolled` | College/System | Student fully enrolled |
 | `rejected` | College | Application rejected |
 | `cancelled` | Student/Admin | Application cancelled |
+
+---
+
+## 13a. Registration & Roll Numbers
+
+**Service:** [BackEnd/services/RegistrationNumberService.js](BackEnd/services/RegistrationNumberService.js)
+**Counter table:** `registration_counters` (migration `044`)
+
+Every confirmed/submitted application is assigned a **registration number**. The format is
+self-describing and depends on the college's `college_type`. Both formats embed the college
+code, course code and year of study, so each number is globally unique.
+
+| Type | Format | Example |
+|---|---|---|
+| **General** | `S` + `<compactYear>` + `<collegeCode>` + `<courseCode>` + `<yearOfStudy>` + `<serial4>` | `S2425ELPS002101` → `S2425ELPS0021…` |
+| **Agriculture** | `<startYear>` + `<collegeCode>` + `<courseCode>` + `<yearOfStudy>` + `<serial3>` | `2026BSKKVBSCAGRI1003` |
+
+- **compactYear** — general uses the two-year form: `2024-25` → `2425`.
+- **startYear** — agriculture uses the 4-digit start year: `2025-26` → `2025`.
+- **collegeCode** — `colleges.college_code`, uppercased, whitespace removed.
+- **courseCode** — `faculty_master.degree_course_code` (uppercased, whitespace removed).
+- **serial** — running number per **college + course + year_of_study + academic_year**, 4 digits (general) or 3 digits (agriculture).
+
+The `registration_number` column is `NVARCHAR(30)` and has a NULL-safe **unique index**
+(`uix_applications_reg_number`), so a duplicate can never be stored.
+
+### Race-safe serial (atomic counter)
+
+The serial does **not** come from `COUNT(*)`. It comes from an atomic per-scope counter row
+in `registration_counters`, incremented with `MERGE … WITH (HOLDLOCK)` **inside the caller's
+transaction** — the same pattern as [ReceiptNumberService](BackEnd/services/ReceiptNumberService.js). This means:
+
+- **No duplicates under concurrency.** Two simultaneous submissions in the same scope are
+  serialised by the row lock and receive consecutive serials. (The old `COUNT(*)` approach
+  would give both the same number; the second write would then fail the unique index with a
+  500 error.)
+- **No serial reuse.** The counter only ever increases, so deleting an application never
+  causes a freed serial to be reissued.
+
+Because the increment must be transactional, `generate()` **requires** a transaction request
+(`tx.request()`); calling it without one throws. All five generation sites run inside a
+transaction: `applications.js` (`/:id/submit`), `application_form.js` (`submit-direct`),
+`payments.js` (application-fee commit), and `college_admin.js` (offline fee collection);
+`college_admin.js`'s `confirm` reuses an already-assigned number.
+
+### Roll numbers
+
+The roll-number rule differs by college type:
+
+| Type | Roll number |
+|---|---|
+| **General** | A separate step. The college runs the **Roll Numbers** batch (`POST /college-admin/:collegeId/roll-numbers/generate`), which assigns sequential integers to `fees_paid` applications in fee-payment order and moves them to `roll_assigned`. |
+| **Agriculture** | **No separate step.** The registration number *is* the roll number — `roll_number` is set equal to `registration_number` automatically at confirmation, in the same UPDATE that assigns the reg-no. |
+
+Consequences for agriculture colleges:
+
+- The **Roll Numbers** page is hidden in the college portal (sidebar nav + dashboard card +
+  the `?section=rollnumbers` route all gate on `college_type`, surfaced to the frontend via
+  `GET /college-admin/:collegeId/features`).
+- The batch endpoint `POST /:collegeId/roll-numbers/generate` **rejects** agriculture
+  colleges with a 400 (defence in depth), so it can never double-assign.
 
 ---
 

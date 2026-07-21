@@ -140,10 +140,11 @@ export default function BrowseColleges() {
                 Open Admissions — {result.periods[0]?.academic_year}
               </p>
               {result.periods.map(period => {
+                // Match on the admission period itself, not course+year, so a
+                // semester college's later-semester period stays open for a
+                // student who already applied into the earlier one.
                 const alreadyApplied = myApps.some(a =>
-                  a.college_id    === result.college.id &&
-                  a.course_id     === period.course_id &&
-                  a.year_of_study === period.year_of_study &&
+                  a.admission_period_id === period.id &&
                   ACTIVE_STATUSES.includes(a.status)
                 )
                 return (

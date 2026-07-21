@@ -20,6 +20,7 @@ const logger   = require('../config/logger');
 const { body, validationResult } = require('express-validator');
 const auditLog = require('../middleware/auditLog');
 const { filledSeatsSql } = require('../constants/seatStatuses');
+const regNumberService = require('../services/RegistrationNumberService');
 
 function validate(req, res, next) {
   const errors = validationResult(req);
@@ -54,23 +55,6 @@ async function logActivity(appId, action, actorRole, note = null) {
       .input('note',      mssql.NVarChar, note || null)
       .query(`INSERT INTO application_activity_log (application_id, action, actor_role, note) VALUES (@appId, @action, @actorRole, @note)`);
   } catch (e) { logger.warn({ err: e }, 'logActivity failed'); }
-}
-
-// ── Helper: generate registration number ────────────────────
-async function generateRegNumber(collegeId, courseId, year, academicYear) {
-  const prefix = `${academicYear.replace('-', '')}-${String(courseId).padStart(2,'0')}-${year}`;
-
-  const result = await db.request()
-    .input('prefix', `${prefix}-%`)
-    .query(`
-      SELECT COUNT(*) AS cnt
-      FROM applications
-      WHERE registration_number LIKE @prefix
-        AND registration_number IS NOT NULL
-    `);
-
-  const seq = (result.recordset[0].cnt || 0) + 1;
-  return `${prefix}-${String(seq).padStart(4, '0')}`;
 }
 
 // ── List applications for a student ────────────────────────
@@ -204,18 +188,31 @@ router.post('/', createApplicationValidators, validate, async (req, res) => {
   const { student_id, college_id, course_id, year_of_study, academic_year, admission_period_id } = req.body;
 
   try {
-    // Check for duplicate active application this academic year for same college/course/year
-    const dup = await db.request()
+    // Semester colleges (agriculture) open a separate admission period per
+    // semester, so a student may hold one application per period within the same
+    // course + year + academic year. General colleges keep the strict rule.
+    const featRes = await db.request()
+      .input('col', mssql.Int, parseInt(college_id))
+      .query('SELECT features_config FROM colleges WHERE id = @col');
+    const features = featRes.recordset[0]?.features_config
+      ? JSON.parse(featRes.recordset[0].features_config) : null;
+    const perSemesterAdmission = features?.admission_form?.semester === true;
+
+    // Check for a duplicate active application. For semester colleges the check
+    // is scoped to this admission period; a different period is a separate admission.
+    const dupReq = db.request()
       .input('sid',  parseInt(student_id))
       .input('col',  parseInt(college_id))
       .input('crs',  parseInt(course_id))
       .input('yr',   parseInt(year_of_study))
-      .input('ay',   academic_year)
-      .query(`
+      .input('ay',   academic_year);
+    if (perSemesterAdmission) dupReq.input('apid', mssql.Int, parseInt(admission_period_id));
+    const dup = await dupReq.query(`
         SELECT id FROM applications
         WHERE student_id = @sid AND college_id = @col AND course_id = @crs
           AND year_of_study = @yr AND academic_year = @ay
           AND status NOT IN ('rejected','cancelled')
+          ${perSemesterAdmission ? 'AND admission_period_id = @apid' : ''}
       `);
 
     if (dup.recordset.length > 0) {
@@ -355,7 +352,7 @@ router.post('/:id/submit', async (req, res) => {
                a.year_of_study, a.academic_year, a.admission_period_id,
                a.created_by_role, a.application_fee_paid,
                COALESCE(c.application_fee, 0) AS application_fee,
-               c.features_config,
+               c.features_config, c.college_type, c.college_code,
                (SELECT COUNT(*) FROM payments p
                  WHERE p.application_id = a.id
                    AND p.payment_type = 'application_fee'
@@ -400,15 +397,23 @@ router.post('/:id/submit', async (req, res) => {
     const createdByCollege = app.created_by_role === 'college';
     const targetStatus = createdByCollege ? 'confirmed' : 'submitted';
 
-    // Generate registration number
-    const regNum = await generateRegNumber(
-      app.college_id, app.course_id, app.year_of_study, app.academic_year
-    );
-
     const pool = await db;
     const tx   = pool.transaction();
     await tx.begin();
+    let regNum;
     try {
+      // Generate registration number inside the tx so the atomic counter
+      // increment commits together with the row that stores the number.
+      regNum = await regNumberService.generate({
+        request:     tx.request(),
+        collegeId:   app.college_id,
+        collegeType: app.college_type,
+        collegeCode: app.college_code,
+        courseId:    app.course_id,
+        yearOfStudy: app.year_of_study,
+        academicYear: app.academic_year,
+      });
+
       // We only get here when the fee is already paid (Rule 1) or none is owed.
       // When no fee was owed, record a zero-value payment row so the payment
       // history is complete.
@@ -425,17 +430,23 @@ router.post('/:id/submit', async (req, res) => {
           `);
       }
 
+      // Agriculture colleges have no separate roll-number step — the
+      // registration number IS the roll number, assigned here at confirmation.
+      const rollNum = app.college_type === 'agriculture' ? regNum : null;
+
       // Rule 2 → 'submitted' (full scrutiny follows).
       // Rule 3 → 'confirmed' (college-filled: directly approved).
       await tx.request()
-        .input('id',     mssql.Int,      appId)
-        .input('regNum', mssql.NVarChar, regNum)
-        .input('actor',  mssql.NVarChar, String(req.user.staff_id || req.user.id))
-        .input('status', mssql.NVarChar, targetStatus)
+        .input('id',      mssql.Int,      appId)
+        .input('regNum',  mssql.NVarChar, regNum)
+        .input('rollNum', mssql.NVarChar, rollNum)
+        .input('actor',   mssql.NVarChar, String(req.user.staff_id || req.user.id))
+        .input('status',  mssql.NVarChar, targetStatus)
         .query(`
           UPDATE applications
           SET status = @status,
               registration_number = @regNum,
+              roll_number = COALESCE(@rollNum, roll_number),
               application_fee_paid = 1,
               submitted_at = GETDATE(),
               confirmed_at = CASE WHEN @status = 'confirmed' THEN GETDATE() ELSE confirmed_at END,

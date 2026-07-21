@@ -29,6 +29,7 @@ const whatsapp = require('../services/whatsapp');
 const logger = require('../config/logger');
 const feeSvc   = require('../services/FeeDeterminationService');
 const rcptSvc  = require('../services/ReceiptNumberService');
+const regNumberService = require('../services/RegistrationNumberService');
 const { saveOtp, verifyAndConsumeOtp } = require('../services/otpService');
 const { filledSeatsSql } = require('../constants/seatStatuses');
 
@@ -88,11 +89,15 @@ router.get('/:collegeId/features', async (req, res) => {
   try {
     const result = await db.request()
       .input('id', mssqlShared.Int, collegeId)
-      .query('SELECT features_config FROM colleges WHERE id = @id');
+      .query('SELECT features_config, college_type FROM colleges WHERE id = @id');
     if (!result.recordset.length)
       return res.status(404).json({ success: false, message: 'College not found.' });
     const raw = result.recordset[0].features_config;
-    return res.json({ success: true, data: raw ? JSON.parse(raw) : null });
+    const data = raw ? JSON.parse(raw) : {};
+    // Surface college_type so the UI can gate type-specific features (e.g. hide
+    // the Roll Numbers page for agriculture, where reg-no is the roll-no).
+    data.college_type = result.recordset[0].college_type || 'general';
+    return res.json({ success: true, data });
   } catch (err) {
     logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
@@ -389,11 +394,13 @@ router.post('/:collegeId/students/transfer-otp', async (req, res) => {
 });
 
 // ── Existing applications for a student at this college ───────
-// Returns the (course_id, year_of_study) pairs the student has already
-// applied for at this college, so the Add Application course dropdown can
-// gray out courses they've already applied to. Draft, cancelled and rejected
-// apps are excluded — a draft was only started (not submitted), and
-// cancelled/rejected courses may be re-applied to.
+// Returns the admission periods the student has already applied into at this
+// college (with course/year/academic-year for context), so the Add Application
+// period dropdown can gray out periods they've already applied to. Matching on
+// admission_period_id lets semester colleges (agriculture) still apply into a
+// later semester's period for the same course + year. Draft, cancelled and
+// rejected apps are excluded — a draft was only started (not submitted), and
+// cancelled/rejected periods may be re-applied to.
 router.get('/:collegeId/students/:studentId/applied-courses', async (req, res) => {
   const collegeId = parseInt(req.params.collegeId);
   const studentId = parseInt(req.params.studentId);
@@ -403,7 +410,7 @@ router.get('/:collegeId/students/:studentId/applied-courses', async (req, res) =
       .input('collegeId', mssqlShared.Int, collegeId)
       .input('studentId', mssqlShared.Int, studentId)
       .query(`
-        SELECT DISTINCT a.course_id, a.year_of_study, a.academic_year
+        SELECT DISTINCT a.admission_period_id, a.course_id, a.year_of_study, a.academic_year
         FROM applications a
         WHERE a.student_id = @studentId
           AND a.college_id = @collegeId
@@ -1178,7 +1185,7 @@ router.post('/:collegeId/applications/:appId/record-application-fee', requirePer
       .input('cid', mssqlShared.Int, collegeId)
       .query(`
         SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study, a.academic_year,
-               a.created_by_role,
+               a.created_by_role, c.college_type, c.college_code,
                COALESCE(c.application_fee, 0) AS application_fee
         FROM applications a
         JOIN colleges c ON c.id = a.college_id
@@ -1206,25 +1213,28 @@ router.post('/:collegeId/applications/:appId/record-application-fee', requirePer
       .query(`SELECT registration_number FROM applications WHERE id = @appId`);
     const existingRegNum = existingRegRes.recordset[0]?.registration_number || null;
 
-    // Generate registration number only if not already assigned
-    let regNum = existingRegNum;
-    if (!regNum) {
-      const ayClean  = (app.academic_year || '').replace('-', '');
-      const prefix   = `${ayClean}-${String(app.course_id).padStart(2, '0')}-${app.year_of_study}`;
-      const cntRes   = await db.request()
-        .input('regPrefix', mssqlShared.NVarChar, `${prefix}-%`)
-        .query(`SELECT COUNT(*) AS cnt FROM applications WHERE registration_number LIKE @regPrefix AND registration_number IS NOT NULL`);
-      const seq = (cntRes.recordset[0].cnt || 0) + 1;
-      regNum = `${prefix}-${String(seq).padStart(4, '0')}`;
-    }
-
     const createdByCollege = app.created_by_role === 'college';
     const targetStatus     = createdByCollege ? 'confirmed' : 'submitted';
 
     const pool = await db;
     const tx   = pool.transaction();
     await tx.begin();
+    let regNum = existingRegNum;
     try {
+      // Generate a registration number only if not already assigned. Done inside
+      // the tx so the atomic counter increment commits with the row update.
+      if (!regNum) {
+        regNum = await regNumberService.generate({
+          request:     tx.request(),
+          collegeId:   app.college_id,
+          collegeType: app.college_type,
+          collegeCode: app.college_code,
+          courseId:    app.course_id,
+          yearOfStudy: app.year_of_study,
+          academicYear: app.academic_year,
+        });
+      }
+
       const receiptNo = await rcptSvc.next({ tx, pool, collegeId, paymentType: 'application_fee' });
 
       await tx.request()
@@ -1245,15 +1255,21 @@ router.post('/:collegeId/applications/:appId/record-application-fee', requirePer
       //   student-filled  -> 'submitted', then the full scrutiny pipeline
       // An application already past 'submitted' keeps its current status —
       // recording the fee must never drag it backwards.
+      // Agriculture colleges have no separate roll-number step — the
+      // registration number IS the roll number, assigned here at confirmation.
+      const rollNum = app.college_type === 'agriculture' ? regNum : null;
+
       await tx.request()
-        .input('id',     mssqlShared.Int,      appId)
-        .input('regNum', mssqlShared.NVarChar,  regNum)
-        .input('actor',  mssqlShared.NVarChar,  actor)
-        .input('status', mssqlShared.NVarChar,  targetStatus)
+        .input('id',      mssqlShared.Int,      appId)
+        .input('regNum',  mssqlShared.NVarChar,  regNum)
+        .input('rollNum', mssqlShared.NVarChar,  rollNum)
+        .input('actor',   mssqlShared.NVarChar,  actor)
+        .input('status',  mssqlShared.NVarChar,  targetStatus)
         .query(`
           UPDATE applications
           SET status = CASE WHEN status IN ('draft', 'submitted') THEN @status ELSE status END,
               registration_number = @regNum,
+              roll_number = COALESCE(@rollNum, roll_number),
               application_fee_paid = 1, submitted_at = COALESCE(submitted_at, GETDATE()),
               confirmed_at = CASE WHEN @status = 'confirmed' AND status IN ('draft','submitted')
                                   THEN GETDATE() ELSE confirmed_at END,
@@ -1782,6 +1798,18 @@ router.post('/:collegeId/roll-numbers/generate', requirePerm('assign_subjects'),
   }
 
   try {
+    // Agriculture colleges have no separate roll-number step — the registration
+    // number IS the roll number, assigned automatically at confirmation.
+    const typeRes = await db.request()
+      .input('cid', mssqlShared.Int, parseInt(req.params.collegeId))
+      .query('SELECT college_type FROM colleges WHERE id = @cid');
+    if (typeRes.recordset[0]?.college_type === 'agriculture') {
+      return res.status(400).json({
+        success: false,
+        message: 'Agriculture colleges do not assign roll numbers separately — the registration number is used as the roll number.',
+      });
+    }
+
     // Find highest existing roll number for this college + course + year_of_study
     const maxRes = await db.request()
       .input('col', parseInt(req.params.collegeId))

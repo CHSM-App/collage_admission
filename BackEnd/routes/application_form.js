@@ -23,6 +23,7 @@ const mssql    = require('mssql');
 const { authenticate } = require('../middleware/auth');
 const logger   = require('../config/logger');
 const { filledSeatsSql } = require('../constants/seatStatuses');
+const regNumberService = require('../services/RegistrationNumberService');
 
 // All application form routes require authentication
 router.use(authenticate);
@@ -144,17 +145,32 @@ router.post('/applications/init', async (req, res) => {
     // Always use the year from the admission period — never trust client or auto-detect
     yr = p.year_of_study;
 
-    // Check for any existing application for this course+year (any status, any period)
-    const existingAny = await db.request()
+    // Semester colleges (e.g. agriculture) open a separate admission period per
+    // semester, so a student may hold one application PER admission period within
+    // the same course + year + academic year. General colleges keep the strict
+    // one-application-per-course-per-year rule.
+    const featRes0 = await db.request()
+      .input('col', mssql.Int, parseInt(college_id))
+      .query('SELECT features_config FROM colleges WHERE id = @col');
+    const features0 = featRes0.recordset[0]?.features_config
+      ? JSON.parse(featRes0.recordset[0].features_config) : null;
+    const perSemesterAdmission = features0?.admission_form?.semester === true;
+
+    // Check for an existing application. For semester colleges the duplicate
+    // check is scoped to THIS admission period — a different period (the next
+    // semester's) is a legitimately separate admission.
+    const existingReq = db.request()
       .input('sid', mssql.Int, parseInt(student_id))
       .input('col', mssql.Int, parseInt(college_id))
       .input('crs', mssql.Int, parseInt(course_id))
       .input('yr',  mssql.Int, yr)
-      .input('ay',  mssql.NVarChar, academic_year)
-      .query(`
+      .input('ay',  mssql.NVarChar, academic_year);
+    if (perSemesterAdmission) existingReq.input('apid', mssql.Int, parseInt(admission_period_id));
+    const existingAny = await existingReq.query(`
         SELECT id, status, current_step FROM applications
         WHERE student_id = @sid AND college_id = @col AND course_id = @crs
           AND year_of_study = @yr AND academic_year = @ay
+          ${perSemesterAdmission ? 'AND admission_period_id = @apid' : ''}
       `);
 
     if (existingAny.recordset.length > 0) {
@@ -193,13 +209,14 @@ router.post('/applications/init', async (req, res) => {
         DECLARE @t TABLE (id INT, merge_action NVARCHAR(10));
         MERGE applications AS target
         USING (SELECT @sid AS student_id, @col AS college_id, @crs AS course_id,
-                      @yr AS year_of_study, @ay AS academic_year) AS src
+                      @yr AS year_of_study, @ay AS academic_year, @apid AS admission_period_id) AS src
           ON  target.student_id    = src.student_id
           AND target.college_id    = src.college_id
           AND target.course_id     = src.course_id
           AND target.year_of_study = src.year_of_study
           AND target.academic_year = src.academic_year
           AND target.status        = 'draft'
+          ${perSemesterAdmission ? 'AND target.admission_period_id = src.admission_period_id' : ''}
         WHEN NOT MATCHED THEN
           INSERT (student_id, college_id, course_id, year_of_study, academic_year,
                   admission_period_id, status, current_step, created_by, created_by_role)
@@ -212,16 +229,18 @@ router.post('/applications/init', async (req, res) => {
 
     // If MERGE matched an existing draft (no INSERT happened), fetch it
     if (!result.recordset.length || result.recordset[0].merge_action !== 'INSERT') {
-      const existing2 = await db.request()
+      const existing2Req = db.request()
         .input('sid', mssql.Int, parseInt(student_id))
         .input('col', mssql.Int, parseInt(college_id))
         .input('crs', mssql.Int, parseInt(course_id))
         .input('yr',  mssql.Int, yr)
-        .input('ay',  mssql.NVarChar, academic_year)
-        .query(`
+        .input('ay',  mssql.NVarChar, academic_year);
+      if (perSemesterAdmission) existing2Req.input('apid', mssql.Int, parseInt(admission_period_id));
+      const existing2 = await existing2Req.query(`
           SELECT id, current_step FROM applications
           WHERE student_id=@sid AND college_id=@col AND course_id=@crs
             AND year_of_study=@yr AND academic_year=@ay AND status='draft'
+            ${perSemesterAdmission ? 'AND admission_period_id=@apid' : ''}
         `);
       if (existing2.recordset.length) {
         return res.json({
@@ -249,15 +268,17 @@ router.post('/applications/init', async (req, res) => {
     // Gracefully handle duplicate-key race condition
     if (err.number === 2601 || err.number === 2627) {
       try {
-        const existing3 = await db.request()
+        const existing3Req = db.request()
           .input('sid', mssql.Int, parseInt(student_id))
           .input('col', mssql.Int, parseInt(college_id))
           .input('crs', mssql.Int, parseInt(course_id))
-          .input('ay',  mssql.NVarChar, academic_year)
-          .query(`
+          .input('ay',  mssql.NVarChar, academic_year);
+        if (perSemesterAdmission) existing3Req.input('apid', mssql.Int, parseInt(admission_period_id));
+        const existing3 = await existing3Req.query(`
             SELECT id, year_of_study, current_step FROM applications
             WHERE student_id=@sid AND college_id=@col AND course_id=@crs
               AND academic_year=@ay AND status='draft'
+              ${perSemesterAdmission ? 'AND admission_period_id=@apid' : ''}
           `);
         if (existing3.recordset.length) {
           const r = existing3.recordset[0];
@@ -309,17 +330,30 @@ router.post('/applications/init-by-college', async (req, res) => {
 
     const yr = period.recordset[0].year_of_study;
 
+    // Semester colleges (agriculture) open a separate admission period per
+    // semester, so a student may hold one application per period within the same
+    // course + year + academic year. See the student init route for the rationale.
+    const featResC = await db.request()
+      .input('col', mssql.Int, parseInt(college_id))
+      .query('SELECT features_config FROM colleges WHERE id = @col');
+    const featuresC = featResC.recordset[0]?.features_config
+      ? JSON.parse(featResC.recordset[0].features_config) : null;
+    const perSemesterAdmission = featuresC?.admission_form?.semester === true;
+
     // Resume an existing draft if present (using correct year from period).
-    const existing = await db.request()
+    // For semester colleges, scope to this admission period.
+    const existingReqC = db.request()
       .input('sid', mssql.Int, parseInt(student_id))
       .input('col', mssql.Int, parseInt(college_id))
       .input('crs', mssql.Int, parseInt(course_id))
       .input('yr',  mssql.Int, yr)
-      .input('ay',  mssql.NVarChar, academic_year)
-      .query(`
+      .input('ay',  mssql.NVarChar, academic_year);
+    if (perSemesterAdmission) existingReqC.input('apid', mssql.Int, parseInt(admission_period_id));
+    const existing = await existingReqC.query(`
         SELECT id, current_step, created_by_role FROM applications
         WHERE student_id=@sid AND college_id=@col AND course_id=@crs
           AND year_of_study=@yr AND academic_year=@ay AND status='draft'
+          ${perSemesterAdmission ? 'AND admission_period_id=@apid' : ''}
       `);
 
     if (existing.recordset.length > 0) {
@@ -349,18 +383,21 @@ router.post('/applications/init-by-college', async (req, res) => {
       });
     }
 
-    // Block if an active (non-draft, non-cancelled, non-rejected) application already exists
-    const activeCheck = await db.request()
+    // Block if an active (non-draft, non-cancelled, non-rejected) application already exists.
+    // For semester colleges, only within the same admission period.
+    const activeCheckReq = db.request()
       .input('sid', mssql.Int, parseInt(student_id))
       .input('col', mssql.Int, parseInt(college_id))
       .input('crs', mssql.Int, parseInt(course_id))
       .input('yr',  mssql.Int, yr)
-      .input('ay',  mssql.NVarChar, academic_year)
-      .query(`
+      .input('ay',  mssql.NVarChar, academic_year);
+    if (perSemesterAdmission) activeCheckReq.input('apid', mssql.Int, parseInt(admission_period_id));
+    const activeCheck = await activeCheckReq.query(`
         SELECT id, status FROM applications
         WHERE student_id = @sid AND college_id = @col AND course_id = @crs
           AND year_of_study = @yr AND academic_year = @ay
           AND status NOT IN ('draft','cancelled','rejected')
+          ${perSemesterAdmission ? 'AND admission_period_id = @apid' : ''}
       `);
 
     if (activeCheck.recordset.length > 0) {
@@ -1322,8 +1359,11 @@ router.post('/applications/:id/submit-direct', async (req, res) => {
     // Fetch app details needed to generate registration number
     const appInfoRes = await db.request()
       .input('id', mssql.Int, appId)
-      .query(`SELECT college_id, course_id, year_of_study, academic_year, created_by_role
-              FROM applications WHERE id = @id`);
+      .query(`SELECT a.college_id, a.course_id, a.year_of_study, a.academic_year, a.created_by_role,
+                     c.college_type, c.college_code
+              FROM applications a
+              JOIN colleges c ON c.id = a.college_id
+              WHERE a.id = @id`);
     const ai = appInfoRes.recordset[0];
 
     // A college-filled application is directly approved (the college reviewed it
@@ -1331,34 +1371,56 @@ router.post('/applications/:id/submit-direct', async (req, res) => {
     const createdByCollege = ai.created_by_role === 'college';
     const targetStatus     = createdByCollege ? 'confirmed' : 'submitted';
 
-    // Generate registration number (same logic as payment flow)
-    const prefix = `${(ai.academic_year || '').replace('-', '')}-${String(ai.course_id).padStart(2, '0')}-${ai.year_of_study}`;
-    const cntRes = await db.request()
-      .input('regPrefix', mssql.NVarChar, `${prefix}-%`)
-      .query(`SELECT COUNT(*) AS cnt FROM applications WHERE registration_number LIKE @regPrefix AND registration_number IS NOT NULL`);
-    const seq = (cntRes.recordset[0].cnt || 0) + 1;
-    const regNum = `${prefix}-${String(seq).padStart(4, '0')}`;
-
     const actor = String(req.user.staff_id || req.user.id);
-    await db.request()
-      .input('id',     mssql.Int,      appId)
-      .input('regNum', mssql.NVarChar, regNum)
-      .input('actor',  mssql.NVarChar, actor)
-      .input('status', mssql.NVarChar, targetStatus)
-      .query(`
-        UPDATE applications SET
-          status = @status,
-          registration_number = @regNum,
-          declaration_accepted_at = GETDATE(),
-          submitted_at = GETDATE(),
-          confirmed_at = CASE WHEN @status = 'confirmed' THEN GETDATE() ELSE confirmed_at END,
-          approved_at  = CASE WHEN @status = 'confirmed' THEN GETDATE() ELSE approved_at END,
-          current_step = 6,
-          updated_at = GETDATE(),
-          updated_by = @actor,
-          status_updated_at = GETDATE()
-        WHERE id = @id
-      `);
+
+    // Generate the registration number and store it in one transaction so the
+    // atomic counter increment commits together with the applications row.
+    const pool = await db;
+    const tx   = pool.transaction();
+    await tx.begin();
+    let regNum;
+    try {
+      regNum = await regNumberService.generate({
+        request:     tx.request(),
+        collegeId:   ai.college_id,
+        collegeType: ai.college_type,
+        collegeCode: ai.college_code,
+        courseId:    ai.course_id,
+        yearOfStudy: ai.year_of_study,
+        academicYear: ai.academic_year,
+      });
+
+      // Agriculture colleges have no separate roll-number step — the
+      // registration number IS the roll number, assigned here at confirmation.
+      const rollNum = ai.college_type === 'agriculture' ? regNum : null;
+
+      await tx.request()
+        .input('id',      mssql.Int,      appId)
+        .input('regNum',  mssql.NVarChar, regNum)
+        .input('rollNum', mssql.NVarChar, rollNum)
+        .input('actor',   mssql.NVarChar, actor)
+        .input('status',  mssql.NVarChar, targetStatus)
+        .query(`
+          UPDATE applications SET
+            status = @status,
+            registration_number = @regNum,
+            roll_number = COALESCE(@rollNum, roll_number),
+            declaration_accepted_at = GETDATE(),
+            submitted_at = GETDATE(),
+            confirmed_at = CASE WHEN @status = 'confirmed' THEN GETDATE() ELSE confirmed_at END,
+            approved_at  = CASE WHEN @status = 'confirmed' THEN GETDATE() ELSE approved_at END,
+            current_step = 6,
+            updated_at = GETDATE(),
+            updated_by = @actor,
+            status_updated_at = GETDATE()
+          WHERE id = @id
+        `);
+
+      await tx.commit();
+    } catch (txErr) {
+      await tx.rollback();
+      throw txErr;
+    }
 
     const submitterRole = createdByCollege ? 'college' : 'student';
     await logActivity(appId, 'submitted', submitterRole, null);

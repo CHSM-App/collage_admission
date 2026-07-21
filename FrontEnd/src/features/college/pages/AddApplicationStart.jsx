@@ -98,13 +98,9 @@ export default function AddApplicationStart() {
       .then(r => {
         const applied = r.data.data || []
         setAppliedCourses(applied)
-        // Clear a previously-picked course if it's now blocked for this student
+        // Clear a previously-picked period if it's now blocked for this student
         const p = periods.find(p => String(p.id) === selectedPeriod)
-        if (p && applied.some(a =>
-          a.course_id === p.course_id &&
-          a.year_of_study === p.year_of_study &&
-          a.academic_year === p.academic_year
-        )) {
+        if (p && applied.some(a => a.admission_period_id === p.id)) {
           setPeriod('')
         }
       })
@@ -112,13 +108,11 @@ export default function AddApplicationStart() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedStudent, collegeId])
 
-  // True if the given period matches a course the student already applied for
+  // True if the student already applied into this exact admission period.
+  // Keying on the period (not course+year) lets semester colleges apply into a
+  // later semester's period for the same course and year.
   function isAlreadyApplied(period) {
-    return appliedCourses.some(a =>
-      a.course_id === period.course_id &&
-      a.year_of_study === period.year_of_study &&
-      a.academic_year === period.academic_year
-    )
+    return appliedCourses.some(a => a.admission_period_id === period.id)
   }
 
   function handleSelectStudent(s) {
