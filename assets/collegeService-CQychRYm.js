@@ -1,0 +1,1 @@
+import{t as e}from"./api-CW1bm3VH.js";var t=t=>e.get(`colleges/search?q=${encodeURIComponent(t)}`),n=t=>e.get(`colleges/by-code/${encodeURIComponent(t)}`),r=t=>e.get(`colleges/${t}`),i=t=>e.get(`colleges/${t}/admission-periods`),a=(t,n)=>e.get(`colleges/${t}/admission-periods/${n}/fee`),o=t=>e.post(`colleges`,t);export{n as a,r as i,a as n,t as o,i as r,o as t};
