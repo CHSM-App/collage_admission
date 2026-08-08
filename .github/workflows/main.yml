@@ -26,10 +26,9 @@ jobs:
         working-directory: FrontEnd
 
       - name: Build frontend
+        # VITE_API_URL is read from FrontEnd/.env.production (single source of truth).
         run: npm run build
         working-directory: FrontEnd
-        env:
-          VITE_API_URL: https://collageserver.vengurlatech.com/
 
       - name: Deploy backend branch
         run: |
@@ -49,3 +48,13 @@ jobs:
 
           # Force push to backend branch
           git push origin HEAD:backend --force
+
+
+
+
+
+
+          
+
+
+          

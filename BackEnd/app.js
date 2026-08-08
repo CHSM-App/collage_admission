@@ -75,6 +75,25 @@ app.use('/uploads',       uploadsRouter);
 
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ── SPA navigation fallback ──────────────────────────────────
+// The frontend uses BrowserRouter, so client routes (/login/student,
+// /student/dashboard, /pay/:token, …) are real URLs. On a direct hit or page
+// refresh the request reaches Express. Several API routers below are mounted at
+// '/' with auth middleware, so they would answer 401 for these paths before any
+// trailing fallback — that's why this must run BEFORE the routers. Serve
+// index.html for browser navigations (GET that accepts HTML) whose path is not
+// an API route; everything else falls through to the routers and JSON 404.
+const API_PREFIXES = [
+  '/auth', '/colleges', '/applications', '/api', '/college-admin', '/payments',
+  '/masters', '/admin', '/notifications', '/certificates', '/exams', '/chat',
+  '/uploads', '/health',
+];
+app.get('*', function (req, res, next) {
+  if (!req.accepts('html')) return next();
+  if (API_PREFIXES.some((p) => req.path === p || req.path.startsWith(p + '/'))) return next();
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 // ── Routes ───────────────────────────────────────────────────
 // Tiered rate limits (see middleware/rateLimits.js):
 //   • /auth has its own strict per-route limiters (login/register/OTP).
