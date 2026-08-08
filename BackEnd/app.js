@@ -83,9 +83,11 @@ app.use(express.static(path.join(__dirname, 'public')));
 // trailing fallback — that's why this must run BEFORE the routers. Serve
 // index.html for browser navigations (GET that accepts HTML) whose path is not
 // an API route; everything else falls through to the routers and JSON 404.
+// NOTE: the /admin API router only exposes /admin/colleges/* — the client route
+// /admin/dashboard is a SPA page, so guard the narrow API subtree, not all /admin.
 const API_PREFIXES = [
   '/auth', '/colleges', '/applications', '/api', '/college-admin', '/payments',
-  '/masters', '/admin', '/notifications', '/certificates', '/exams', '/chat',
+  '/masters', '/admin/colleges', '/notifications', '/certificates', '/exams', '/chat',
   '/uploads', '/health',
 ];
 app.get('*', function (req, res, next) {
