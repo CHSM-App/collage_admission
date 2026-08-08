@@ -1,0 +1,1 @@
+import{t as e}from"./jsx-runtime-Wg2orqH5.js";import{t}from"./RoleLoginForm-DZWfu0fD.js";var n=e();function r(){return(0,n.jsx)(t,{role:`student`})}export{r as default};
