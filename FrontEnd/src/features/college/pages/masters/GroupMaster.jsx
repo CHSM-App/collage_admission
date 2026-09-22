@@ -1,20 +1,20 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
-import { getFaculty, getGroups, getGroup, getCoursesForSemester, createGroup, updateGroup, deleteGroup, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
+import { getFaculty, getGroups, getGroup, getCourses, createGroup, updateGroup, deleteGroup, invalidateGroups, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
+import ImportButton from '../../../../shared/components/ImportButton.jsx'
 import { useToast } from '../../../../context/ToastContext.jsx'
 import { getErrorMessage } from '../../../../shared/hooks/useNetworkError.js'
+import { COURSE_TYPES } from '../../constants/courseTypes.js'
 
-const NUM_SLOTS  = 11
 const semCountFor = (yrs) => Math.max(1, Math.min(10, (parseInt(yrs) || 0) * 2))
 
 const EMPTY_GROUP = (facultyId, sem) => ({
   faculty_master_id: facultyId,
   semester: sem,
-  group_code: '',
   group_description: '',
   is_active: true,
-  courses: Array.from({ length: NUM_SLOTS }, (_, i) => ({ course_position: i + 1, course_code: '', course_title: '' })),
+  course_master_ids: [],
 })
 
 export default function GroupMaster({ collegeId }) {
@@ -31,11 +31,15 @@ export default function GroupMaster({ collegeId }) {
   const [loading, setLoading]       = useState(false)
   const [modal, setModal]           = useState(null)   // null | 'new' | group object
   const [form, setForm]             = useState(null)
-  const [courseHints, setCourseHints] = useState([])   // autocomplete from course_master
+  const [subjects, setSubjects]     = useState([])     // Course Master rows for the form's semester
+  const [typeFilter, setTypeFilter] = useState('')
+  const [dropped, setDropped]       = useState([])     // legacy members with no Course Master link
+  const [viewing, setViewing]       = useState(null)   // { group, courses }
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState('')
   const [sortCol, setSortCol] = useState('group_code')
   const [sortDir, setSortDir] = useState('asc')
+
   function toggleSortGM(col) {
     if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortCol(col); setSortDir('asc') }
@@ -82,69 +86,77 @@ export default function GroupMaster({ collegeId }) {
 
   useEffect(() => { loadGroups() }, [loadGroups])
 
-  // Load course hints for ALL faculties at the selected semester (for elective autocomplete)
-  useEffect(() => {
-    getCoursesForSemester(collegeId, selSem, r => setCourseHints(r.data.data || []))
-      .then(r => setCourseHints(r.data.data || []))
-      .catch(() => {})
-  }, [collegeId, selSem])
+  // The picker only ever offers subjects of the group's own program-semester —
+  // that is exactly what the API will accept back.
+  const loadSubjects = useCallback((facultyId, sem) => {
+    setSubjects([])
+    return getCourses(collegeId, facultyId, sem, r => setSubjects(activeSubjects(r)))
+      .then(r => setSubjects(activeSubjects(r)))
+      .catch(() => setSubjects([]))
+  }, [collegeId])
 
   function openNew() {
     setForm(EMPTY_GROUP(selFaculty, selSem))
-    setModal('new'); setError('')
+    setDropped([]); setTypeFilter(''); setError('')
+    setModal('new')
+    loadSubjects(selFaculty, selSem)
   }
 
   async function openEdit(g) {
-    const r = await getGroup(collegeId, g.id)
-    const data = r.data.data
-    const existing = data.courses || []
-    const padded = Array.from({ length: NUM_SLOTS }, (_, i) => {
-      const found = existing.find(c => c.course_position === i + 1)
-      return found || { course_position: i + 1, course_code: '', course_title: '' }
-    })
-    setForm({ ...data, courses: padded })
-    setModal(data); setError('')
+    try {
+      const r = await getGroup(collegeId, g.id)
+      const data = r.data.data
+      const members = data.courses || []
+      // Members with no Course Master link are free-text rows from before
+      // migration 046, or subjects since deleted. They cannot be re-sent as
+      // ids, so say plainly that saving drops them rather than losing them
+      // quietly.
+      const linked = members.filter(c => c.course_master_id != null)
+      setDropped(members.filter(c => c.course_master_id == null))
+      setForm({
+        faculty_master_id: data.faculty_master_id,
+        semester: data.semester,
+        group_description: data.group_description || '',
+        is_active: !!data.is_active,
+        course_master_ids: linked.map(c => c.course_master_id),
+      })
+      setTypeFilter(''); setError('')
+      setModal(data)
+      loadSubjects(data.faculty_master_id, data.semester)
+    } catch (e) { toast.error(getErrorMessage(e, 'Could not open that group.')) }
+  }
+
+  async function openView(g) {
+    try {
+      const r = await getGroup(collegeId, g.id)
+      setViewing({ group: r.data.data, courses: r.data.data.courses || [] })
+    } catch (e) { toast.error(getErrorMessage(e, 'Could not open that group.')) }
   }
 
   function setField(k, v) { setForm(f => ({ ...f, [k]: v })) }
 
-  function setCourseRow(pos, field, val) {
+  function toggleSubject(id) {
     setForm(f => ({
       ...f,
-      courses: f.courses.map(c => c.course_position === pos ? { ...c, [field]: val } : c),
+      course_master_ids: f.course_master_ids.includes(id)
+        ? f.course_master_ids.filter(x => x !== id)
+        : [...f.course_master_ids, id],
     }))
   }
 
-  function handleCodeChange(pos, code) {
-    setCourseRow(pos, 'course_code', code)
-    const hint = courseHints.find(h => h.course_code === code)
-    if (hint) setCourseRow(pos, 'course_title', hint.course_title)
-  }
+  const filteredSubjects = useMemo(
+    () => typeFilter ? subjects.filter(s => s.subject_type === typeFilter) : subjects,
+    [subjects, typeFilter]
+  )
 
   async function save() {
-    if (!form.group_code.trim())       return setError('Group Code is required.')
     if (!form.group_description.trim()) return setError('Group Description is required.')
-
-    // Duplicate Code+Title check within this group's slots.
-    // Compare on trimmed/lowercased values to match SQL's case-insensitive collation.
-    const filledRows = form.courses.filter(c => c.course_code.trim() || c.course_title.trim())
-    const seen = new Map()
-    for (const c of filledRows) {
-      const key = `${c.course_code.trim().toLowerCase()}|${c.course_title.trim().toLowerCase()}`
-      if (seen.has(key)) {
-        return setError(`Selected Course Code and Course Title combination already exists (slots ${seen.get(key)} and ${c.course_position}).`)
-      }
-      seen.set(key, c.course_position)
-    }
+    if (form.course_master_ids.length === 0) return setError('Select at least one subject.')
 
     setSaving(true); setError('')
-    const payload = {
-      ...form,
-      courses: form.courses.filter(c => c.course_code.trim()),
-    }
     try {
-      if (modal === 'new') await createGroup(collegeId, payload)
-      else await updateGroup(collegeId, modal.id, payload)
+      if (modal === 'new') await createGroup(collegeId, form)
+      else await updateGroup(collegeId, modal.id, form)
       setModal(null); loadGroups(true)
     } catch (e) { setError(getErrorMessage(e, 'Save failed.')) }
     finally { setSaving(false) }
@@ -156,13 +168,28 @@ export default function GroupMaster({ collegeId }) {
     catch { toast.error('Failed.') }
   }
 
+  const semSubjectCount = subjects.length
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-4 gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-2">
         <h2 className="text-lg font-semibold text-slate-800">
           Group Master <span className="text-sm font-normal text-slate-400">(Subject Combinations)</span>
         </h2>
-        {rw && <button onClick={openNew} className="shrink-0 px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700">+ New Group</button>}
+        {rw && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <ImportButton
+              label="Import groupmaster.xls"
+              path={`masters/${collegeId}/group/import`}
+              title="Upload the university's groupmaster file. Needs the member subjects in Course Master first, and a Univ. Faculty No on each program."
+              describe={d => `${d.inserted} groups added, ${d.updated} updated (${d.items} subject memberships).`}
+              // The file spans every program and semester, so drop the whole
+              // group cache — not just the tab currently on screen.
+              onDone={() => { invalidateGroups(collegeId); loadGroups(true) }}
+            />
+            <button onClick={openNew} className="shrink-0 px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700">+ New Group</button>
+          </div>
+        )}
       </div>
 
       {/* Filters */}
@@ -186,12 +213,6 @@ export default function GroupMaster({ collegeId }) {
           </div>
         </div>
       </div>
-
-      {/* TODO: confirm with stakeholder — BA uses Group Master alone or alongside Course Master? */}
-      <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
-        ⚠ Stakeholder confirmation needed: does this program use Group Master alone, or alongside Course Master?
-        Currently treated as supplemental (Course Master holds all subjects; Group Master defines valid combinations).
-      </p>
 
       {loading ? <SkeletonTable rows={4} cols={3} /> : (
         <>
@@ -220,6 +241,7 @@ export default function GroupMaster({ collegeId }) {
                       </span>
                     </td>
                     <td className="px-3 py-1 text-right space-x-3 whitespace-nowrap">
+                      <button onClick={() => openView(g)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">View</button>
                       {rw && <button onClick={() => openEdit(g)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>}
                       {rw && g.is_active && <button onClick={() => softDelete(g)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Deactivate</button>}
                     </td>
@@ -245,8 +267,9 @@ export default function GroupMaster({ collegeId }) {
                   </span>
                 </div>
                 <div className="flex gap-3 mt-3">
-                  <button onClick={() => openEdit(g)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>
-                  {g.is_active && <button onClick={() => softDelete(g)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Deactivate</button>}
+                  <button onClick={() => openView(g)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">View</button>
+                  {rw && <button onClick={() => openEdit(g)} className="text-xs font-medium text-slate-500 hover:text-slate-800 underline">Edit</button>}
+                  {rw && g.is_active && <button onClick={() => softDelete(g)} className="text-xs font-medium text-red-400 hover:text-red-600 underline">Deactivate</button>}
                 </div>
               </div>
             ))}
@@ -254,7 +277,7 @@ export default function GroupMaster({ collegeId }) {
         </>
       )}
 
-      {/* Modal */}
+      {/* Create / edit */}
       {modal && form && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col">
@@ -267,9 +290,16 @@ export default function GroupMaster({ collegeId }) {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="flex flex-col gap-1">
-                  <label className="text-xs font-semibold text-slate-600">Group Code *</label>
-                  <input value={form.group_code} onChange={e => setField('group_code', e.target.value.toUpperCase())}
-                    className={inp} placeholder="HPE-01" />
+                  <label className="text-xs font-semibold text-slate-600">Group Code</label>
+                  {modal === 'new' ? (
+                    <p className="text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg px-3 py-2">
+                      Generated on save
+                    </p>
+                  ) : (
+                    <p className="font-mono font-semibold text-slate-900 border border-slate-200 bg-slate-50 rounded-lg px-3 py-2 text-sm">
+                      {modal.group_code}
+                    </p>
+                  )}
                 </div>
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-semibold text-slate-600">Status</label>
@@ -286,34 +316,58 @@ export default function GroupMaster({ collegeId }) {
                   className={inp} placeholder="History-Political Science-Economics" />
               </div>
 
-              <div>
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-                  Subject Slots (up to {NUM_SLOTS})
-                  {courseHints.length > 0 && <span className="normal-case font-normal text-slate-400 ml-2">— Course codes auto-fill from Course Master</span>}
+              {dropped.length > 0 && (
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  {dropped.length} member{dropped.length !== 1 ? 's' : ''} of this group{' '}
+                  ({dropped.map(c => c.course_code).join(', ')}) are not in Course Master, so they cannot be
+                  ticked below and <strong>saving will remove them</strong>. Add them to Course Master for
+                  this program and semester first if you want to keep them.
                 </p>
-                <div className="space-y-1.5">
-                  {form.courses.map(c => (
-                    <div key={c.course_position} className="flex items-center gap-2">
-                      <span className="text-xs text-slate-400 w-5 text-right shrink-0">{c.course_position}.</span>
-                      <input
-                        list={`hints-${c.course_position}`}
-                        value={c.course_code}
-                        onChange={e => handleCodeChange(c.course_position, e.target.value)}
-                        className="border border-slate-200 rounded px-2 py-1.5 text-xs w-28 sm:w-32 focus:outline-none focus:ring-1 focus:ring-slate-300"
-                        placeholder="Code"
-                      />
-                      <datalist id={`hints-${c.course_position}`}>
-                        {courseHints.map(h => <option key={h.course_code} value={h.course_code}>{h.course_title}</option>)}
-                      </datalist>
-                      <input
-                        value={c.course_title}
-                        onChange={e => setCourseRow(c.course_position, 'course_title', e.target.value)}
-                        className="border border-slate-200 rounded px-2 py-1.5 text-xs flex-1 focus:outline-none focus:ring-1 focus:ring-slate-300"
-                        placeholder="Course Title"
-                      />
-                    </div>
-                  ))}
+              )}
+
+              <div>
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                    Subjects
+                    <span className="normal-case font-normal text-slate-400 ml-2">
+                      {form.course_master_ids.length} selected
+                    </span>
+                  </p>
+                  <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
+                    className="border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-slate-300 w-40">
+                    <option value="">All Types</option>
+                    {COURSE_TYPES.map(t => <option key={t.code} value={t.code} title={t.title}>{t.code} — {t.title}</option>)}
+                  </select>
                 </div>
+
+                {semSubjectCount === 0 ? (
+                  <p className="text-xs text-slate-400">Add subjects to Sem {form.semester} in Course Master before creating a group.</p>
+                ) : filteredSubjects.length === 0 ? (
+                  <p className="text-xs text-slate-400">No {typeFilter} subjects in Sem {form.semester}.</p>
+                ) : (
+                  <div className="flex flex-col gap-2 max-h-80 overflow-y-auto p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                    {filteredSubjects.map(s => {
+                      const selected = form.course_master_ids.includes(s.id)
+                      return (
+                        <label key={s.id} className={`flex items-start gap-2.5 text-sm px-3 py-2 rounded-lg border cursor-pointer transition ${selected ? 'bg-slate-800 border-slate-800' : 'bg-white border-slate-200 hover:border-slate-400'}`}>
+                          <input type="checkbox" className="w-4 h-4 mt-0.5 accent-slate-900 cursor-pointer shrink-0"
+                            checked={selected} onChange={() => toggleSubject(s.id)} />
+                          <div className="flex flex-col gap-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className={selected ? 'text-white font-medium' : 'text-slate-800 font-medium'}>{s.course_title}</span>
+                              <Tag selected={selected} mono>{s.course_code}</Tag>
+                            </div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {s.subject_type && <Tag selected={selected}>{s.subject_type}</Tag>}
+                              {s.credits != null && <Tag selected={selected}>{s.credits} cr</Tag>}
+                              <Tag selected={selected}>Int/SE {s.max_internal ?? '—'}/{s.max_sem_end ?? '—'}</Tag>
+                            </div>
+                          </div>
+                        </label>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-100 shrink-0">
@@ -325,11 +379,95 @@ export default function GroupMaster({ collegeId }) {
           </div>
         </div>
       )}
+
+      {/* Group details — read-only, so a group's contents can be checked
+          without entering edit and risking a stray tick. */}
+      {viewing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 shrink-0">
+              <div>
+                <h3 className="font-semibold text-slate-800">{viewing.group.group_description}</h3>
+                <p className="text-xs text-slate-400 font-mono mt-0.5">
+                  {viewing.group.group_code} · Sem {viewing.group.semester ?? '—'} · {viewing.courses.length} subjects
+                </p>
+              </div>
+              <button onClick={() => setViewing(null)} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+            </div>
+            <div className="overflow-y-auto px-6 py-5">
+              {viewing.courses.length === 0 ? (
+                <p className="text-center text-slate-500 py-8 text-sm">No subjects in this group.</p>
+              ) : (
+                <div className="overflow-x-auto border border-slate-300">
+                  <table className="w-full text-sm border-collapse">
+                    <thead className="bg-slate-50 text-xs font-bold text-slate-600 uppercase tracking-wide border-b border-slate-300">
+                      <tr>
+                        <th className="px-3 py-1 text-center w-10 border-r border-slate-200">#</th>
+                        <th className="px-3 py-1 text-left w-32 border-r border-slate-200">Code</th>
+                        <th className="px-3 py-1 text-left border-r border-slate-200">Title</th>
+                        <th className="px-3 py-1 text-center w-20 border-r border-slate-200">Type</th>
+                        <th className="px-3 py-1 text-center w-16 border-r border-slate-200">Credits</th>
+                        <th className="px-3 py-1 text-center w-24">Int/SE</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {viewing.courses.map(c => (
+                        <tr key={c.id} className={c.course_master_id == null ? 'bg-amber-50/60' : ''}>
+                          <td className="px-3 py-1 text-center text-slate-400 border-r border-slate-200">{c.course_position}</td>
+                          <td className="px-3 py-1 font-mono text-slate-900 border-r border-slate-200">
+                            {c.course_code}
+                            {c.course_master_id == null && (
+                              <span className="ml-1 text-amber-600" title="Not linked to Course Master">*</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-1 text-slate-700 border-r border-slate-200">{c.course_title || '—'}</td>
+                          <td className="px-3 py-1 text-center text-slate-500 border-r border-slate-200">{c.subject_type || '—'}</td>
+                          <td className="px-3 py-1 text-center text-slate-500 border-r border-slate-200">{c.credits ?? '—'}</td>
+                          <td className="px-3 py-1 text-center text-slate-500">{c.max_internal ?? '—'}/{c.max_sem_end ?? '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {viewing.courses.some(c => c.course_master_id == null) && (
+                <p className="text-xs text-amber-700 mt-3">* Not linked to a Course Master subject — shown from the stored code and title.</p>
+              )}
+            </div>
+            <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-100 shrink-0">
+              <button onClick={() => setViewing(null)} className="px-4 py-2 text-sm text-slate-600">Close</button>
+              {rw && (
+                <button
+                  onClick={() => { const g = viewing.group; setViewing(null); openEdit(g) }}
+                  className="px-5 py-2 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700"
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
+/** Course Master rows are soft-deleted; a deactivated subject is not offerable. */
+function activeSubjects(r) {
+  return (r.data.data || []).filter(s => s.is_active !== false)
+}
+
 const inp = 'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300'
+
+function Tag({ children, selected, mono }) {
+  return (
+    <span className={`text-[11px] px-1.5 py-0.5 rounded border ${mono ? 'font-mono' : ''} ${
+      selected ? 'border-white/30 text-white/80' : 'border-slate-200 text-slate-500'
+    }`}>
+      {children}
+    </span>
+  )
+}
 
 function GMTh({ col, label, align = 'left', sortCol, sortDir, onSort }) {
   const active = sortCol === col

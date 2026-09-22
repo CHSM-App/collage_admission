@@ -102,7 +102,7 @@ describe('useApplicationForm', () => {
     localStorage.clear()
     setupLocalStorage()
 
-    useParams.mockReturnValue({ applicationId: '42' })
+    useParams.mockReturnValue({ applicationId: '42', collegeCode: 'CL001' })
     useSearchParams.mockReturnValue([new URLSearchParams(), vi.fn()])
     useNavigate.mockReturnValue(mockNavigate)
 
@@ -129,7 +129,7 @@ describe('useApplicationForm', () => {
   })
 
   it('initializes new application when paramId is "new"', async () => {
-    useParams.mockReturnValue({ applicationId: 'new' })
+    useParams.mockReturnValue({ applicationId: 'new', collegeCode: 'CL001' })
     useSearchParams.mockReturnValue([
       new URLSearchParams({
         college_id: '1', course_id: '2', period_id: '3', academic_year: '2024-25',
@@ -160,7 +160,7 @@ describe('useApplicationForm', () => {
       academic_year: '2024-25',
       year_of_study: undefined,
     })
-    expect(mockNavigate).toHaveBeenCalledWith('/apply/99', { replace: true })
+    expect(mockNavigate).toHaveBeenCalledWith('/c/CL001/apply/99', { replace: true })
   })
 
   it('sets globalError on init failure', async () => {

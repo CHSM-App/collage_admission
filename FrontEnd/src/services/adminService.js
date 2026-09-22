@@ -9,6 +9,14 @@ export const getAllAdminColleges = () =>
 export const updateAdminCollege = (collegeId, data) =>
   api.put(`admin/colleges/${collegeId}`, data)
 
+// Brands the college's student portal. Multipart — let the browser set the
+// boundary itself rather than pinning a Content-Type header.
+export const uploadCollegeLogo = (collegeId, file) => {
+  const form = new FormData()
+  form.append('logo', file)
+  return api.post(`admin/colleges/${collegeId}/logo`, form)
+}
+
 // Roles
 export const getRoles = (collegeId) =>
   api.get(`admin/colleges/${collegeId}/roles`)

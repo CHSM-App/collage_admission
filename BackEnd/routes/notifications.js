@@ -178,9 +178,13 @@ router.get('/student/:studentId', async (req, res) => {
   const studentId = parseInt(req.params.studentId);
   if (!studentId) return res.status(400).json({ success: false, message: 'Invalid studentId' });
 
+  // Scope to one college's portal — see the same filter on GET /applications.
+  const collegeId = req.query.college_id ? parseInt(req.query.college_id) : null;
+
   try {
-    const result = await db.request()
-      .input('sid', studentId)
+    const request = db.request().input('sid', studentId);
+    if (collegeId) request.input('cid', collegeId);
+    const result = await request
       .query(`
         SELECT
           a.id, a.status, a.roll_number, a.submitted_at,
@@ -193,6 +197,7 @@ router.get('/student/:studentId', async (req, res) => {
         LEFT JOIN faculty_master cr ON cr.code_no = a.course_id AND cr.college_id = a.college_id
         WHERE a.student_id = @sid
           AND a.status NOT IN ('draft', 'cancelled')
+          ${collegeId ? 'AND a.college_id = @cid' : ''}
         ORDER BY COALESCE(a.status_updated_at, a.submitted_at) DESC
       `);
 

@@ -73,6 +73,12 @@ app.use(cookieParser());
 // /uploads/* is never served statically.
 app.use('/uploads',       uploadsRouter);
 
+// College logos are deliberately public — they brand the logged-out landing and
+// login pages of each college's portal, so they cannot go through the
+// authenticated /uploads route. They live outside public/ because the frontend
+// build empties that directory on every deploy.
+app.use('/logos',         express.static(path.join(__dirname, 'uploads', 'logos')));
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── SPA navigation fallback ──────────────────────────────────
@@ -88,7 +94,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 const API_PREFIXES = [
   '/auth', '/colleges', '/applications', '/api', '/college-admin', '/payments',
   '/masters', '/admin/colleges', '/notifications', '/certificates', '/exams', '/chat',
-  '/uploads', '/health',
+  '/uploads', '/logos', '/health',
 ];
 app.get('*', function (req, res, next) {
   if (!req.accepts('html')) return next();

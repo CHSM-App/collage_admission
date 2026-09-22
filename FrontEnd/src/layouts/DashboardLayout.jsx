@@ -2,8 +2,9 @@ import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import ErrorBoundary from '../shared/components/ErrorBoundary.jsx'
 import ChatBot from '../components/ChatBot.jsx'
-import { DASHBOARD_PATHS } from '../app/routePaths.js'
+import { DASHBOARD_PATHS, STUDENT_PATHS } from '../app/routePaths.js'
 import Button from '../shared/components/Button.jsx'
+import { useCollege } from '../context/CollegeContext.jsx'
 import { useAuth } from '../features/auth/hooks/useAuth.js'
 import { useNotifications } from '../features/student/hooks/useNotifications.js'
 import { useCollegeFeatures } from '../features/college/hooks/useCollegeFeatures.js'
@@ -14,16 +15,23 @@ const roleLabels = {
   admin:   'Admin Console',
 }
 
+// Student nav is a function of the college code — every link stays inside that
+// college's own portal (/c/<code>/dashboard).
+const studentSidebarItems = (code) => {
+  const base = STUDENT_PATHS.dashboard(code)
+  return [
+    { label: 'Overview',       to: base },
+    // college search replaced by /c/:collegeCode — remove once settled
+    // { label: 'Browse & Apply', to: `${base}?section=browse` },
+    { label: 'My Applications',to: `${base}?section=applications` },
+    // { label: 'My Documents',   to: `${base}?section=documents` },
+    { label: 'Fee Receipts',   to: `${base}?section=receipts` },
+    { label: 'Notifications',  to: `${base}?section=notifications` },
+  ]
+}
+
 // permission key for each college sidebar item (null = always visible)
 const sidebarItems = {
-  student: [
-    { label: 'Overview',       to: DASHBOARD_PATHS.student },
-    { label: 'Browse & Apply', to: `${DASHBOARD_PATHS.student}?section=browse` },
-    { label: 'My Applications',to: `${DASHBOARD_PATHS.student}?section=applications` },
-    // { label: 'My Documents',   to: `${DASHBOARD_PATHS.student}?section=documents` },
-    { label: 'Fee Receipts',   to: `${DASHBOARD_PATHS.student}?section=receipts` },
-    { label: 'Notifications',  to: `${DASHBOARD_PATHS.student}?section=notifications` },
-  ],
   college: [
     { label: 'Overview',          to: DASHBOARD_PATHS.college,                                   perm: null },
     { label: 'Admission Periods', to: `${DASHBOARD_PATHS.college}?section=periods`,              perm: null },
@@ -58,6 +66,7 @@ function getDisplayName(user) {
 export default function DashboardLayout() {
   const location = useLocation()
   const navigate  = useNavigate()
+  const college   = useCollege()   // null on the college/admin dashboards
   const { user, role, logout } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [collapsedGroups, setCollapsedGroups] = useState(() => {
@@ -110,7 +119,7 @@ export default function DashboardLayout() {
     markSeen()
     setBellOpen(false)
     setPopup(false)
-    navigate(`${DASHBOARD_PATHS.student}?section=notifications`)
+    navigate(`${STUDENT_PATHS.dashboard(college?.code)}?section=notifications`)
   }
 
   // Close sidebar on route change (mobile)
@@ -118,7 +127,9 @@ export default function DashboardLayout() {
     setSidebarOpen(false)
   }, [location.pathname, location.search])
 
-  const baseItems = sidebarItems[role] || []
+  const baseItems = role === 'student'
+    ? studentSidebarItems(college?.code)
+    : (sidebarItems[role] || [])
   let currentItems = baseItems
 
   // For staff: hide items they have no permission for at all
@@ -198,9 +209,25 @@ export default function DashboardLayout() {
         <div className="flex h-full flex-col p-5 overflow-y-auto">
           {/* Header with close button on mobile */}
           <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wide text-emerald-600">College Admission</p>
-              <h2 className="mt-1 text-lg font-bold text-slate-950">{roleLabels[role]}</h2>
+            {/* Inside a college portal the sidebar carries that college's own
+                identity; the staff/admin consoles keep the platform wording. */}
+            <div className="min-w-0">
+              {college ? (
+                <div className="flex items-center gap-2">
+                  {college.logoUrl && (
+                    <img src={college.logoUrl} alt="" className="h-9 w-9 shrink-0 rounded object-contain" />
+                  )}
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-slate-950">{college.name}</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Student Portal</p>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="text-xs font-bold uppercase tracking-wide text-emerald-600">College Admission</p>
+                  <h2 className="mt-1 text-lg font-bold text-slate-950">{roleLabels[role]}</h2>
+                </>
+              )}
               {isStaff && (
                 <p className="mt-0.5 text-xs text-blue-600 font-semibold">{user.role_name}</p>
               )}
@@ -304,6 +331,17 @@ export default function DashboardLayout() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               </button>
+              {/* In a college portal the nav bar leads with the college — the
+                  sidebar carrying it is hidden on mobile. */}
+              {college && (
+                <div className="flex items-center gap-2 min-w-0">
+                  {college.logoUrl && (
+                    <img src={college.logoUrl} alt="" className="h-8 w-8 shrink-0 rounded object-contain" />
+                  )}
+                  <p className="text-sm font-bold text-slate-950 truncate">{college.name}</p>
+                  <span className="hidden sm:inline text-slate-300">|</span>
+                </div>
+              )}
               <div className="min-w-0">
                 <p className="text-xs text-slate-500 hidden sm:block">Welcome back,</p>
                 <p className="text-sm font-bold text-slate-950 truncate">

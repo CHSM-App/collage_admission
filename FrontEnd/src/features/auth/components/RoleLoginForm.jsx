@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { getDashboardPath, LOGIN_PATHS, REGISTER_PATHS, FORGOT_PASSWORD_PATH, COLLEGE_FORGOT_PASSWORD_PATH } from '../../../app/routePaths.js'
+import { getPostLoginPath, REGISTER_PATHS, FORGOT_PASSWORD_PATH, COLLEGE_FORGOT_PASSWORD_PATH, STUDENT_PATHS } from '../../../app/routePaths.js'
 import AuthLayout from '../../../layouts/AuthLayout.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import Input from '../../../shared/components/Input.jsx'
+import { useCollege } from '../../../context/CollegeContext.jsx'
 import { useAuth } from '../hooks/useAuth.js'
 
 const roleContent = {
@@ -27,14 +28,10 @@ const roleContent = {
   },
 }
 
-const roleLinks = [
-  { label: 'Student', role: 'student', to: LOGIN_PATHS.student },
-  { label: 'College', role: 'college', to: LOGIN_PATHS.college },
-]
-
 export default function RoleLoginForm({ role }) {
   const navigate = useNavigate()
   const location = useLocation()
+  const college  = useCollege()   // null outside a college portal
   const { isAuthenticated, role: activeRole, login, loading, error, clearError } = useAuth()
   const isStudent = role === 'student'
   const [formData, setFormData] = useState({ email: '', phone: '', password: '' })
@@ -43,9 +40,9 @@ export default function RoleLoginForm({ role }) {
 
   useEffect(() => {
     if (isAuthenticated) {
-      navigate(getDashboardPath(activeRole), { replace: true })
+      navigate(getPostLoginPath(activeRole, college?.code, location.search), { replace: true })
     }
-  }, [activeRole, isAuthenticated, navigate])
+  }, [activeRole, isAuthenticated, navigate, college?.code, location.search])
 
   // Auto-dismiss the error banner after a generous timeout so it doesn't
   // linger forever, but is on screen long enough to read comfortably.
@@ -74,22 +71,6 @@ export default function RoleLoginForm({ role }) {
 
   return (
     <AuthLayout title={content.title} subtitle={content.subtitle}>
-      <div className="mb-6 grid grid-cols-2 gap-2 rounded-lg bg-slate-100 p-1">
-        {roleLinks.map((item) => (
-          <Link
-            key={item.role}
-            to={item.to}
-            className={`rounded-md px-3 py-2 text-center text-sm font-semibold transition ${
-              location.pathname === item.to
-                ? 'bg-white text-slate-950 shadow-sm'
-                : 'text-slate-500 hover:text-slate-900'
-            }`}
-          >
-            {item.label}
-          </Link>
-        ))}
-      </div>
-
       <form className="space-y-5" onSubmit={handleSubmit}>
         {isStudent ? (
           <Input
@@ -199,13 +180,21 @@ export default function RoleLoginForm({ role }) {
         {role === 'student' && (
           <div className="space-y-2 text-center text-sm text-slate-500">
             <p>
-              <Link to={FORGOT_PASSWORD_PATH} className="font-semibold text-slate-950 hover:underline">
+              {/* location.search carries ?next= across the hop so the student
+                  still returns to the page they came from. */}
+              <Link
+                to={`${college ? STUDENT_PATHS.forgot(college.code) : FORGOT_PASSWORD_PATH}${location.search}`}
+                className="font-semibold text-slate-950 hover:underline"
+              >
                 Forgot password?
               </Link>
             </p>
             <p>
               New student?{' '}
-              <Link to={REGISTER_PATHS.student} className="font-semibold text-slate-950 hover:underline">
+              <Link
+                to={`${college ? STUDENT_PATHS.register(college.code) : REGISTER_PATHS.student}${location.search}`}
+                className="font-semibold text-slate-950 hover:underline"
+              >
                 Create an account
               </Link>
             </p>

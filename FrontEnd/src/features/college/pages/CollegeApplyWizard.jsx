@@ -36,9 +36,10 @@ import Step2Personal  from '../../student/pages/wizard/Step2Personal.jsx'
 import Step3Other     from '../../student/pages/wizard/Step3Other.jsx'
 import Step4Exam      from '../../student/pages/wizard/Step4Exam.jsx'
 import Step5Documents from '../../student/pages/wizard/Step5Documents.jsx'
+import Step6Groups    from '../../student/pages/wizard/Step6Groups.jsx'
 
-const ALL_STEPS     = ['Personal', 'Other Details', 'Exam Details', 'Documents', 'Review', 'Division & Fees']
-const STEPS_NO_FEE  = ['Personal', 'Other Details', 'Exam Details', 'Documents', 'Review']
+const ALL_STEPS     = ['Personal', 'Other Details', 'Exam Details', 'Documents', 'Subject Group', 'Review', 'Division & Fees']
+const STEPS_NO_FEE  = ['Personal', 'Other Details', 'Exam Details', 'Documents', 'Subject Group', 'Review']
 
 // Wizard step index → actual application step number for saving (offset by 1 vs student wizard)
 // Student wizard: step1=Context, step2=Personal, ...
@@ -283,8 +284,8 @@ export default function CollegeApplyWizard() {
       navigate(`/college/dashboard?section=app&app_id=${state.applicationId}`)
       return
     }
-    dispatch({ type: 'SET_MAX_STEP', step: 6 })
-    dispatch({ type: 'SET_STEP', step: 6 })
+    dispatch({ type: 'SET_MAX_STEP', step: 7 })
+    dispatch({ type: 'SET_STEP', step: 7 })
   }
 
   // ── App fee handlers ────────────────────────────────────────
@@ -449,14 +450,27 @@ export default function CollegeApplyWizard() {
             />
           )}
 
-          {/* Step 5 — Review & submit */}
+          {/* Step 5 — Subject group. Optional here: staff entering an
+              application may not know the student's choice yet. */}
           {currentStep === 5 && (
+            <Step6Groups
+              {...stepProps}
+              step={5}
+              appId={applicationId}
+              skippable
+              onBack={() => goStep(4)}
+              onNext={() => skip(6)}
+            />
+          )}
+
+          {/* Step 6 — Review & submit */}
+          {currentStep === 6 && (
             <CollegeReviewStep
               data={data}
               saving={saving}
               submitError={submitError}
               isEditMode={isEditMode}
-              onBack={() => goStep(4)}
+              onBack={() => goStep(5)}
               onEditStep={goStep}
               onSubmit={handleFinalSubmit}
               onSaveAndReturn={() => navigate(`/college/dashboard?section=app&app_id=${applicationId}`)}
@@ -483,15 +497,15 @@ export default function CollegeApplyWizard() {
             />
           )}
 
-          {/* Step 6 — Division, Fee & Payment */}
-          {currentStep === 6 && (
+          {/* Step 7 — Division, Fee & Payment */}
+          {currentStep === 7 && (
             <CollegeFeeConfirmStep
               applicationId={applicationId}
               collegeId={collegeId}
               courseId={data.course_id}
               yearOfStudy={data.year_of_study}
               appDivision={data.app_division}
-              onBack={() => goStep(5)}
+              onBack={() => goStep(6)}
               onGoToInbox={() => navigate('/college/dashboard?section=inbox')}
               onGoToDetail={() => navigate(`/college/dashboard?section=app&app_id=${applicationId}`)}
               onAddNew={() => navigate('/college/dashboard?section=add-application')}

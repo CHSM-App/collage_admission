@@ -1,7 +1,9 @@
 import api from './api'
 
-export const getApplications = (studentId) =>
-  api.get(`applications?student_id=${studentId}&limit=100`)
+// collegeId scopes the list to one college's portal — a student with
+// applications at several colleges must only ever see the current one's.
+export const getApplications = (studentId, collegeId) =>
+  api.get(`applications?student_id=${studentId}&limit=100${collegeId ? `&college_id=${collegeId}` : ''}`)
 
 export const createApplication = (data) =>
   api.post('applications', data)
@@ -41,6 +43,18 @@ export const saveSubjectSelections = (appId, data) =>
 
 export const getSubjectsList = (collegeId, courseId, semester) =>
   api.get('api/subjects-list', { params: { college_id: collegeId, course_id: courseId, semester } })
+
+// ─── Subject groups (application wizard) ──────────────────────
+// Each group comes back with its member courses inlined, so expanding one on
+// screen costs no extra request.
+export const getGroupsList = (collegeId, courseId, semester) =>
+  api.get('api/groups-list', { params: { college_id: collegeId, course_id: courseId, semester } })
+
+export const getApplicationGroups = (appId) =>
+  api.get(`api/applications/${appId}/groups`)
+
+export const saveApplicationGroups = (appId, selections) =>
+  api.post(`api/applications/${appId}/groups`, { selections })
 
 export const linkFormDocument = (appId, data) =>
   api.post(`api/applications/${appId}/form-documents`, data)

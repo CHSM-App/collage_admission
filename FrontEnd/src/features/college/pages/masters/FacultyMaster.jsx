@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { getFaculty, createFaculty, updateFaculty, deleteFaculty, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
+import { getFaculty, createFaculty, updateFaculty, deleteFaculty, invalidatePrograms, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
+import ImportButton from '../../../../shared/components/ImportButton.jsx'
 import { useToast } from '../../../../context/ToastContext.jsx'
 import { getErrorMessage } from '../../../../shared/hooks/useNetworkError.js'
 
@@ -13,6 +14,7 @@ const yearSlotsFor = (yrs) => Math.max(0, Math.min(5,  parseInt(yrs)     || 0))
 
 const EMPTY = {
   degree_course_code: '', degree_course_name: '', duration_years: 3,
+  university_faculty_no: '',
   unique_code_sem1: '',  unique_code_sem2: '',  unique_code_sem3: '',
   unique_code_sem4: '',  unique_code_sem5: '',  unique_code_sem6: '',
   unique_code_sem7: '',  unique_code_sem8: '',  unique_code_sem9: '',
@@ -123,7 +125,18 @@ export default function FacultyMaster({ collegeId }) {
     <div>
       <div className="flex items-center justify-between mb-4 gap-2">
         <h2 className="text-lg font-semibold text-slate-800">Program Master <span className="text-sm font-normal text-slate-400">(Degree Courses)</span></h2>
-        {rw && <button onClick={openNew} className="shrink-0 px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700">+ New</button>}
+        {rw && (
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            <ImportButton
+              label="Import prgmaster.xls"
+              path={`masters/${collegeId}/faculty/import`}
+              title="Upload the university's program master. Creates the programs and sets each one's Univ. Faculty No, which the course and group imports match on."
+              describe={d => `${d.inserted} programs added, ${d.updated} updated.`}
+              onDone={() => { invalidatePrograms(collegeId); load(true) }}
+            />
+            <button onClick={openNew} className="shrink-0 px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700">+ New</button>
+          </div>
+        )}
       </div>
 
       <input value={search} onChange={e => setSearch(e.target.value)}
@@ -142,6 +155,7 @@ export default function FacultyMaster({ collegeId }) {
                   <Th col="degree_course_code" label="Code"      align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <Th col="degree_course_name" label="Name"      align="left"   sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <Th col="duration_years"     label="Years"     align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                  <Th col="university_faculty_no" label="Univ. Fac. No" align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <th className="px-3 py-1 text-left border-r border-slate-200">Exam Seat Codes</th>
                   <Th col="is_active"          label="Status"    align="center" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                   <th className="px-3 py-1 border-r border-slate-200" />
@@ -149,13 +163,18 @@ export default function FacultyMaster({ collegeId }) {
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {filtered.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500">No records found.</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500">No records found.</td></tr>
                 )}
                 {filtered.map(r => (
                   <tr key={r.code_no} className="hover:bg-blue-50 transition">
                     <td className="px-3 py-1 font-mono font-semibold text-slate-900 border-r border-slate-200">{r.degree_course_code}</td>
                     <td className="px-3 py-1 text-slate-700 border-r border-slate-200">{r.degree_course_name}</td>
                     <td className="px-3 py-1 text-center text-slate-700 border-r border-slate-200">{r.duration_years}</td>
+                    <td className="px-3 py-1 text-center border-r border-slate-200">
+                      {/* The key the course and group imports match their
+                          `faculty` column on — unset means those skip it. */}
+                      {r.university_faculty_no ?? <span className="text-amber-600" title="Not set — coursemaster/groupmaster rows for this program will be skipped">—</span>}
+                    </td>
                     <td className="px-3 py-1 text-slate-400 text-xs border-r border-slate-200">
                       {[r.exam_seat_code_year1, r.exam_seat_code_year2, r.exam_seat_code_year3, r.exam_seat_code_year4, r.exam_seat_code_year5].filter(Boolean).join(' / ') || '—'}
                     </td>
@@ -222,10 +241,17 @@ export default function FacultyMaster({ collegeId }) {
                 </Field>
               </div>
 
-              <Field label="Degree Course Name *">
-                <input value={form.degree_course_name} onChange={e => set('degree_course_name', e.target.value)}
-                  className={inp} placeholder="Bachelor of Commerce" />
-              </Field>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Field label="Degree Course Name *">
+                  <input value={form.degree_course_name} onChange={e => set('degree_course_name', e.target.value)}
+                    className={inp} placeholder="Bachelor of Commerce" />
+                </Field>
+                <Field label="Univ. Faculty No" hint="The university's own number (BA=1, BCOM=2, BSC=3…). Needed to import groupmaster.xls and to generate group codes.">
+                  <input type="number" min="1" value={form.university_faculty_no ?? ''}
+                    onChange={e => set('university_faculty_no', e.target.value)}
+                    className={inp} placeholder="2" />
+                </Field>
+              </div>
 
               <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide pt-1">
                 University Semester Codes

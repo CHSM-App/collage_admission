@@ -59,7 +59,7 @@ async function logActivity(appId, action, actorRole, note = null) {
 
 // ── List applications for a student ────────────────────────
 router.get('/', async (req, res) => {
-  const { student_id, academic_year } = req.query;
+  const { student_id, academic_year, college_id } = req.query;
   const { page, limit, offset } = parsePage(req.query);
 
   if (!student_id) {
@@ -88,6 +88,14 @@ router.get('/', async (req, res) => {
     if (academic_year) {
       where += ' AND a.academic_year = @ay';
       extraInputs.push(r => r.input('ay', academic_year));
+    }
+
+    // Scope to one college's portal. A student may hold applications at several
+    // colleges; each college's portal must only ever show its own, otherwise
+    // the shared platform is visible to the student.
+    if (college_id) {
+      where += ' AND a.college_id = @cid';
+      extraInputs.push(r => r.input('cid', parseInt(college_id)));
     }
 
     function makeRequest() {

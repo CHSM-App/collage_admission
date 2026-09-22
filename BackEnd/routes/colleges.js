@@ -111,8 +111,10 @@ router.post('/', authenticate, requireAdmin, async (req, res) => {
   }
 })
 
-// List all colleges
-router.get('/', async (req, res) => {
+// List all colleges — admin only. Students reach a college through its own
+// portal URL (/c/<college_code>), never through a platform-wide list; leaving
+// this public would let anyone enumerate every college on the platform.
+router.get('/', authenticate, requireAdmin, async (req, res) => {
   const { page, limit, offset } = parsePage(req.query);
   try {
     const countRes = await db.request().query('SELECT COUNT(*) AS total FROM colleges WHERE is_enabled = 1');
@@ -132,9 +134,11 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Search colleges by exact code OR exact name (student find-college page)
+// Search colleges by exact code OR exact name — admin only, same enumeration
+// reason as the list route above. (Was the student find-college page, which is
+// replaced by the per-college portal URL.)
 // Partial / substring matches are intentionally rejected.
-router.get('/search', async (req, res) => {
+router.get('/search', authenticate, requireAdmin, async (req, res) => {
   const q = (req.query.q || '').trim()
   if (!q) return res.json({ success: true, data: [] })
   try {
@@ -160,7 +164,7 @@ router.get('/by-code/:code', async (req, res) => {
   try {
     const collegeRes = await db.request()
       .input('code', code)
-      .query('SELECT id, name, city, phone, email, features_config FROM colleges WHERE UPPER(college_code) = @code AND is_enabled = 1');
+      .query('SELECT id, name, city, phone, email, logo_url, features_config FROM colleges WHERE UPPER(college_code) = @code AND is_enabled = 1');
 
     if (!collegeRes.recordset.length) {
       return res.status(404).json({ success: false, message: 'No college found with that code. Please check and try again.' });
@@ -172,6 +176,7 @@ router.get('/by-code/:code', async (req, res) => {
       city:  row.city,
       phone: row.phone,
       email: row.email,
+      logo_url: row.logo_url,
       features: row.features_config ? JSON.parse(row.features_config) : null,
     };
 

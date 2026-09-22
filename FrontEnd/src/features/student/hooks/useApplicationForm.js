@@ -11,14 +11,17 @@
 import { useEffect, useReducer, useCallback } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
+import { STUDENT_PATHS } from '../../../app/routePaths.js'
 import {
   initApplication,
   getApplicationForm,
   updateApplicationStep,
   getRequiredDocuments,
   getStudentAutofill,
+  getGroupsList,
 } from '../../../services/applicationService.js'
 import { getStudentDocuments } from '../../../services/documentService.js'
+import { semestersForYear } from '../lib/semesters.js'
 
 // ── Initial state ─────────────────────────────────────────────
 const initialState = {
@@ -80,6 +83,7 @@ function reducer(state, action) {
         applicationFeePaid: action.applicationFeePaid,
         correctionNote:     action.correctionNote || null,
         features:           action.features || null,
+        hasGroups:          !!action.hasGroups,
         loading:            false,
       }
     case 'SET_DATA':
@@ -196,7 +200,8 @@ function formatDate(d) {
 
 // ── Hook ──────────────────────────────────────────────────────
 export function useApplicationForm() {
-  const { applicationId: paramId } = useParams()
+  // Both come from the route /c/:collegeCode/apply/:applicationId
+  const { applicationId: paramId, collegeCode } = useParams()
   const [searchParams] = useSearchParams()
   const navigate       = useNavigate()
   const { user }       = useAuthContext()
@@ -225,7 +230,7 @@ export function useApplicationForm() {
             year_of_study,
           })
           appId = initRes.data.data.application_id
-          navigate(`/apply/${appId}`, { replace: true })
+          navigate(STUDENT_PATHS.apply(collegeCode, appId), { replace: true })
         }
 
         const formRes = await getApplicationForm(appId)
@@ -271,6 +276,23 @@ export function useApplicationForm() {
           },
         })
 
+        // Does this course define subject groups for either semester of the
+        // applicant's year? The answer decides whether the wizard shows the
+        // group step at all, and how many steps the indicator draws — both
+        // needed before that step could render, so it is resolved here rather
+        // than inside the step. A failure leaves hasGroups false, which simply
+        // skips the step rather than blocking the whole form.
+        let hasGroups = false
+        try {
+          const sems = semestersForYear(merged.year_of_study)
+          if (merged.college_id && merged.course_id && sems.length) {
+            const lists = await Promise.all(
+              sems.map(s => getGroupsList(merged.college_id, merged.course_id, s))
+            )
+            hasGroups = lists.some(r => (r.data.data || []).length > 0)
+          }
+        } catch { /* no groups — the step is skipped */ }
+
         const resumeStep = app.current_step || 1
         dispatch({
           type: 'INIT_APP',
@@ -280,6 +302,7 @@ export function useApplicationForm() {
           applicationFeePaid: !!app.application_fee_paid,
           correctionNote:     app.correction_note || null,
           features,
+          hasGroups,
         })
       } catch (err) {
         dispatch({ type: 'SET_GLOBAL_ERR', message: err?.response?.data?.message || 'Failed to load application.' })
@@ -333,12 +356,13 @@ export function useApplicationForm() {
     })
   }
 
-  function advanceToStep6() {
-    dispatch({ type: 'SET_MAX_STEP', step: 6 })
-    dispatch({ type: 'SET_STEP', step: 6 })
+  /** Jump forward without a save — used where the step wrote its own data. */
+  function advanceToStep(n) {
+    dispatch({ type: 'SET_MAX_STEP', step: n })
+    dispatch({ type: 'SET_STEP', step: n })
   }
 
-  const { data, currentStep, loading, saving, errors, globalError, applicationId, appStatus, applicationFeePaid, correctionNote, features } = state
+  const { data, currentStep, loading, saving, errors, globalError, applicationId, appStatus, applicationFeePaid, correctionNote, features, hasGroups } = state
   const readOnly = !!appStatus && !EDITABLE_STATUSES.includes(appStatus)
 
   return {
@@ -354,12 +378,13 @@ export function useApplicationForm() {
     applicationFeePaid,
     correctionNote,
     features,
+    hasGroups,
     readOnly,
     handleChange,
     setField,
     goStep,
     saveAndNext,
     setDocuments,
-    advanceToStep6,
+    advanceToStep,
   }
 }

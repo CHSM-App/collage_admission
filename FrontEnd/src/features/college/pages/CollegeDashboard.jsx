@@ -1,5 +1,7 @@
+import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
+import { STUDENT_PATHS } from '../../../app/routePaths.js'
 import { usePermissions }  from '../hooks/usePermissions.js'
 import { useCollegeFeatures } from '../hooks/useCollegeFeatures.js'
 import AdmissionPeriods    from './AdmissionPeriods.jsx'
@@ -141,6 +143,7 @@ function Overview({ user, navAllowed, collegeFeeEnabled }) {
           )}
         </div>
         <p className="mt-1 text-slate-600">{user?.city}</p>
+        {user?.college_code && <PortalLink code={user.college_code} />}
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -171,6 +174,40 @@ function Overview({ user, navAllowed, collegeFeeEnabled }) {
         </ol>
       </div>
     </section>
+  )
+}
+
+// The college's own admission portal address — the link students are given.
+// Without this shown somewhere, a college has no way to find it.
+function PortalLink({ code }) {
+  const [copied, setCopied] = useState(false)
+  const url = `${window.location.origin}${STUDENT_PATHS.landing(code)}`
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* clipboard blocked — the link is selectable anyway */ }
+  }
+
+  return (
+    <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        Your admission link — share this with students
+      </p>
+      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+        <a href={url} target="_blank" rel="noreferrer" className="break-all font-mono text-sm text-blue-700 hover:underline">
+          {url}
+        </a>
+        <button
+          onClick={copy}
+          className="shrink-0 rounded-md border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 transition"
+        >
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+    </div>
   )
 }
 

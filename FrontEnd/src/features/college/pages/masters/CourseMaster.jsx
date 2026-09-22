@@ -1,18 +1,19 @@
 import { useEffect, useState, useCallback } from 'react'
-import { getFaculty, getCourses, updateCourse, bulkSaveCourses, deleteCourse, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
+import { getFaculty, getCourses, updateCourse, bulkSaveCourses, deleteCourse, invalidateCourses, masterCacheRead, masterCacheHas } from '../../../../services/masterService.js'
 import { usePermissions } from '../../hooks/usePermissions.js'
 import { SkeletonTable } from '../../../../shared/components/Skeleton.jsx'
+import ImportButton from '../../../../shared/components/ImportButton.jsx'
 import { useToast } from '../../../../context/ToastContext.jsx'
 import { getErrorMessage } from '../../../../shared/hooks/useNetworkError.js'
+import { COURSE_TYPES, isLegacyType } from '../../constants/courseTypes.js'
 
-const SUBJECT_TYPES = ['Core','Elective','Practical','Project','Foundation','AbilityEnhancement']
 // Semester tabs are derived from the selected program's duration: tabs = years * 2
 // (matches FacultyMaster's semSlotsFor). Clamp to [1, 10] to mirror schema limits.
 const semCountFor = (yrs) => Math.max(1, Math.min(10, (parseInt(yrs) || 0) * 2))
 
 const EMPTY_ROW = () => ({
   _key: Math.random(),
-  course_code: '', course_title: '', credits: '', subject_type: 'Core',
+  course_code: '', course_title: '', credits: '', subject_type: 'Major',
   max_internal: '', min_internal: '', max_sem_end: '', min_sem_end: '',
   max_total: '', min_total: '', display_order: '',
   id: null, is_new: true,
@@ -181,7 +182,22 @@ export default function CourseMaster({ collegeId }) {
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3">
         <h2 className="text-lg font-semibold text-slate-800">Course Master <span className="text-sm font-normal text-slate-400">(Subjects per Semester)</span></h2>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap items-start">
+          {rw && (
+            <ImportButton
+              label="Import coursemaster.xls"
+              path={`masters/${collegeId}/course/import`}
+              // A successful import reloads the grid, which would throw away
+              // unsaved edits without asking — so it stays shut until they are
+              // saved or discarded.
+              title={dirty
+                ? 'Save or discard your unsaved changes before importing.'
+                : "Upload the university's course master. Each program needs a Univ. Faculty No set in Program Master first."}
+              describe={d => `${d.inserted} subjects added, ${d.updated} updated.`}
+              onDone={() => { invalidateCourses(collegeId); loadRows(true) }}
+              disabled={dirty}
+            />
+          )}
           {rw && <button onClick={addRow} className="px-3 py-1.5 border border-slate-300 text-slate-700 text-sm rounded-lg hover:bg-slate-50">+ Add Row</button>}
           {rw && <button onClick={saveAll} disabled={saving} className="px-3 py-1.5 bg-slate-800 text-white text-sm rounded-lg hover:bg-slate-700 disabled:opacity-50">
             {saving ? 'Saving…' : 'Save All'}
@@ -261,8 +277,12 @@ export default function CourseMaster({ collegeId }) {
                         className={`${cell} text-center`} placeholder="4.0" />
                     </td>
                     <td className="px-2 py-1 border-r border-slate-200">
-                      <select value={r.subject_type} onChange={e => updateRow(r._key,'subject_type',e.target.value)} className={cell}>
-                        {SUBJECT_TYPES.map(t => <option key={t}>{t}</option>)}
+                      <select value={r.subject_type || ''} onChange={e => updateRow(r._key,'subject_type',e.target.value)} className={cell}>
+                        {/* A row saved under the old vocabulary keeps its value
+                            as a selectable option, so editing another column
+                            cannot silently retype the subject. */}
+                        {isLegacyType(r.subject_type) && <option value={r.subject_type}>{r.subject_type}</option>}
+                        {COURSE_TYPES.map(t => <option key={t.code} value={t.code} title={t.title}>{t.code}</option>)}
                       </select>
                     </td>
                     {['max_internal','min_internal','max_sem_end','min_sem_end','max_total','min_total'].map(f => (
@@ -288,7 +308,7 @@ export default function CourseMaster({ collegeId }) {
 
       <p className="mt-3 text-xs text-slate-400">
         SE = Semester End exam. All marks fields are optional. Min ≤ Max enforced on save.
-        {/* TODO: "Update from Result 9" — stub for legacy sync; confirm exact source with stakeholder */}
+        Type codes: {COURSE_TYPES.map(t => `${t.code} = ${t.title}`).join(' · ')}.
       </p>
     </div>
   )

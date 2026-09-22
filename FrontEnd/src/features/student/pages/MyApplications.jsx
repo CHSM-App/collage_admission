@@ -1,7 +1,9 @@
 import React, { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
+import { useCollege } from '../../../context/CollegeContext.jsx'
 import { useToast } from '../../../context/ToastContext.jsx'
+import { STUDENT_PATHS } from '../../../app/routePaths.js'
 import { deleteApplication } from '../../../services/applicationService.js'
 import { useMyApplications } from '../hooks/useMyApplications.js'
 import { useSortableTable } from '../../../shared/hooks/useSortableTable.js'
@@ -42,6 +44,7 @@ function statusMetaFor(app) {
 export default function MyApplications() {
   const { user }    = useAuthContext()
   const navigate    = useNavigate()
+  const college     = useCollege()
   const toast       = useToast()
   const [filterStatus, setFilterStatus]     = useState('')
   const [feePayApp, setFeePayApp]           = useState(null)
@@ -114,10 +117,10 @@ export default function MyApplications() {
         <div>
           <p className="text-sm font-semibold uppercase tracking-wide text-emerald-600">Student portal</p>
           <h1 className="mt-1 text-2xl font-bold text-slate-950">My Applications</h1>
-          <p className="mt-1 text-sm text-slate-500">All your college applications across all years.</p>
+          <p className="mt-1 text-sm text-slate-500">All your applications across all years.</p>
         </div>
         <button
-          onClick={() => navigate('/student/dashboard?section=browse')}
+          onClick={() => navigate(STUDENT_PATHS.landing(college?.code))}
           className="self-start sm:shrink-0 rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
         >
           + New Application
@@ -162,12 +165,12 @@ export default function MyApplications() {
       {!loading && apps.length === 0 && (
         <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center">
           <p className="text-slate-500 font-medium">No applications yet.</p>
-          <p className="mt-1 text-sm text-slate-400">Browse colleges and apply to get started.</p>
+          <p className="mt-1 text-sm text-slate-400">Apply to an open admission to get started.</p>
           <button
-            onClick={() => navigate('/student/dashboard?section=browse')}
+            onClick={() => navigate(STUDENT_PATHS.landing(college?.code))}
             className="mt-4 rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
           >
-            Browse colleges
+            View open admissions
           </button>
         </div>
       )}
@@ -390,13 +393,14 @@ const btn = 'rounded-md border border-slate-300 bg-white px-4 py-1.5 text-sm fon
 const btnPrimary = 'rounded-md bg-slate-800 px-4 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 transition'
 
 function AppDetail({ app, navigate, setFeePayApp, setReceiptsAppId, setSelectSubjectsApp, fetchApps }) {
+  const college = useCollege()
   return (
     <div className="space-y-2">
       {app.status === 'correction_requested' && (
         <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-3 space-y-2">
           <p className="text-sm font-semibold text-slate-800">The college has requested corrections to your application.</p>
           {app.correction_note && <p className="text-sm text-slate-600 whitespace-pre-wrap">{app.correction_note}</p>}
-          <button onClick={() => navigate(`/apply/${app.id}`)} className={btnPrimary}>
+          <button onClick={() => navigate(STUDENT_PATHS.apply(college?.code, app.id))} className={btnPrimary}>
             Edit &amp; Resubmit Application
           </button>
         </div>
@@ -498,7 +502,7 @@ function AppDetail({ app, navigate, setFeePayApp, setReceiptsAppId, setSelectSub
         <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2">
           <p className="text-sm text-amber-800 font-medium">Application not yet submitted.</p>
           <div className="mt-2 flex items-center gap-3 flex-wrap">
-            <button onClick={() => navigate(`/apply/${app.id}`)} className="rounded-md bg-amber-500 px-4 py-1.5 text-sm font-semibold text-white hover:bg-amber-600">Continue →</button>
+            <button onClick={() => navigate(STUDENT_PATHS.apply(college?.code, app.id))} className="rounded-md bg-amber-500 px-4 py-1.5 text-sm font-semibold text-white hover:bg-amber-600">Continue →</button>
             <DeleteDraftButton appId={app.id} onDeleted={fetchApps} />
           </div>
         </div>

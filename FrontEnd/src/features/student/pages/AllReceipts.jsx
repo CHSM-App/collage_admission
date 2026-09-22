@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 import { getApplications } from '../../../services/applicationService.js'
+import { useCollege } from '../../../context/CollegeContext.jsx'
 import {
   getCollegeFeeStatus,
   getMiscFeeStatus,
@@ -38,15 +39,16 @@ function fmtINR(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }
 // ─────────────────────────────────────────────────────────────
 export default function AllReceipts() {
   const { user }              = useAuthContext()
+  const college               = useCollege()
   const [apps, setApps]       = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    getApplications(user.id)
+    getApplications(user.id, college?.id)
       .then(r => setApps(r.data.data || []))
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [user.id])
+  }, [user.id, college?.id])
 
   return (
     <section className="space-y-6">

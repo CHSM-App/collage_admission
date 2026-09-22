@@ -7,10 +7,12 @@
  *
  * Routes:
  *   Faculty Master       GET/POST/PUT/DELETE /masters/:collegeId/faculty
+ *   Program Import       POST                 /masters/:collegeId/faculty/import
  *   Bank Master          GET/POST/PUT/DELETE /masters/:collegeId/bank
  *   Course Master        GET/POST/PUT/DELETE /masters/:collegeId/course
+ *   Course Import        POST                 /masters/:collegeId/course/import
  *   Group Master         GET/POST/PUT/DELETE /masters/:collegeId/group
- *   Group Courses        GET/POST/PUT/DELETE /masters/:collegeId/group/:groupId/courses
+ *   Group Import         POST                 /masters/:collegeId/group/import
  *   Division Master      GET/POST/PUT/DELETE /masters/:collegeId/division
  *   Fees Master          GET/POST/PUT/DELETE /masters/:collegeId/fees
  *   Classwise Fees       GET/POST/PUT/DELETE /masters/:collegeId/fees/classwise
@@ -22,8 +24,11 @@ const express  = require('express')
 const router   = express.Router()
 const db       = require('./db')
 const mssql    = require('mssql')
+const multer   = require('multer')
 const feeSvc   = require('../services/FeeDeterminationService')
 const feeLock  = require('../services/FeeLockService')
+const { parseSheet }  = require('../lib/sheet')
+const { startStream } = require('../lib/progress')
 const { authenticate, requireCollegeAccess, requirePerm, requireWrite } = require('../middleware/auth')
 const logger   = require('../config/logger')
 
@@ -108,14 +113,30 @@ async function getFacultyMasterCols() {
   return { sems, years, source: 'discovered' }
 }
 
+// The university's own faculty number (BA=1, BCOM=2, BSC=3 ...), used by the
+// groupmaster.xls importer to resolve its `faculty` column to a program, and by
+// generateGroupCode for the leading two digits. Blank is normal — a college
+// that never received a university numbering leaves it unset.
+function facultyNo(body) {
+  const v = body.university_faculty_no
+  if (v == null || String(v).trim() === '') return null
+  const n = parseInt(v, 10)
+  return Number.isInteger(n) ? n : null
+}
+
 // Centralized SQL → HTTP error translator for faculty_master saves. Logs
 // the full SQL detail server-side (so a developer can debug) and returns
 // a user-friendly, action-oriented message to the client. Never leaks raw
 // SQL message text to the response.
 function handleFacultySaveError(e, res, op) {
   logger.error({ err: e, op, sqlNumber: e.number, sqlState: e.state, procedure: e.procName }, `[faculty-master ${op}] save failed`)
-  // Unique constraint violation (degree_course_code per college)
+  // Unique constraint violation — degree_course_code or university_faculty_no,
+  // both per college. Disambiguate by index name so the message points at the
+  // field the clerk actually has to change.
   if (e.number === 2627 || e.number === 2601) {
+    if (/uq_faculty_university_no/i.test(e.message || '')) {
+      return res.status(409).json({ success: false, message: 'Another degree course in this college already uses that Univ. Faculty No.' })
+    }
     return res.status(409).json({ success: false, message: 'A degree course with this code already exists for this college.' })
   }
   // Invalid column / schema mismatch (pre-migration DB)
@@ -216,6 +237,7 @@ router.post('/:collegeId/faculty', requirePerm('masters'), async (req, res) => {
       .input('dc',    mssql.NVarChar, degree_course_code.trim().toUpperCase())
       .input('dn',    mssql.NVarChar, degree_course_name.trim())
       .input('dy',    mssql.Int,      yrs)
+      .input('ufn',   mssql.Int,      facultyNo(body))
       .input('ia',    mssql.Bit,      is_active ? 1 : 0)
       .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
     cols.sems.forEach((_,  i) => reqQ.input(`s${i + 1}`, mssql.NVarChar, semVals[i]))
@@ -226,12 +248,12 @@ router.post('/:collegeId/faculty', requirePerm('masters'), async (req, res) => {
 
     const r = await reqQ.query(`
       INSERT INTO faculty_master
-        (college_id,degree_course_code,degree_course_name,duration_years,
+        (college_id,degree_course_code,degree_course_name,duration_years,university_faculty_no,
          ${cols.sems.join(',')},
          ${cols.years.join(',')},
          is_active,created_by)
       VALUES
-        (@cid,@dc,@dn,@dy,${semParams},${yearParams},@ia,@actor);
+        (@cid,@dc,@dn,@dy,@ufn,${semParams},${yearParams},@ia,@actor);
       SELECT * FROM faculty_master WHERE code_no = SCOPE_IDENTITY();
     `)
     return res.status(201).json({ success: true, data: r.recordset[0] })
@@ -288,6 +310,7 @@ router.put('/:collegeId/faculty/:id', requirePerm('masters'), async (req, res) =
       .input('dc',    mssql.NVarChar, degree_course_code.trim().toUpperCase())
       .input('dn',    mssql.NVarChar, degree_course_name.trim())
       .input('dy',    mssql.Int,      yrs)
+      .input('ufn',   mssql.Int,      facultyNo(body))
       .input('ia',    mssql.Bit,      is_active ? 1 : 0)
       .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
     cols.sems.forEach((_,  i) => reqQ.input(`s${i + 1}`, mssql.NVarChar, semVals[i]))
@@ -299,6 +322,7 @@ router.put('/:collegeId/faculty/:id', requirePerm('masters'), async (req, res) =
     const r = await reqQ.query(`
       UPDATE faculty_master SET
         degree_course_code=@dc, degree_course_name=@dn, duration_years=@dy,
+        university_faculty_no=@ufn,
         ${semSet},
         ${yearSet},
         is_active=@ia, modified_by=@actor, modified_on=GETDATE()
@@ -585,8 +609,555 @@ router.post('/:collegeId/course/bulk-save', requirePerm('masters'), async (req, 
 })
 
 // ═══════════════════════════════════════════════════════════════
+// EXCEL IMPORT — shared plumbing
+// ═══════════════════════════════════════════════════════════════
+//
+// The university ships two master files per cycle, and they must be loaded in
+// this order because the second references the first by course code:
+//   1. coursemaster.xls -> course_master
+//   2. groupmaster.xls  -> group_master + group_courses
+//
+// Both are college-scoped: one file spans every program and semester, and both
+// resolve their `faculty` column through faculty_master.university_faculty_no.
+// Both are all-or-nothing — every row is validated before a single write, and
+// rows in the database but absent from the file are left alone, never deleted.
+
+const SHEET_MAX_MB = 10
+const MAX_ERRORS = 200          // useful to a clerk, still renderable
+
+const sheetUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: SHEET_MAX_MB * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!/\.xlsx?$/i.test(file.originalname)) return cb(new Error('Please choose an .xls or .xlsx file.'))
+    cb(null, true)
+  },
+})
+
+// multer rejections (wrong type, too large) would otherwise escape as Express's
+// default HTML 500, which the client parses as JSON and reports as a generic
+// failure. Keep them on the same { success, message } contract as everything
+// else on this router.
+function uploadSheet(req, res, next) {
+  sheetUpload.single('file')(req, res, err => {
+    if (!err) return next()
+    const message = err.code === 'LIMIT_FILE_SIZE'
+      ? `That file is larger than ${SHEET_MAX_MB} MB.`
+      : err.message || 'Could not read the uploaded file.'
+    res.status(400).json({ success: false, message })
+  })
+}
+
+/** Programs of this college keyed by the university's faculty number. */
+async function programsByFacultyNo(collegeId) {
+  const r = await db.request().input('cid', mssql.Int, collegeId)
+    .query(`SELECT code_no, degree_course_code, duration_years, university_faculty_no
+            FROM faculty_master WHERE college_id=@cid AND is_active=1`)
+  return new Map(r.recordset
+    .filter(f => f.university_faculty_no != null)
+    .map(f => [Number(f.university_faculty_no), f]))
+}
+
+/**
+ * These files are written by the university and span every faculty it runs, so
+ * a file naming a faculty this college does not offer is NORMAL — those rows
+ * are skipped, not fatal. faculty_master holds only the programs one college
+ * offers, unlike a university-wide master where an unmatched number would be a
+ * genuine error.
+ *
+ * The exception is nothing matching at all, which almost always means
+ * university_faculty_no has not been filled in yet.
+ */
+function skippedFacultyNote(unknown, rows) {
+  const list = [...unknown].sort((a, b) => a - b)
+  return `${rows} row${rows === 1 ? '' : 's'} skipped for faculty number${list.length > 1 ? 's' : ''} `
+       + `${list.join(', ')} — no program in this college has that Univ. Faculty No. `
+       + 'Set it in Program Master if one of these should have been imported.'
+}
+
+function noFacultyMatchedError(res, unknown) {
+  const list = [...unknown].sort((a, b) => a - b)
+  return res.status(422).json({
+    success: false,
+    message: 'Nothing could be imported: no program in this college matches any faculty number in the file '
+           + `(${list.join(', ')}). Open Program Master and set "Univ. Faculty No" on each program to the `
+           + 'number the university uses for it, then try again.',
+    unknown_faculty_codes: list,
+  })
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PROGRAM MASTER IMPORT (prgmaster.xls)
+// ═══════════════════════════════════════════════════════════════
+//
+// Runs FIRST: the course and group importers resolve their `faculty` column
+// through faculty_master.university_faculty_no, so the programs have to carry
+// that number before either can match a row.
+//
+// college_result has no equivalent importer — its `programs` table is a global
+// master seeded by migration 033 and deliberately never auto-created. Here
+// faculty_master is per-college, so each college needs its own list, and typing
+// a dozen programs by hand just to unlock the other two imports is the thing
+// this avoids.
+//
+// Column names are matched case-, space- and dot-insensitively (lib/sheet.js),
+// and the common spellings of each field are accepted.
+
+// college_result's `programs` table names these two differently: `faculty` is a
+// TEXT grouping there (BA / BCOM / BSC) while `faculty_no` holds the number. In
+// coursemaster and groupmaster `faculty` IS the number. Accept both spellings so
+// a sheet exported from either shape works, and resolve the number from
+// whichever column actually carries one.
+const PRG_FACULTY_COLS = ['faculty_no', 'facultyno', 'faculty']
+const PRG_CODE_COLS = ['prg_code', 'prgcode', 'degree_course_code', 'code']
+const PRG_NAME_COLS = ['prg_name', 'prgname', 'degree_course_name', 'name', 'program']
+
+/** First of these columns that the row actually carries a value for. */
+function pick(row, ...names) {
+  for (const n of names) {
+    const v = row.get(n)
+    if (v != null) return v
+  }
+  return null
+}
+
+router.post('/:collegeId/faculty/import', requirePerm('masters'), uploadSheet, async (req, res) => {
+  const collegeId = cid(req)
+  if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded.' })
+
+  let parsed
+  try {
+    parsed = parseSheet(req.file.buffer, {
+      sheetName: 'prgmaster', headerRow: 1,
+    })
+  } catch (e) {
+    return res.status(e.statusCode || 400).json({ success: false, message: e.message })
+  }
+
+  // No `required` anchor above: prgmaster has its header on row 1, so
+  // findHeaderIdx needs nothing to search on. Check the columns here instead,
+  // which lets one message name every accepted spelling.
+  const missing = [
+    ['faculty number', PRG_FACULTY_COLS],
+    ['program code', PRG_CODE_COLS],
+    ['program name', PRG_NAME_COLS],
+  ].filter(([, cols]) => !cols.some(c => parsed.headers.includes(c)))
+  if (missing.length) {
+    return res.status(400).json({
+      success: false,
+      message: missing.map(([what, cols]) => `No ${what} column — expected one of: ${cols.join(', ')}.`).join(' '),
+    })
+  }
+
+  // Existing programs of this college, so the upsert knows what it is touching
+  // and can spot a faculty number already claimed by a different program.
+  const existing = (await db.request().input('cid', mssql.Int, collegeId)
+    .query(`SELECT code_no, degree_course_code, university_faculty_no
+            FROM faculty_master WHERE college_id=@cid`)).recordset
+
+  const errors = []
+  const warnings = []
+  const staged = []
+  const seenCode = new Map()
+  const seenFacultyNo = new Map()
+  const addError = (line, error) => { if (errors.length < MAX_ERRORS) errors.push({ line, error }) }
+
+  for (const row of parsed.rows) {
+    const line = row.rowNumber
+    const facultyRaw = pick(row, ...PRG_FACULTY_COLS)
+    const facultyNo = facultyRaw == null ? null : Number(facultyRaw)
+    const code = pick(row, ...PRG_CODE_COLS)
+    const name = pick(row, ...PRG_NAME_COLS)
+    const durationRaw = pick(row, 'duration_years', 'duration', 'years', 'yrs')
+
+    if (facultyNo == null) { addError(line, `faculty number is required (one of: ${PRG_FACULTY_COLS.join(', ')})`); continue }
+    if (!Number.isInteger(facultyNo) || facultyNo < 1) {
+      // A programs-table export puts the text grouping (BA / BCOM / BSC) in
+      // `faculty`; the number lives in a faculty_no column there.
+      addError(line, `faculty number must be a whole number 1 or above, got "${facultyRaw}"`
+        + (/^[A-Za-z(]/.test(String(facultyRaw)) ? ' — that looks like a faculty name, not its number' : ''))
+      continue
+    }
+    if (!code) { addError(line, 'prg_code is required'); continue }
+    if (!name) { addError(line, `prg_name is required (faculty ${facultyNo}, ${code})`); continue }
+
+    const upper = code.toUpperCase()
+    // A 1-5 year degree keeps SEM_SLOTS inside the ten sem-code columns the
+    // schema has, and matches what the Program Master form offers.
+    const duration = durationRaw == null ? 3 : parseInt(durationRaw, 10)
+    if (!Number.isInteger(duration) || duration < 1 || duration > 5) {
+      addError(line, `${upper}: duration must be 1-5 years, got ${durationRaw}`); continue
+    }
+
+    if (seenCode.has(upper)) {
+      addError(line, `Duplicate prg_code ${upper} (also on row ${seenCode.get(upper)})`); continue
+    }
+    if (seenFacultyNo.has(facultyNo)) {
+      addError(line, `Faculty number ${facultyNo} is used twice — ${upper} and row ${seenFacultyNo.get(facultyNo)}. `
+        + 'Each program needs its own number.'); continue
+    }
+    // uq_faculty_university_no is per college, so a number held by a program
+    // this file does not itself rename would collide on write.
+    const clash = existing.find(f => f.university_faculty_no === facultyNo
+      && f.degree_course_code.toUpperCase() !== upper)
+    if (clash) {
+      addError(line, `Faculty number ${facultyNo} already belongs to ${clash.degree_course_code}. `
+        + 'Clear it there first, or correct the number here.'); continue
+    }
+    seenCode.set(upper, line)
+    seenFacultyNo.set(facultyNo, line)
+
+    // Optional: the sem / exam-seat codes, when the sheet carries them. Absent
+    // columns are left alone rather than blanked, so an import that only
+    // supplies the numbering cannot wipe codes someone entered by hand.
+    const codes = {}
+    for (let i = 1; i <= SEM_SLOTS(duration); i++) {
+      const v = pick(row, `unique_code_sem${i}`, `sem${i}`, `sem${i}code`)
+      if (v != null) codes[`unique_code_sem${i}`] = v
+    }
+    let semCodeCount = Object.keys(codes).length
+    for (let i = 1; i <= YEAR_SLOTS(duration); i++) {
+      const v = pick(row, `exam_seat_code_year${i}`, `year${i}`, `seat${i}`)
+      if (v != null) codes[`exam_seat_code_year${i}`] = v
+    }
+
+    staged.push({ line, code: upper, name, duration, facultyNo, codes, semCodeCount })
+  }
+
+  if (errors.length) return res.status(422).json({ success: false, errors })
+  if (!staged.length) return res.status(422).json({ success: false, message: 'The sheet has no program rows.' })
+
+  // The Program Master form requires every semester code for the duration, so a
+  // program imported without them cannot be re-saved from the form until they
+  // are filled in. Worth saying out loud rather than discovering it later.
+  const noCodes = staged.filter(s => s.semCodeCount === 0).length
+  if (noCodes) {
+    warnings.push(`${noCodes} program${noCodes === 1 ? '' : 's'} imported without university semester codes. `
+      + 'Fill those in from Program Master before editing the program there.')
+  }
+
+  const p = startStream(res, 2)
+  let tx
+  try {
+    tx = db.transaction()
+    await tx.begin()
+    const exec = () => new mssql.Request(tx)
+    const actor = String(req.user.staff_id || req.user.id)
+
+    p.phase(`Saving ${staged.length} programs`)
+    let inserted = 0, updated = 0
+    for (const s of staged) {
+      const cols = Object.keys(s.codes)
+      const r = exec()
+        .input('cid', mssql.Int, collegeId)
+        .input('dc', mssql.NVarChar, s.code)
+        .input('dn', mssql.NVarChar, s.name)
+        .input('dy', mssql.Int, s.duration)
+        .input('ufn', mssql.Int, s.facultyNo)
+        .input('actor', mssql.NVarChar, actor)
+      cols.forEach((c, i) => r.input(`c${i}`, mssql.NVarChar, s.codes[c]))
+
+      // Keyed on uq_faculty_college_code, so re-importing a corrected sheet
+      // fixes the program in place instead of colliding.
+      const out = await r.query(`
+        UPDATE faculty_master SET
+          degree_course_name=@dn, duration_years=@dy, university_faculty_no=@ufn,
+          is_active=1, modified_by=@actor, modified_on=GETDATE()
+          ${cols.map((c, i) => `, ${c}=@c${i}`).join('')}
+        WHERE college_id=@cid AND degree_course_code=@dc;
+
+        IF @@ROWCOUNT = 0
+        BEGIN
+          INSERT INTO faculty_master
+            (college_id,degree_course_code,degree_course_name,duration_years,
+             university_faculty_no,is_active,created_by${cols.length ? ',' + cols.join(',') : ''})
+          VALUES (@cid,@dc,@dn,@dy,@ufn,1,@actor${cols.map((_, i) => `,@c${i}`).join('')});
+          SELECT 'inserted' AS act;
+        END
+        ELSE SELECT 'updated' AS act;
+      `)
+      if (out.recordset[0].act === 'inserted') inserted++
+      else updated++
+    }
+
+    p.phase('Committing')
+    await tx.commit()
+    return p.done({ inserted, updated, warnings })
+  } catch (e) {
+    if (tx) { try { await tx.rollback() } catch (_) { /* already rolled back */ } }
+    logger.error({ err: e }, 'import program master')
+    return p.fail(500, { error: e.message || 'Import failed — nothing was saved.' })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// COURSE MASTER IMPORT (coursemaster.xls)
+// ═══════════════════════════════════════════════════════════════
+
+// Same five as college_result's importer: they are also what findHeaderIdx
+// anchors on to locate the real header under this file's 3-row legend.
+const COURSEMASTER_REQUIRED = ['faculty', 'sem', 'coursetype', 'ctitle', 'codeno']
+
+// The university writes MINOR and Minor for the same thing. CEP and FP appear
+// in the source file but are not in the app's nine canonical types; they are
+// kept verbatim rather than dropped, and Course Master shows them as-is.
+const KNOWN_COURSE_TYPES = ['Major', 'Minor', 'OE', 'VSC', 'SEC', 'IKS', 'AEC', 'VEC', 'CC', 'CEP', 'FP']
+function normalizeCourseType(t) {
+  if (!t) return null
+  return KNOWN_COURSE_TYPES.find(k => k.toLowerCase() === String(t).toLowerCase()) || t
+}
+
+const titleCase = s => String(s).trim().replace(/\S+/g, w => w[0].toUpperCase() + w.slice(1).toLowerCase())
+
+router.post('/:collegeId/course/import', requirePerm('masters'), uploadSheet, async (req, res) => {
+  const collegeId = cid(req)
+  if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded.' })
+
+  let parsed
+  try {
+    // Rows 1-3 are a legend in some exports and absent in others, so the real
+    // header is found by looking for the required columns (see lib/sheet.js).
+    parsed = parseSheet(req.file.buffer, {
+      sheetName: 'coursemaster', headerRow: 4, required: COURSEMASTER_REQUIRED,
+    })
+  } catch (e) {
+    return res.status(e.statusCode || 400).json({ success: false, message: e.message })
+  }
+
+  const byFacultyNo = await programsByFacultyNo(collegeId)
+  const errors = []
+  const warnings = []
+  const unknownFaculty = new Set()
+  let skippedRows = 0
+  const staged = []
+  const seen = new Map()          // program|sem|code -> line
+  const ordinal = new Map()       // program|sem -> running display_order
+  const addError = (line, error) => { if (errors.length < MAX_ERRORS) errors.push({ line, error }) }
+
+  for (const row of parsed.rows) {
+    const line = row.rowNumber
+    const facultyNo = row.num('faculty')
+    const semester = row.num('sem')
+    const codeno = row.get('codeno')
+    const ctitle = row.get('ctitle')
+
+    if (facultyNo == null) { addError(line, 'faculty is required'); continue }
+    if (semester == null) { addError(line, 'sem is required'); continue }
+    if (!codeno) { addError(line, 'codeno is required'); continue }
+    if (!ctitle) { addError(line, 'ctitle is required'); continue }
+
+    const program = byFacultyNo.get(Number(facultyNo))
+    if (!program) { unknownFaculty.add(Number(facultyNo)); skippedRows++; continue }
+
+    // A program's semester count comes from its duration, exactly as the
+    // Course Master screen derives its semester tabs.
+    const maxSem = Math.max(1, Math.min(10, (parseInt(program.duration_years) || 0) * 2))
+    if (semester < 1 || semester > maxSem) {
+      addError(line, `sem ${semester} is outside ${program.degree_course_code}'s 1-${maxSem} (${program.duration_years}-year program)`)
+      continue
+    }
+
+    const key = `${program.code_no}|${semester}|${codeno.toLowerCase()}`
+    if (seen.has(key)) {
+      addError(line, `Duplicate codeno ${codeno} for ${program.degree_course_code} Sem ${semester} (also on row ${seen.get(key)})`)
+      continue
+    }
+    seen.set(key, line)
+
+    // The external column is "fmaxmarks" in some exports of this file and
+    // "emaxmarks" in others; the rest of the layout is identical.
+    const imax = row.num('imaxmarks')
+    const emax = row.num('fmaxmarks') ?? row.num('emaxmarks')
+    const imin = row.num('iminmarks')
+    const emin = row.num('eminmarks')
+
+    // Marks are optional on course_master (the grid accepts blanks), so a
+    // missing maximum is a warning rather than a rejection — unlike
+    // college_result, where an external maximum is what makes a paper markable.
+    if (emax == null) {
+      warnings.push(`Row ${line}: ${codeno} has no semester-end maximum; left blank`)
+    }
+    if (imax != null && imin != null && imin > imax) {
+      addError(line, `${codeno}: iminmarks ${imin} exceeds imaxmarks ${imax}`); continue
+    }
+    if (emax != null && emin != null && emin > emax) {
+      addError(line, `${codeno}: eminmarks ${emin} exceeds the semester-end maximum ${emax}`); continue
+    }
+
+    const okey = `${program.code_no}|${semester}`
+    const order = (ordinal.get(okey) || 0) + 1
+    ordinal.set(okey, order)
+
+    const sum = (a, b) => (a == null && b == null ? null : (a || 0) + (b || 0))
+
+    staged.push({
+      line,
+      faculty_master_id: program.code_no,
+      semester: Number(semester),
+      course_code: codeno,
+      course_title: titleCase(ctitle),
+      subject_type: normalizeCourseType(row.get('coursetype')),
+      // "credits" in the newer layout, "credit" in the older one.
+      credits: row.num('credits') ?? row.num('credit'),
+      max_internal: imax != null && imax > 0 ? imax : null,
+      min_internal: imin,
+      max_sem_end: emax,
+      min_sem_end: emin,
+      // Mirrors autoCalcTotal in the Course Master grid: a total is the sum of
+      // its components, for the pass mark too.
+      max_total: sum(imax != null && imax > 0 ? imax : null, emax),
+      min_total: sum(imin, emin),
+      display_order: order,
+    })
+  }
+
+  if (errors.length) return res.status(422).json({ success: false, errors })
+  // Unmatched faculties only fail the import when they leave nothing to do.
+  if (!staged.length && unknownFaculty.size) return noFacultyMatchedError(res, unknownFaculty)
+  if (!staged.length) return res.status(422).json({ success: false, message: 'The sheet has no subject rows.' })
+  if (unknownFaculty.size) warnings.push(skippedFacultyNote(unknownFaculty, skippedRows))
+
+  const p = startStream(res, 2)
+  let tx
+  try {
+    tx = db.transaction()
+    await tx.begin()
+    const exec = () => new mssql.Request(tx)
+    const actor = String(req.user.staff_id || req.user.id)
+
+    p.phase(`Saving ${staged.length} subjects`)
+    let inserted = 0, updated = 0
+    for (const s of staged) {
+      // Keyed on uq_course_master, so an existing subject is corrected in place
+      // rather than colliding. Nothing is ever deleted.
+      const r = await exec()
+        .input('cid', mssql.Int, collegeId)
+        .input('fid', mssql.Int, s.faculty_master_id)
+        .input('sem', mssql.Int, s.semester)
+        .input('cc', mssql.NVarChar, s.course_code)
+        .input('ct', mssql.NVarChar, s.course_title)
+        .input('st', mssql.NVarChar, s.subject_type)
+        .input('cr', mssql.Decimal(4, 2), s.credits)
+        .input('mi', mssql.Int, s.max_internal)
+        .input('ni', mssql.Int, s.min_internal)
+        .input('ms', mssql.Int, s.max_sem_end)
+        .input('ns', mssql.Int, s.min_sem_end)
+        .input('mt', mssql.Int, s.max_total)
+        .input('nt', mssql.Int, s.min_total)
+        .input('do', mssql.Int, s.display_order)
+        .input('actor', mssql.NVarChar, actor)
+        .query(`
+          UPDATE course_master SET
+            course_title=@ct, subject_type=@st, credits=@cr,
+            max_internal=@mi, min_internal=@ni, max_sem_end=@ms, min_sem_end=@ns,
+            max_total=@mt, min_total=@nt, display_order=@do, is_active=1,
+            updated_by=@actor, modified_on=GETDATE()
+          WHERE college_id=@cid AND faculty_master_id=@fid AND semester=@sem AND course_code=@cc;
+
+          IF @@ROWCOUNT = 0
+          BEGIN
+            INSERT INTO course_master
+              (college_id,faculty_master_id,semester,course_code,course_title,credits,
+               max_internal,min_internal,max_sem_end,min_sem_end,max_total,min_total,
+               subject_type,display_order,created_by)
+            VALUES (@cid,@fid,@sem,@cc,@ct,@cr,@mi,@ni,@ms,@ns,@mt,@nt,@st,@do,@actor);
+            SELECT 'inserted' AS act;
+          END
+          ELSE SELECT 'updated' AS act;
+        `)
+      if (r.recordset[0].act === 'inserted') inserted++
+      else updated++
+    }
+
+    p.phase('Committing')
+    await tx.commit()
+    return p.done({ inserted, updated, warnings })
+  } catch (e) {
+    if (tx) { try { await tx.rollback() } catch (_) { /* already rolled back */ } }
+    logger.error({ err: e }, 'import course master')
+    return p.fail(500, { error: e.message || 'Import failed — nothing was saved.' })
+  }
+})
+
+// ═══════════════════════════════════════════════════════════════
 // GROUP MASTER
 // ═══════════════════════════════════════════════════════════════
+//
+// A group is a set of *actual* Course Master rows (group_courses.course_master_id,
+// migration 046), ordered by course_position. course_code / course_title stay on
+// the row as a snapshot: rows imported from groupmaster.xls and rows created
+// before migration 046 may have no course_master_id to read them from.
+
+// Group code: 6 digits, <2-digit faculty><semester><3-digit serial>.
+//   digits 1-2 = the university's faculty number, zero-padded (BA=1 -> 01)
+//   digit  3   = semester
+//   digits 4-6 = serial, counted within the program
+// e.g. BSC (faculty 3), semester 2, 1st group -> "032001".
+//
+// Programs with no university_faculty_no fall back to their own code_no, which
+// is what a college that never received a university numbering will have been
+// using all along.
+async function generateGroupCode(collegeId, facultyMasterId, semester) {
+  const fac = await db.request()
+    .input('fid', mssql.Int, facultyMasterId)
+    .input('cid', mssql.Int, collegeId)
+    .query(`SELECT code_no, university_faculty_no FROM faculty_master WHERE code_no=@fid AND college_id=@cid`)
+  if (!fac.recordset.length) {
+    throw Object.assign(new Error('Program not found for this college.'), { statusCode: 404 })
+  }
+  const row = fac.recordset[0]
+  const facultyNo = row.university_faculty_no ?? row.code_no
+  const prefix = `${String(facultyNo).padStart(2, '0')}${parseInt(semester)}`
+
+  const used = await db.request()
+    .input('cid', mssql.Int, collegeId)
+    .input('fid', mssql.Int, facultyMasterId)
+    .query(`SELECT group_code FROM group_master WHERE college_id=@cid AND faculty_master_id=@fid`)
+  const taken = new Set(used.recordset.map(r => String(r.group_code)))
+
+  for (let seq = used.recordset.length + 1; seq < used.recordset.length + 1000; seq++) {
+    const code = `${prefix}${String(seq).padStart(3, '0')}`
+    if (!taken.has(code)) return code
+  }
+  throw Object.assign(new Error('Could not generate a unique group code.'), { statusCode: 409 })
+}
+
+/**
+ * The Course Master rows behind `ids`, in the order the client sent them, but
+ * only those belonging to this college's selected program-semester. A short
+ * result means the client sent an id it does not own — the caller rejects.
+ */
+async function resolveGroupCourses(collegeId, facultyMasterId, semester, ids) {
+  if (!ids.length) return []
+  const r2 = db.request()
+    .input('cid', mssql.Int, collegeId)
+    .input('fid', mssql.Int, facultyMasterId)
+    .input('sem', mssql.Int, parseInt(semester))
+  const params = ids.map((id, i) => { r2.input(`i${i}`, mssql.Int, id); return `@i${i}` })
+  const r = await r2.query(`
+    SELECT id, course_code, course_title FROM course_master
+    WHERE college_id=@cid AND faculty_master_id=@fid AND semester=@sem AND id IN (${params.join(',')})
+  `)
+  const byId = new Map(r.recordset.map(c => [c.id, c]))
+  return ids.map(id => byId.get(id)).filter(Boolean)
+}
+
+/** Replace a group's members. Runs on `exec` so the importer can pass a transaction request factory. */
+async function writeGroupCourses(exec, groupId, courses) {
+  await exec().input('gid', mssql.Int, groupId)
+    .query(`DELETE FROM group_courses WHERE group_id=@gid`)
+  for (let i = 0; i < courses.length; i++) {
+    const c = courses[i]
+    await exec()
+      .input('gid', mssql.Int, groupId)
+      .input('pos', mssql.Int, c.course_position ?? i + 1)
+      .input('cmid', mssql.Int, c.id ?? c.course_master_id ?? null)
+      .input('cc', mssql.NVarChar, c.course_code)
+      .input('ct', mssql.NVarChar, c.course_title || '')
+      .query(`INSERT INTO group_courses (group_id,course_position,course_master_id,course_code,course_title)
+              VALUES (@gid,@pos,@cmid,@cc,@ct)`)
+  }
+}
 
 router.get('/:collegeId/group', requireCollegeAccess, async (req, res) => {
   const { faculty_id, semester } = req.query
@@ -614,46 +1185,67 @@ router.get('/:collegeId/group/:id', requireCollegeAccess, async (req, res) => {
         .input('id',  mssql.Int, parseInt(req.params.id))
         .input('cid', mssql.Int, cid(req))
         .query(`SELECT * FROM group_master WHERE id=@id AND college_id=@cid`),
+      // LEFT JOIN: rows created before migration 046, and any whose subject was
+      // since deleted from Course Master, still render from their snapshot.
       db.request()
         .input('gid', mssql.Int, parseInt(req.params.id))
-        .query(`SELECT * FROM group_courses WHERE group_id=@gid ORDER BY course_position`),
+        .query(`
+          SELECT gc.id, gc.course_position, gc.course_master_id,
+                 COALESCE(cm.course_code,  gc.course_code)  AS course_code,
+                 COALESCE(cm.course_title, gc.course_title) AS course_title,
+                 cm.credits, cm.subject_type, cm.max_internal, cm.max_sem_end
+          FROM group_courses gc
+          LEFT JOIN course_master cm ON cm.id = gc.course_master_id
+          WHERE gc.group_id=@gid
+          ORDER BY gc.course_position, gc.id
+        `),
     ])
     if (!gRes.recordset.length) return res.status(404).json({ success: false, message: 'Not found.' })
     res.json({ success: true, data: { ...gRes.recordset[0], courses: gcRes.recordset } })
   } catch (e) { logger.error({ err: e }, 'get group master by id'); res.status(500).json({ success: false, message: e.message }) }
 })
 
-// Reject duplicate (course_code, course_title) combinations inside one group.
-// Comparison normalizes case + whitespace to match SQL Server's default
-// case-insensitive collation, so the API matches the DB constraint.
-function findDuplicateCourseCombo(courses) {
-  const seen = new Map()
-  for (const c of courses || []) {
-    const code  = (c.course_code  || '').trim().toLowerCase()
-    const title = (c.course_title || '').trim().toLowerCase()
-    if (!code && !title) continue
-    const key = `${code}|${title}`
-    if (seen.has(key)) {
-      return { firstPos: seen.get(key), dupPos: c.course_position, code: c.course_code, title: c.course_title }
+/**
+ * Shared validation for create/update. Returns { error } or { courses }.
+ * `course_master_ids` is the only accepted member shape — the pre-046 slot
+ * array (`courses: [{course_code, course_title}]`) is rejected, so a stale
+ * client fails loudly instead of writing unlinked free text.
+ */
+async function validateGroupBody(collegeId, body) {
+  const { faculty_master_id, semester, group_description, course_master_ids } = body
+  if (!faculty_master_id) return { error: 'faculty_master_id required.' }
+  if (!semester) return { error: 'semester required.' }
+  if (!group_description?.trim()) return { error: 'Group Description is required.' }
+  if (!course_master_ids) {
+    if (Array.isArray(body.courses)) {
+      return { error: 'This version of Group Master expects course_master_ids. Reload the page and try again.' }
     }
-    seen.set(key, c.course_position)
+    return { error: 'Select at least one subject.' }
   }
-  return null
+  if (!Array.isArray(course_master_ids) || course_master_ids.length === 0) {
+    return { error: 'Select at least one subject.' }
+  }
+  const ids = [...new Set(course_master_ids.map(Number).filter(Number.isInteger))]
+  const courses = await resolveGroupCourses(collegeId, parseInt(faculty_master_id), semester, ids)
+  if (courses.length !== ids.length) {
+    return { error: 'One or more selected subjects are not in this program and semester.' }
+  }
+  return { courses }
 }
 
 router.post('/:collegeId/group', requirePerm('masters'), async (req, res) => {
-  const { faculty_master_id, semester, group_code, group_description, is_active = true, courses = [] } = req.body
-  if (!faculty_master_id) return res.status(422).json({ success: false, message: 'faculty_master_id required.' })
-  if (!group_code?.trim()) return res.status(422).json({ success: false, message: 'group_code required.' })
-  if (!group_description?.trim()) return res.status(422).json({ success: false, message: 'group_description required.' })
-  const dup = findDuplicateCourseCombo(courses)
-  if (dup) return res.status(422).json({ success: false, message: `Selected Course Code and Course Title combination already exists (slots ${dup.firstPos} and ${dup.dupPos}).` })
+  const { faculty_master_id, semester, group_description, is_active = true } = req.body
+  const v = await validateGroupBody(cid(req), req.body).catch(e => ({ error: e.message }))
+  if (v.error) return res.status(422).json({ success: false, message: v.error })
   try {
+    // Generated, never taken from the client — the code encodes faculty and
+    // semester, so a typed one could contradict the row it sits on.
+    const code = await generateGroupCode(cid(req), parseInt(faculty_master_id), semester)
     const r = await db.request()
       .input('cid',   mssql.Int,      cid(req))
       .input('fid',   mssql.Int,      parseInt(faculty_master_id))
       .input('sem',   mssql.Int,      parseInt(semester))
-      .input('gc',    mssql.NVarChar, group_code.trim())
+      .input('gc',    mssql.NVarChar, code)
       .input('gd',    mssql.NVarChar, group_description.trim())
       .input('ia',    mssql.Bit,      is_active ? 1 : 0)
       .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
@@ -663,68 +1255,44 @@ router.post('/:collegeId/group', requirePerm('masters'), async (req, res) => {
         SELECT * FROM group_master WHERE id = SCOPE_IDENTITY();
       `)
     const newGroup = r.recordset[0]
-    // Insert child courses
-    for (const c of courses) {
-      if (!c.course_code?.trim()) continue
-      await db.request()
-        .input('gid', mssql.Int,      newGroup.id)
-        .input('pos', mssql.Int,      parseInt(c.course_position))
-        .input('cc',  mssql.NVarChar, c.course_code.trim())
-        .input('ct',  mssql.NVarChar, c.course_title?.trim() || '')
-        .query(`INSERT INTO group_courses (group_id,course_position,course_code,course_title) VALUES (@gid,@pos,@cc,@ct)`)
-    }
+    await writeGroupCourses(() => db.request(), newGroup.id, v.courses)
     res.status(201).json({ success: true, data: newGroup })
   } catch (e) {
-    if (e.number === 2627 || e.number === 2601) {
-      // The group_master uq_group_master and group_courses uq_group_course_combo
-      // both surface as 2627/2601. Disambiguate by message text.
-      if (/uq_group_course_combo/i.test(e.message || ''))
-        return res.status(409).json({ success: false, message: 'Selected Course Code and Course Title combination already exists.' })
-      return res.status(409).json({ success: false, message: 'Group code already exists for this program-semester.' })
-    }
+    if (e.statusCode) return res.status(e.statusCode).json({ success: false, message: e.message })
+    if (e.number === 2627 || e.number === 2601)
+      return res.status(409).json({ success: false, message: 'Group code already exists for this program.' })
     logger.error({ err: e }, 'create group master')
     res.status(500).json({ success: false, message: e.message })
   }
 })
 
 router.put('/:collegeId/group/:id', requirePerm('masters'), async (req, res) => {
-  const { faculty_master_id, semester, group_code, group_description, is_active, courses = [] } = req.body
-  const dup = findDuplicateCourseCombo(courses)
-  if (dup) return res.status(422).json({ success: false, message: `Selected Course Code and Course Title combination already exists (slots ${dup.firstPos} and ${dup.dupPos}).` })
+  const { faculty_master_id, semester, group_description, is_active } = req.body
+  const v = await validateGroupBody(cid(req), req.body).catch(e => ({ error: e.message }))
+  if (v.error) return res.status(422).json({ success: false, message: v.error })
   try {
+    // group_code is deliberately absent from the SET list: it encodes the
+    // faculty and semester it was issued under, and students may already be
+    // assigned to it by code.
     const r = await db.request()
       .input('id',    mssql.Int,      parseInt(req.params.id))
       .input('cid',   mssql.Int,      cid(req))
       .input('fid',   mssql.Int,      parseInt(faculty_master_id))
       .input('sem',   mssql.Int,      parseInt(semester))
-      .input('gc',    mssql.NVarChar, group_code?.trim())
-      .input('gd',    mssql.NVarChar, group_description?.trim())
+      .input('gd',    mssql.NVarChar, group_description.trim())
       .input('ia',    mssql.Bit,      is_active ? 1 : 0)
       .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
         UPDATE group_master SET
-          faculty_master_id=@fid, semester=@sem, group_code=@gc,
+          faculty_master_id=@fid, semester=@sem,
           group_description=@gd, is_active=@ia, updated_by=@actor, modified_on=GETDATE()
         WHERE id=@id AND college_id=@cid;
         SELECT * FROM group_master WHERE id=@id AND college_id=@cid;
       `)
     if (!r.recordset.length) return res.status(404).json({ success: false, message: 'Record not found.' })
-    // Replace child courses
-    await db.request().input('gid', mssql.Int, parseInt(req.params.id))
-      .query(`DELETE FROM group_courses WHERE group_id=@gid`)
-    for (const c of courses) {
-      if (!c.course_code?.trim()) continue
-      await db.request()
-        .input('gid', mssql.Int,      parseInt(req.params.id))
-        .input('pos', mssql.Int,      parseInt(c.course_position))
-        .input('cc',  mssql.NVarChar, c.course_code.trim())
-        .input('ct',  mssql.NVarChar, c.course_title?.trim() || '')
-        .query(`INSERT INTO group_courses (group_id,course_position,course_code,course_title) VALUES (@gid,@pos,@cc,@ct)`)
-    }
+    await writeGroupCourses(() => db.request(), parseInt(req.params.id), v.courses)
     res.json({ success: true, data: r.recordset[0] })
   } catch (e) {
-    if ((e.number === 2627 || e.number === 2601) && /uq_group_course_combo/i.test(e.message || ''))
-      return res.status(409).json({ success: false, message: 'Selected Course Code and Course Title combination already exists.' })
     logger.error({ err: e }, 'update group master')
     res.status(500).json({ success: false, message: e.message })
   }
@@ -738,6 +1306,184 @@ router.delete('/:collegeId/group/:id', requirePerm('masters'), async (req, res) 
       .query(`UPDATE group_master SET is_active=0, modified_on=GETDATE() WHERE id=@id AND college_id=@cid`)
     res.json({ success: true })
   } catch (e) { logger.error({ err: e }, 'delete group master'); res.status(500).json({ success: false, message: e.message }) }
+})
+
+// ═══════════════════════════════════════════════════════════════
+// GROUP MASTER IMPORT (groupmaster.xls)
+// ═══════════════════════════════════════════════════════════════
+//
+// Runs second: members are matched against course_master by course code, so
+// the course master import (or manual entry) has to come first.
+//
+// Group codes are stored VERBATIM, never regenerated: the university resets its
+// serial per (faculty, semester) while generateGroupCode counts per program,
+// and students are assigned to groups by the university's code.
+
+const GROUP_SLOTS = 13                                    // codeno1 .. codeno13
+const GROUPMASTER_REQUIRED = ['faculty', 'sem', 'groupcode']
+
+router.post('/:collegeId/group/import', requirePerm('masters'), uploadSheet, async (req, res) => {
+  const collegeId = cid(req)
+  if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded.' })
+
+  let parsed
+  try {
+    parsed = parseSheet(req.file.buffer, {
+      sheetName: 'groupmaster', headerRow: 1, required: GROUPMASTER_REQUIRED,
+    })
+  } catch (e) {
+    return res.status(e.statusCode || 400).json({ success: false, message: e.message })
+  }
+
+  const byFacultyNo = await programsByFacultyNo(collegeId)
+  const errors = []
+  const warnings = []
+  const unknownFaculty = new Set()
+  let skippedRows = 0
+  const staged = []
+  const seenGroup = new Map()
+  const ordinal = new Map()   // (faculty, sem) -> running count, for synthesized titles
+  const addError = (line, error) => { if (errors.length < MAX_ERRORS) errors.push({ line, error }) }
+
+  for (const row of parsed.rows) {
+    const line = row.rowNumber
+    const facultyNo = row.num('faculty')
+    const semester = row.num('sem')
+    // Leading zeros are lost to the sheet reader: "042001" arrives as 42001.
+    const groupCode = row.padded('groupcode', 6)
+
+    if (facultyNo == null) { addError(line, 'faculty is required'); continue }
+    if (semester == null) { addError(line, 'sem is required'); continue }
+    if (!groupCode) { addError(line, 'groupcode is required'); continue }
+    if (semester < 1 || semester > 10) { addError(line, `sem must be 1-10, got ${semester}`); continue }
+
+    const program = byFacultyNo.get(Number(facultyNo))
+    if (!program) { unknownFaculty.add(Number(facultyNo)); skippedRows++; continue }
+
+    if (seenGroup.has(groupCode)) {
+      addError(line, `Duplicate groupcode ${groupCode} (also on row ${seenGroup.get(groupCode)})`)
+      continue
+    }
+    seenGroup.set(groupCode, line)
+
+    const prefix = groupCode.slice(0, 2)
+    if (Number(prefix) !== Number(facultyNo)) {
+      warnings.push(`Row ${line}: groupcode ${groupCode} starts with ${prefix} but the row says faculty ${facultyNo}; stored as given`)
+    }
+
+    const codes = []
+    for (let i = 1; i <= GROUP_SLOTS; i++) {
+      const c = row.get(`codeno${i}`)
+      if (!c || Number(c) === 0) continue
+      codes.push({ code: c, position: codes.length + 1 })
+    }
+    if (!codes.length) { addError(line, `groupcode ${groupCode} has no member courses`); continue }
+
+    const okey = `${facultyNo}|${semester}`
+    const n = (ordinal.get(okey) || 0) + 1
+    ordinal.set(okey, n)
+
+    // grouptitle is blank in the university's own file, but group_description
+    // is NOT NULL — synthesize something a clerk can recognise.
+    const title = row.get('grouptitle')
+    staged.push({
+      program, semester: Number(semester), group_code: groupCode, codes, line,
+      group_description: title || `${program.degree_course_code} Sem ${semester} Group ${n}`,
+    })
+  }
+
+  if (errors.length) return res.status(422).json({ success: false, errors })
+  // Unmatched faculties only fail the import when they leave nothing to do.
+  if (!staged.length && unknownFaculty.size) return noFacultyMatchedError(res, unknownFaculty)
+  if (!staged.length) return res.status(422).json({ success: false, message: 'The sheet has no group rows.' })
+  if (unknownFaculty.size) warnings.push(skippedFacultyNote(unknownFaculty, skippedRows))
+
+  // Resolve every member course before any write, so a missing one costs
+  // nothing. Keyed by program+semester: the same course_code may legitimately
+  // exist in two programs.
+  const cmRes = await db.request().input('cid', mssql.Int, collegeId)
+    .query(`SELECT id, faculty_master_id, semester, course_code, course_title
+            FROM course_master WHERE college_id=@cid`)
+  const courseKey = (fid, sem, code) => `${fid}|${sem}|${String(code).trim().toLowerCase()}`
+  const byCode = new Map(cmRes.recordset.map(c => [courseKey(c.faculty_master_id, c.semester, c.course_code), c]))
+
+  const missing = []
+  for (const g of staged) {
+    for (const c of g.codes) {
+      const found = byCode.get(courseKey(g.program.code_no, g.semester, c.code))
+      if (found) c.course = found
+      else if (missing.length < MAX_ERRORS) {
+        missing.push({ line: g.line, error: `Course code ${c.code} is not in Course Master for ${g.program.degree_course_code} Sem ${g.semester}` })
+      }
+    }
+  }
+  if (missing.length) return res.status(422).json({ success: false, errors: missing })
+
+  // Past this point the 200 has gone out, so failures come back as the last
+  // NDJSON line carrying a `status`.
+  const p = startStream(res, 3)
+  let tx
+  try {
+    tx = db.transaction()
+    await tx.begin()
+    const exec = () => new mssql.Request(tx)
+    const actor = String(req.user.staff_id || req.user.id)
+
+    p.phase(`Saving ${staged.length} groups`)
+    let inserted = 0, updated = 0, items = 0
+    for (const g of staged) {
+      const existing = await exec()
+        .input('cid', mssql.Int, collegeId)
+        .input('fid', mssql.Int, g.program.code_no)
+        .input('gc', mssql.NVarChar, g.group_code)
+        .query(`SELECT id FROM group_master WHERE college_id=@cid AND faculty_master_id=@fid AND group_code=@gc`)
+
+      let groupId
+      if (existing.recordset.length) {
+        groupId = existing.recordset[0].id
+        await exec()
+          .input('id', mssql.Int, groupId)
+          .input('sem', mssql.Int, g.semester)
+          .input('gd', mssql.NVarChar, g.group_description)
+          .input('actor', mssql.NVarChar, actor)
+          .query(`UPDATE group_master SET semester=@sem, group_description=@gd, is_active=1,
+                         updated_by=@actor, modified_on=GETDATE()
+                  WHERE id=@id`)
+        updated++
+      } else {
+        const ins = await exec()
+          .input('cid', mssql.Int, collegeId)
+          .input('fid', mssql.Int, g.program.code_no)
+          .input('sem', mssql.Int, g.semester)
+          .input('gc', mssql.NVarChar, g.group_code)
+          .input('gd', mssql.NVarChar, g.group_description)
+          .input('actor', mssql.NVarChar, actor)
+          .query(`INSERT INTO group_master (college_id,faculty_master_id,semester,group_code,group_description,is_active,created_by)
+                  VALUES (@cid,@fid,@sem,@gc,@gd,1,@actor);
+                  SELECT SCOPE_IDENTITY() AS id;`)
+        groupId = Number(ins.recordset[0].id)
+        inserted++
+      }
+      g.groupId = groupId
+    }
+
+    p.phase('Saving group members')
+    for (const g of staged) {
+      // Slot number, not array index: codeno3 stays member 3 even when
+      // codeno1 and codeno2 were blank.
+      const courses = g.codes.map(c => ({ ...c.course, course_position: c.position }))
+      await writeGroupCourses(exec, g.groupId, courses)
+      items += courses.length
+    }
+
+    p.phase('Committing')
+    await tx.commit()
+    return p.done({ inserted, updated, items, warnings })
+  } catch (e) {
+    if (tx) { try { await tx.rollback() } catch (_) { /* already rolled back */ } }
+    logger.error({ err: e }, 'import group master')
+    return p.fail(500, { error: e.message || 'Import failed — nothing was saved.' })
+  }
 })
 
 // ═══════════════════════════════════════════════════════════════

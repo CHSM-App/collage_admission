@@ -1211,7 +1211,7 @@ router.post('/applications/:id/declaration', async (req, res) => {
 
     await db.request()
       .input('id',   mssql.Int,      appId)
-      .input('step', mssql.Int,      6)
+      .input('step', mssql.Int,      7)   // Review is step 7 since the group step was added
       .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
       .query(`
         UPDATE applications SET
@@ -1290,7 +1290,7 @@ router.post('/applications/:id/resubmit', async (req, res) => {
           status = @status,
           correction_note = NULL,
           declaration_accepted_at = GETDATE(),
-          current_step = 6,
+          current_step = 7,
           updated_at = GETDATE(),
           updated_by = @actor,
           status_updated_at = GETDATE()
@@ -1409,7 +1409,7 @@ router.post('/applications/:id/submit-direct', async (req, res) => {
             submitted_at = GETDATE(),
             confirmed_at = CASE WHEN @status = 'confirmed' THEN GETDATE() ELSE confirmed_at END,
             approved_at  = CASE WHEN @status = 'confirmed' THEN GETDATE() ELSE approved_at END,
-            current_step = 6,
+            current_step = 7,
             updated_at = GETDATE(),
             updated_by = @actor,
             status_updated_at = GETDATE()
@@ -1618,6 +1618,239 @@ router.post('/applications/:id/subject-selections', async (req, res) => {
 
     return res.json({ success: true, message: 'Subjects saved.' });
   } catch (err) {
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// SUBJECT GROUPS (application wizard)
+// ═══════════════════════════════════════════════════════════════
+//
+// The wizard asks the applicant for one group per semester, for both semesters
+// of their year. Distinct from the subject-selection endpoints above, which run
+// AFTER admission is confirmed and pick loose subjects.
+//
+// A year maps to two absolute semesters: year Y -> 2Y-1 and 2Y. group_master
+// stores the absolute semester, so this is the only place the two numbering
+// schemes meet.
+const semestersForYear = (y) => {
+  const year = parseInt(y);
+  return Number.isInteger(year) && year > 0 ? [year * 2 - 1, year * 2] : [];
+};
+
+// Group choice is part of the application, so it follows the form's own
+// editable window rather than the post-admission one used by subject selection.
+const GROUP_EDITABLE_STATUSES = ['draft', 'correction_requested'];
+
+// ── GET /api/groups-list ────────────────────────────────────
+// Active groups for a college + course + semester, each with its member
+// courses inlined so expanding a group on screen costs no extra request.
+// ?college_id=&course_id=&semester=
+router.get('/groups-list', async (req, res) => {
+  const { college_id, course_id, semester } = req.query;
+  if (!college_id || !course_id || !semester) {
+    return res.status(400).json({ success: false, message: 'college_id, course_id, and semester are required.' });
+  }
+  try {
+    const groupsRes = await db.request()
+      .input('collegeId', mssql.Int, parseInt(college_id))
+      .input('courseId',  mssql.Int, parseInt(course_id))
+      .input('semester',  mssql.Int, parseInt(semester))
+      .query(`
+        SELECT id, group_code, group_description,
+               (SELECT COUNT(*) FROM group_courses gc WHERE gc.group_id = gm.id) AS course_count
+        FROM group_master gm
+        WHERE college_id = @collegeId
+          AND faculty_master_id = @courseId
+          AND semester = @semester
+          AND is_active = 1
+        ORDER BY group_code
+      `);
+
+    const groups = groupsRes.recordset;
+    if (!groups.length) return res.json({ success: true, data: [] });
+
+    // One query for every member, stitched in JS — not one query per group.
+    const memberReq = db.request();
+    const params = groups.map((g, i) => { memberReq.input(`g${i}`, mssql.Int, g.id); return `@g${i}`; });
+    const membersRes = await memberReq.query(`
+      SELECT gc.group_id, gc.course_position,
+             COALESCE(cm.course_code,  gc.course_code)  AS course_code,
+             COALESCE(cm.course_title, gc.course_title) AS course_title,
+             cm.credits, cm.subject_type
+      FROM group_courses gc
+      LEFT JOIN course_master cm ON cm.id = gc.course_master_id
+      WHERE gc.group_id IN (${params.join(',')})
+      ORDER BY gc.group_id, gc.course_position, gc.id
+    `);
+
+    const byGroup = new Map();
+    for (const m of membersRes.recordset) {
+      if (!byGroup.has(m.group_id)) byGroup.set(m.group_id, []);
+      byGroup.get(m.group_id).push(m);
+    }
+
+    return res.json({
+      success: true,
+      data: groups.map(g => ({ ...g, courses: byGroup.get(g.id) || [] })),
+    });
+  } catch (err) {
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── GET /api/applications/:id/groups ────────────────────────
+router.get('/applications/:id/groups', async (req, res) => {
+  const appId = parseInt(req.params.id);
+  try {
+    const appRes = await db.request()
+      .input('id', mssql.Int, appId)
+      .query(`SELECT id, status, college_id, course_id, year_of_study FROM applications WHERE id = @id`);
+    if (appRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: 'Application not found.' });
+    }
+    const app = appRes.recordset[0];
+
+    const saved = await db.request()
+      .input('appId', mssql.Int, appId)
+      .query(`
+        SELECT ag.semester, ag.group_id, ag.group_code, gm.group_description
+        FROM application_groups ag
+        LEFT JOIN group_master gm ON gm.id = ag.group_id
+        WHERE ag.application_id = @appId
+        ORDER BY ag.semester
+      `);
+
+    return res.json({
+      success: true,
+      data: {
+        selections: saved.recordset,
+        // Derived here so the client never re-implements the year -> semester map.
+        semesters: semestersForYear(app.year_of_study),
+        can_select: GROUP_EDITABLE_STATUSES.includes(app.status),
+        college_id: app.college_id,
+        course_id: app.course_id,
+        year_of_study: app.year_of_study,
+        status: app.status,
+      },
+    });
+  } catch (err) {
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── POST /api/applications/:id/groups ───────────────────────
+// Body: { selections: [{ semester, group_id }] }
+//
+// All-or-nothing. Each chosen group is verified to belong to this application's
+// college, course and semester before anything is written, and the group's
+// members are expanded into application_subjects so the college's existing
+// subject views need no change.
+router.post('/applications/:id/groups', async (req, res) => {
+  const appId = parseInt(req.params.id);
+  const { selections } = req.body;
+
+  if (!Array.isArray(selections)) {
+    return res.status(400).json({ success: false, message: 'selections array is required.' });
+  }
+
+  let tx;
+  try {
+    const appRes = await db.request()
+      .input('id', mssql.Int, appId)
+      .query(`SELECT id, status, college_id, course_id, year_of_study FROM applications WHERE id = @id`);
+    if (appRes.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: 'Application not found.' });
+    }
+    const app = appRes.recordset[0];
+    if (!GROUP_EDITABLE_STATUSES.includes(app.status)) {
+      return res.status(400).json({ success: false, message: 'This application can no longer be edited.' });
+    }
+
+    const allowed = semestersForYear(app.year_of_study);
+    if (!allowed.length) {
+      return res.status(400).json({ success: false, message: 'This application has no year of study set.' });
+    }
+
+    // Validate every selection up front, so a bad one costs no writes.
+    const clean = [];
+    for (const sel of selections) {
+      const semester = parseInt(sel?.semester);
+      const groupId = parseInt(sel?.group_id);
+      if (!allowed.includes(semester)) {
+        return res.status(422).json({
+          success: false,
+          message: `Semester ${sel?.semester} is not part of year ${app.year_of_study} (expected ${allowed.join(' or ')}).`,
+        });
+      }
+      if (!Number.isInteger(groupId)) {
+        return res.status(422).json({ success: false, message: `No group chosen for semester ${semester}.` });
+      }
+      const g = await db.request()
+        .input('gid', mssql.Int, groupId)
+        .input('cid', mssql.Int, app.college_id)
+        .input('fid', mssql.Int, app.course_id)
+        .input('sem', mssql.Int, semester)
+        .query(`SELECT id, group_code FROM group_master
+                WHERE id=@gid AND college_id=@cid AND faculty_master_id=@fid AND semester=@sem AND is_active=1`);
+      if (!g.recordset.length) {
+        return res.status(422).json({
+          success: false,
+          message: `That group is not available for semester ${semester} of this course.`,
+        });
+      }
+      clean.push({ semester, groupId, groupCode: g.recordset[0].group_code });
+    }
+
+    if (clean.length) {
+      tx = db.transaction();
+      await tx.begin();
+      const exec = () => new mssql.Request(tx);
+
+      for (const c of clean) {
+        await exec().input('appId', mssql.Int, appId).input('sem', mssql.Int, c.semester)
+          .query(`DELETE FROM application_groups WHERE application_id=@appId AND semester=@sem`);
+        await exec()
+          .input('appId', mssql.Int, appId)
+          .input('sem', mssql.Int, c.semester)
+          .input('gid', mssql.Int, c.groupId)
+          .input('gc', mssql.NVarChar, c.groupCode)
+          .query(`INSERT INTO application_groups (application_id, semester, group_id, group_code)
+                  VALUES (@appId, @sem, @gid, @gc)`);
+
+        // Mirror the group's members into application_subjects. course_position
+        // becomes display_order so the subjects list in the group's order.
+        await exec().input('appId', mssql.Int, appId).input('sem', mssql.Int, c.semester)
+          .query(`DELETE FROM application_subjects WHERE application_id=@appId AND semester=@sem`);
+        await exec()
+          .input('appId', mssql.Int, appId)
+          .input('sem', mssql.Int, c.semester)
+          .input('gid', mssql.Int, c.groupId)
+          .query(`
+            INSERT INTO application_subjects (application_id, semester, subject_code, subject_title, display_order)
+            SELECT @appId, @sem,
+                   UPPER(COALESCE(cm.course_code, gc.course_code)),
+                   COALESCE(cm.course_title, gc.course_title, ''),
+                   gc.course_position
+            FROM group_courses gc
+            LEFT JOIN course_master cm ON cm.id = gc.course_master_id
+            WHERE gc.group_id = @gid
+          `);
+      }
+
+      await tx.commit();
+      tx = null;
+    }
+
+    await logActivity(appId, 'group_selected', 'student',
+      clean.map(c => `Sem ${c.semester}: ${c.groupCode}`).join(', ') || 'No group selected');
+
+    return res.json({ success: true, message: 'Subject group saved.' });
+  } catch (err) {
+    if (tx) { try { await tx.rollback(); } catch (_) { /* already rolled back */ } }
     logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }

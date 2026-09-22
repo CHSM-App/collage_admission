@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { LOGIN_PATHS, getDashboardPath } from '../../../app/routePaths.js'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { LOGIN_PATHS, getPostLoginPath, STUDENT_PATHS } from '../../../app/routePaths.js'
 import AuthLayout from '../../../layouts/AuthLayout.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import Input from '../../../shared/components/Input.jsx'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
+import { useCollege } from '../../../context/CollegeContext.jsx'
 import { useStudentRegistration, REG_STEPS } from '../hooks/useStudentRegistration.js'
 
 function PasswordInput({ id, label, name, placeholder, value, onChange, disabled }) {
@@ -46,6 +47,8 @@ function PasswordInput({ id, label, name, placeholder, value, onChange, disabled
 
 export default function StudentRegister() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const college  = useCollege()
   const { saveSession } = useAuthContext()
 
   const {
@@ -66,7 +69,7 @@ export default function StudentRegister() {
     const session = await handleVerifyOtp(e)
     if (session) {
       saveSession(session)
-      navigate(getDashboardPath('student'), { replace: true })
+      navigate(getPostLoginPath('student', college?.code, location.search), { replace: true })
     }
   }
 
@@ -188,7 +191,10 @@ export default function StudentRegister() {
 
         <p className="text-center text-sm text-slate-500">
           Already have an account?{' '}
-          <Link to={LOGIN_PATHS.student} className="font-semibold text-slate-950 hover:underline">
+          <Link
+            to={`${college ? STUDENT_PATHS.login(college.code) : LOGIN_PATHS.student}${location.search}`}
+            className="font-semibold text-slate-950 hover:underline"
+          >
             Sign in
           </Link>
         </p>

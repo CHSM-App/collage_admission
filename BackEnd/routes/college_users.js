@@ -20,6 +20,10 @@
 
 const express = require('express');
 const bcrypt  = require('bcryptjs');
+const multer  = require('multer');
+const path    = require('path');
+const fs      = require('fs');
+const crypto  = require('crypto');
 const router  = express.Router();
 const db      = require('./db');
 const mssql   = require('mssql');
@@ -27,6 +31,31 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
 const logger  = require('../config/logger');
 const { presetForType, isValidType, COLLEGE_TYPES } = require('../constants/collegePresets');
+// file-type v22 is ESM-only; load it lazily via dynamic import from CommonJS.
+const fileTypeFromBuffer = async (buf) => (await import('file-type')).fileTypeFromBuffer(buf);
+
+// ── College logo upload ──────────────────────────────────────
+// Buffered in memory so the magic bytes can be checked before anything touches
+// disk — the stored extension comes from the detected type, never the filename.
+const LOGO_ROOT = path.join(__dirname, '..', 'uploads', 'logos');
+const LOGO_MIME_TO_EXT = {
+  'image/png':  '.png',
+  'image/jpeg': '.jpg',
+  'image/webp': '.webp',
+};
+const LOGO_MAX_KB = 512;
+const LOGO_TYPES_MESSAGE = 'Logo must be a PNG, JPG or WEBP image.';
+
+const logoUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: LOGO_MAX_KB * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (!Object.keys(LOGO_MIME_TO_EXT).includes(file.mimetype)) {
+      return cb(new Error(LOGO_TYPES_MESSAGE));
+    }
+    cb(null, true);
+  },
+});
 
 // Rejects the shapes users actually typo: no @, nothing before/after the @, a dot
 // straight after the @ or straight before it, consecutive dots, and a missing or
@@ -177,6 +206,58 @@ router.put('/colleges/:id', authenticate, requireAdmin, async (req, res) => {
   }
 });
 
+// ── POST /admin/colleges/:id/logo ───────────────────────────
+// The logo brands the college's own student portal (/c/<code>) — it renders on
+// the public landing page and login screen, so it must be publicly readable and
+// cannot go through the authenticated /uploads router.
+//
+// Stored under BackEnd/uploads/logos, NOT BackEnd/public: the frontend build
+// runs with emptyOutDir into public/ and would wipe every logo on each deploy.
+router.post('/colleges/:id/logo', authenticate, requireAdmin, logoUpload.single('logo'), async (req, res) => {
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ success: false, message: 'Invalid college id.' });
+  if (!req.file) return res.status(400).json({ success: false, message: 'No logo file received.' });
+
+  try {
+    // Trust the magic bytes, never the client-supplied mimetype or filename —
+    // the stored extension is derived from what the file actually is.
+    const detected = await fileTypeFromBuffer(req.file.buffer);
+    const ext = detected && LOGO_MIME_TO_EXT[detected.mime];
+    if (!ext) {
+      return res.status(400).json({ success: false, message: LOGO_TYPES_MESSAGE });
+    }
+
+    fs.mkdirSync(LOGO_ROOT, { recursive: true });
+    const filename = `${id}-${crypto.randomBytes(8).toString('hex')}${ext}`;
+    fs.writeFileSync(path.join(LOGO_ROOT, filename), req.file.buffer);
+    const logoUrl = `/logos/${filename}`;
+
+    const prev = await db.request()
+      .input('id', mssql.Int, id)
+      .query('SELECT logo_url FROM colleges WHERE id = @id');
+    if (!prev.recordset.length) {
+      return res.status(404).json({ success: false, message: 'College not found.' });
+    }
+
+    await db.request()
+      .input('logo',  mssql.NVarChar, logoUrl)
+      .input('id',    mssql.Int,      id)
+      .input('actor', mssql.NVarChar, String(req.user.id))
+      .query('UPDATE colleges SET logo_url = @logo, updated_by = @actor WHERE id = @id');
+
+    // Best-effort cleanup of the replaced file; a leftover never breaks anything.
+    const old = prev.recordset[0].logo_url;
+    if (old && old.startsWith('/logos/')) {
+      fs.promises.unlink(path.join(LOGO_ROOT, path.basename(old))).catch(() => {});
+    }
+
+    return res.json({ success: true, message: 'Logo updated.', data: { logo_url: logoUrl } });
+  } catch (err) {
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
 // ── GET /admin/colleges/:id/features ────────────────────────
 router.get('/colleges/:id/features', authenticate, requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id);
@@ -205,7 +286,7 @@ router.get('/colleges', authenticate, requireAdmin, async (req, res) => {
 
     const dataRes = await db.request().query(`
       SELECT c.id, c.name, c.city, c.address, c.phone, c.email, c.college_code,
-             c.application_fee, c.is_enabled, c.college_type,
+             c.application_fee, c.is_enabled, c.college_type, c.logo_url,
              (SELECT COUNT(*) FROM college_users cu WHERE cu.college_id = c.id AND cu.is_active = 1) AS active_users,
              (SELECT COUNT(*) FROM college_roles cr WHERE cr.college_id = c.id) AS roles_count
       FROM colleges c

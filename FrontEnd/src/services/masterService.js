@@ -96,6 +96,17 @@ export const deleteFaculty = (collegeId, codeNo) =>
   api.delete(`masters/${collegeId}/faculty/${codeNo}`)
     .then(r => { invalidate(`faculty:${collegeId}`); return r })
 
+/**
+ * prgmaster.xls upload. See invalidateCourses for why these exist. A program
+ * import can change which faculty numbers resolve, so course and group caches
+ * go too.
+ */
+export const invalidatePrograms = (collegeId) => {
+  invalidate(`faculty:${collegeId}`)
+  invalidate(`course:${collegeId}:`)
+  invalidate(`group:${collegeId}:`)
+}
+
 // ─── Course ───────────────────────────────────────────────────
 
 export const getCourses = (collegeId, facultyId, semester, onBg) =>
@@ -116,6 +127,18 @@ export const bulkSaveCourses = (collegeId, data) =>
 export const deleteCourse = (collegeId, courseId) =>
   api.delete(`masters/${collegeId}/course/${courseId}`)
     .then(r => { invalidate(`course:${collegeId}:`); return r })
+
+/**
+ * coursemaster.xls / groupmaster.xls uploads post their own multipart body from
+ * ImportButton, so it can report upload and NDJSON phase progress. These exist
+ * only so cache invalidation stays beside the rest of the calls. One file spans
+ * every program and semester, so the whole prefix goes — not just the tab on
+ * screen. A course import can change what groups resolve to, so it drops both.
+ */
+export const invalidateCourses = (collegeId) => {
+  invalidate(`course:${collegeId}:`)
+  invalidate(`group:${collegeId}:`)
+}
 
 // ─── Class ────────────────────────────────────────────────────
 
@@ -160,15 +183,9 @@ export const getGroups = (collegeId, facultyId, semester, onBg) =>
     onBg,
   )
 
+/** Group plus its members, each joined back to its Course Master row. */
 export const getGroup = (collegeId, groupId) =>
   api.get(`masters/${collegeId}/group/${groupId}`)
-
-export const getCoursesForSemester = (collegeId, semester, onBg) =>
-  cachedGet(
-    `coursesForSem:${collegeId}:${semester}`,
-    () => api.get(`masters/${collegeId}/course?semester=${semester}`),
-    onBg,
-  )
 
 export const createGroup = (collegeId, data) =>
   api.post(`masters/${collegeId}/group`, data)
@@ -181,6 +198,9 @@ export const updateGroup = (collegeId, groupId, data) =>
 export const deleteGroup = (collegeId, groupId) =>
   api.delete(`masters/${collegeId}/group/${groupId}`)
     .then(r => { invalidate(`group:${collegeId}:`); return r })
+
+/** See invalidateCourses — same reason, group side. */
+export const invalidateGroups = (collegeId) => invalidate(`group:${collegeId}:`)
 
 // ─── Bank ─────────────────────────────────────────────────────
 

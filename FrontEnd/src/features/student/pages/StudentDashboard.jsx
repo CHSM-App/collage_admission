@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
+import { useCollege } from '../../../context/CollegeContext.jsx'
+import { STUDENT_PATHS } from '../../../app/routePaths.js'
 import { useMyApplications } from '../hooks/useMyApplications.js'
-import BrowseColleges from './BrowseColleges.jsx'
+// college search replaced by /c/:collegeCode — remove once settled
+// import BrowseColleges from './BrowseColleges.jsx'
 import MyApplications from './MyApplications.jsx'
 import StudentDocuments from './StudentDocuments.jsx'
 import ApplyForm from './ApplyForm.jsx'
@@ -18,7 +21,8 @@ export default function StudentDashboard() {
 
   const { user } = useAuthContext()
 
-  if (section === 'browse') return <BrowseColleges />
+  // college search replaced by /c/:collegeCode — remove once settled
+  // if (section === 'browse') return <BrowseColleges />
   if (section === 'applications') return <MyApplications />
   if (section === 'documents') return <StudentDocuments />
   if (section === 'receipts') return <AllReceipts />
@@ -35,6 +39,8 @@ const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 
 function Overview({ user }) {
   const navigate = useNavigate()
+  const college  = useCollege()
+  const base     = STUDENT_PATHS.dashboard(college?.code)
   const { apps } = useMyApplications(user?.id)
 
   const rollApps = apps.filter(a => a.roll_number)
@@ -66,24 +72,24 @@ function Overview({ user }) {
 
       <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3">
         <ActionCard
-          title="Browse & Apply"
-          desc="Find colleges with open admissions and submit your application."
-          btnLabel="Browse colleges"
-          onClick={() => navigate('/student/dashboard?section=browse')}
+          title="Open Admissions"
+          desc="See the courses open for admission and apply."
+          btnLabel="View admissions"
+          onClick={() => navigate(STUDENT_PATHS.landing(college?.code))}
           accent="emerald"
         />
         <ActionCard
           title="My Applications"
           desc="Track the status of all your submitted applications."
           btnLabel="View applications"
-          onClick={() => navigate('/student/dashboard?section=applications')}
+          onClick={() => navigate(`${base}?section=applications`)}
           accent="blue"
         />
         <ActionCard
           title="My Documents"
           desc="View and manage documents you've uploaded."
           btnLabel="Manage documents"
-          onClick={() => navigate('/student/dashboard?section=documents')}
+          onClick={() => navigate(`${base}?section=documents`)}
           accent="violet"
         />
       </div>
@@ -92,7 +98,7 @@ function Overview({ user }) {
         <h2 className="text-lg font-semibold text-slate-950">How admissions work</h2>
         <ol className="mt-4 space-y-3">
           {[
-            'Browse open admissions and pick a college + course.',
+            'Pick a course from the open admissions.',
             'Submit your application and pay the application fee.',
             'College reviews your application and calls you for document verification.',
             'Bring original documents to the college for verification.',

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
+import { useCollege } from '../../../context/CollegeContext.jsx'
+import { STUDENT_PATHS } from '../../../app/routePaths.js'
 import { getCollege, getAdmissionPeriods, getAdmissionPeriodFee } from '../../../services/collegeService.js'
 import { createApplication, submitApplication } from '../../../services/applicationService.js'
 import Button from '../../../shared/components/Button.jsx'
@@ -11,8 +13,11 @@ const YEAR_LABEL = { 1: 'FY (First Year)', 2: 'SY (Second Year)', 3: 'TY (Third 
 
 export default function ApplyForm({ periodId, collegeId }) {
   const { user } = useAuthContext()
+  const scope    = useCollege()
   const navigate = useNavigate()
   const toast    = useToast()
+  const landingPath      = STUDENT_PATHS.landing(scope?.code)
+  const applicationsPath = `${STUDENT_PATHS.dashboard(scope?.code)}?section=applications`
 
   const [period, setPeriod]   = useState(null)
   const [college, setCollege] = useState(null)
@@ -86,9 +91,9 @@ export default function ApplyForm({ periodId, collegeId }) {
     return (
       <PageShell>
         <p className="text-red-500">Admission period not found or closed.</p>
-        <button onClick={() => navigate('/student/dashboard?section=browse')}
+        <button onClick={() => navigate(landingPath)}
           className="mt-4 text-sm text-blue-600 hover:underline">
-          ← Back to browse
+          ← Back to admissions
         </button>
       </PageShell>
     )
@@ -107,16 +112,16 @@ export default function ApplyForm({ periodId, collegeId }) {
           </p>
           <div className="flex gap-3 pt-2">
             <button
-              onClick={() => navigate('/student/dashboard?section=applications')}
+              onClick={() => navigate(applicationsPath)}
               className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
             >
               View my applications
             </button>
             <button
-              onClick={() => navigate('/student/dashboard?section=browse')}
+              onClick={() => navigate(landingPath)}
               className="rounded-md border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              Browse more colleges
+              View open admissions
             </button>
           </div>
         </div>
@@ -186,7 +191,7 @@ export default function ApplyForm({ periodId, collegeId }) {
           <Button
             type="button"
             variant="secondary"
-            onClick={() => navigate('/student/dashboard?section=browse')}
+            onClick={() => navigate(landingPath)}
           >
             Cancel
           </Button>

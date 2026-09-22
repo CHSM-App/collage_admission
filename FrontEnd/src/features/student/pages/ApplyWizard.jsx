@@ -11,12 +11,15 @@
  *   3 — Other details
  *   4 — Previous exam details
  *   5 — Document upload
- *   6 — Review & declaration
+ *   6 — Subject group (skipped when the course defines none)
+ *   7 — Review & declaration
  */
 
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApplicationForm } from '../hooks/useApplicationForm.js'
+import { useCollege } from '../../../context/CollegeContext.jsx'
+import { STUDENT_PATHS } from '../../../app/routePaths.js'
 import StepIndicator from '../../../shared/components/StepIndicator.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import { SkeletonForm } from '../../../shared/components/Skeleton.jsx'
@@ -26,14 +29,21 @@ import Step2Personal     from './wizard/Step2Personal.jsx'
 import Step3Other        from './wizard/Step3Other.jsx'
 import Step4Exam         from './wizard/Step4Exam.jsx'
 import Step5Documents    from './wizard/Step5Documents.jsx'
+import Step6Groups       from './wizard/Step6Groups.jsx'
 import Step6Review       from './wizard/Step6Review.jsx'
 
-const STEPS = ['Context', 'Personal', 'Other Details', 'Exam Details', 'Documents', 'Review']
+// Review is always the last step; the group step sits before it and only
+// exists when the course actually defines groups (see hasGroups).
+const BASE_STEPS  = ['Context', 'Personal', 'Other Details', 'Exam Details', 'Documents']
+const REVIEW_STEP = 7
+const GROUP_STEP  = 6
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 
 export default function ApplyWizard() {
   const navigate = useNavigate()
+  const college  = useCollege()
+  const applicationsPath = `${STUDENT_PATHS.dashboard(college?.code)}?section=applications`
 
   const {
     data,
@@ -48,13 +58,14 @@ export default function ApplyWizard() {
     applicationFeePaid,
     correctionNote,
     features,
+    hasGroups,
     readOnly,
     handleChange,
     setField,
     goStep,
     saveAndNext,
     setDocuments,
-    advanceToStep6,
+    advanceToStep,
   } = useApplicationForm()
 
   // Scroll to top on every step change
@@ -83,13 +94,20 @@ export default function ApplyWizard() {
 
   const stepProps = { data, errors, globalError, saving, onChange: handleChange, setField, readOnly, features }
 
+  // A draft saved before the group step existed resumes at 6, which is now the
+  // group step — correct when the course has groups, but it would strand a
+  // course that has none, so send those straight to Review.
+  const steps       = hasGroups ? [...BASE_STEPS, 'Subject Group', 'Review'] : [...BASE_STEPS, 'Review']
+  const afterDocs   = hasGroups ? GROUP_STEP : REVIEW_STEP
+  const displayStep = !hasGroups && currentStep >= GROUP_STEP ? steps.length : currentStep
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Top bar */}
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white px-4 py-3">
         <div className="mx-auto max-w-3xl flex items-center gap-3">
           <button
-            onClick={() => navigate('/student/dashboard?section=applications')}
+            onClick={() => navigate(applicationsPath)}
             className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition"
             aria-label="Back"
           >
@@ -106,7 +124,7 @@ export default function ApplyWizard() {
 
       <div className="mx-auto max-w-3xl px-4 py-6 space-y-6">
         {/* Step indicator */}
-        <StepIndicator steps={STEPS} current={currentStep} />
+        <StepIndicator steps={steps} current={displayStep} />
 
         {/* Read-only banner */}
         {readOnly && (
@@ -169,19 +187,28 @@ export default function ApplyWizard() {
               appId={applicationId}
               studentId={studentId}
               onBack={() => goStep(4)}
-              onNext={advanceToStep6}
+              onNext={() => advanceToStep(afterDocs)}
               onDocumentsChange={setDocuments}
             />
           )}
-          {currentStep === 6 && (
+          {currentStep === GROUP_STEP && hasGroups && (
+            <Step6Groups
+              {...stepProps}
+              step={GROUP_STEP}
+              appId={applicationId}
+              onBack={() => goStep(5)}
+              onNext={() => advanceToStep(REVIEW_STEP)}
+            />
+          )}
+          {(currentStep === REVIEW_STEP || (currentStep === GROUP_STEP && !hasGroups)) && (
             <Step6Review
               {...stepProps}
               appId={applicationId}
               applicationFeePaid={applicationFeePaid}
               features={features}
-              onBack={() => goStep(5)}
+              onBack={() => goStep(hasGroups ? GROUP_STEP : 5)}
               onEditStep={goStep}
-              onDone={() => navigate(`/student/dashboard?section=applications`)}
+              onDone={() => navigate(applicationsPath)}
             />
           )}
         </div>

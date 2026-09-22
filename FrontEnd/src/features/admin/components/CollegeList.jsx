@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { getAdminColleges, updateAdminCollege } from '../../../services/adminService.js'
+import { getAdminColleges, updateAdminCollege, uploadCollegeLogo } from '../../../services/adminService.js'
 import Pagination from '../../../shared/components/Pagination.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import RolesPanel      from './RolesPanel.jsx'
@@ -171,6 +171,13 @@ export default function CollegeList() {
         {/* College header */}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex flex-wrap items-center gap-3">
+            <LogoUpload
+              college={selected}
+              onUploaded={(logo_url) => {
+                setSelected(s => ({ ...s, logo_url }))
+                setColleges(list => list.map(c => c.id === selected.id ? { ...c, logo_url } : c))
+              }}
+            />
             <h2 className="text-xl font-bold text-slate-950">{selected.name}</h2>
             <span className="rounded-full bg-amber-50 border border-amber-200 px-3 py-0.5 text-sm font-mono font-semibold text-amber-700">
               {selected.college_code}
@@ -408,6 +415,56 @@ export default function CollegeList() {
         total={pagination.total}
         onPageChange={setPage}
       />
+    </div>
+  )
+}
+
+// The logo brands this college's student portal (/c/<code>) — it appears on the
+// public landing page, the login screen and the student sidebar.
+function LogoUpload({ college, onUploaded }) {
+  const fileRef = useRef(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleFile(e) {
+    const file = e.target.files?.[0]
+    e.target.value = ''            // allow re-picking the same file after an error
+    if (!file) return
+    setError('')
+    setBusy(true)
+    try {
+      const res = await uploadCollegeLogo(college.id, file)
+      onUploaded(res.data.data.logo_url)
+    } catch (err) {
+      setError(err?.response?.data?.message || 'Upload failed.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => fileRef.current?.click()}
+        disabled={busy}
+        title="Upload portal logo (PNG, JPG or WEBP, max 512 KB)"
+        className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-lg border border-dashed border-slate-300 bg-slate-50 text-[10px] font-semibold text-slate-400 hover:border-slate-400 hover:text-slate-600 transition disabled:opacity-50"
+      >
+        {busy
+          ? '…'
+          : college.logo_url
+            ? <img src={college.logo_url} alt="" className="h-full w-full object-contain" />
+            : 'LOGO'}
+      </button>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        onChange={handleFile}
+        className="hidden"
+      />
+      {error && <span className="text-xs font-semibold text-red-600">{error}</span>}
     </div>
   )
 }

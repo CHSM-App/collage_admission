@@ -1,7 +1,8 @@
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getDashboardPath, getLoginPath } from '../../../app/routePaths.js'
+import { getLoginPath, getPostLoginPath, STUDENT_PATHS } from '../../../app/routePaths.js'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
+import { useCollege } from '../../../context/CollegeContext.jsx'
 import { authService } from '../services/authService.js'
 
 function getErrorMessage(error) {
@@ -23,6 +24,9 @@ function getErrorMessage(error) {
 export function useAuth() {
   const navigate = useNavigate()
   const authContext = useAuthContext()
+  // null outside a /c/:collegeCode route (college & admin login) — that is fine,
+  // getPostLoginPath falls back to the role's own dashboard.
+  const college = useCollege()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -33,7 +37,7 @@ export function useAuth() {
     try {
       const session = await authService.loginByRole(role, credentials)
       authContext.saveSession(session)
-      navigate(getDashboardPath(session.role), { replace: true })
+      navigate(getPostLoginPath(session.role, college?.code), { replace: true })
       return session
     } catch (loginError) {
       const message = getErrorMessage(loginError)
@@ -45,7 +49,11 @@ export function useAuth() {
   }
 
   const logout = () => {
-    const loginPath = getLoginPath(authContext.role)
+    // A student logs back out onto their college's own portal, never a
+    // platform-wide login screen.
+    const loginPath = authContext.role === 'student' && college?.code
+      ? STUDENT_PATHS.login(college.code)
+      : getLoginPath(authContext.role)
     authContext.logout()
     navigate(loginPath, { replace: true })
   }

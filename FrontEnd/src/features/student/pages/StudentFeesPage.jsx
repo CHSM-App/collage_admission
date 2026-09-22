@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 import { getApplications } from '../../../services/applicationService.js'
+import { useCollege } from '../../../context/CollegeContext.jsx'
 import { useCollegePayment } from '../../../shared/hooks/useCollegePayment.js'
 import { getMiscFeeStatus, initiateMiscFeePayment } from '../../../services/paymentService.js'
 import PaymentReceipts from './PaymentReceipts.jsx'
@@ -32,12 +33,13 @@ function StatusBadge({ status }) {
 // ─────────────────────────────────────────────────────────────
 export default function StudentFeesPage() {
   const { user }                    = useAuthContext()
+  const college                     = useCollege()
   const [apps, setApps]             = useState([])
   const [loading, setLoading]       = useState(true)
   const [selectedApp, setSelectedApp] = useState(null)
 
   useEffect(() => {
-    getApplications(user.id)
+    getApplications(user.id, college?.id)
       .then(r => {
         const all = r.data.data || []
         const eligible = all.filter(a => FEE_STATUSES.includes(a.status))
@@ -47,7 +49,7 @@ export default function StudentFeesPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [user.id])
+  }, [user.id, college?.id])
 
   return (
     <section className="space-y-6">

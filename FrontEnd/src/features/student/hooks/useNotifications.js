@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { getStudentNotifications } from '../../../services/notificationService.js'
+import { useCollege } from '../../../context/CollegeContext.jsx'
 
 const SEEN_KEY    = 'notif_last_seen'
 const CLEARED_KEY = 'notif_cleared_at' // localStorage — persists across sessions
 
 export function useNotifications(studentId) {
+  // Scoped to the college portal in view — see getApplications.
+  const collegeId = useCollege()?.id
   const [allNotifications, setAllNotifications] = useState([])
   const [unread, setUnread]                     = useState(0)
   const [loading, setLoading]                   = useState(false)
@@ -32,11 +35,11 @@ export function useNotifications(studentId) {
   const fetch = useCallback(() => {
     if (!studentId) return
     setLoading(true)
-    getStudentNotifications(studentId)
+    getStudentNotifications(studentId, collegeId)
       .then(r => computeState(r.data.data || []))
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [studentId, computeState])
+  }, [studentId, collegeId, computeState])
 
   useEffect(() => {
     fetch()
