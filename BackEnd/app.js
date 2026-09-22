@@ -34,7 +34,17 @@ const IS_PROD = process.env.NODE_ENV === 'production';
 // Origins the PayU redirect form posts to, derived from the service that builds
 // that form so the two cannot drift apart.
 const { ENDPOINTS: PAYU_ENDPOINTS } = require('./services/PayUService');
-const PAYU_FORM_ORIGINS = [...new Set(Object.values(PAYU_ENDPOINTS).map(u => new URL(u).origin))];
+// Both environments at once, plus a wildcard for the rest of the gateway's
+// own hosts: Chrome applies form-action to the redirect targets of a
+// submission, not just its action, and PayU's flow hops between payu.in hosts
+// before it ever reaches the bank. Only the first hop leaves our document, so
+// this stops at PayU — the 3-D Secure bank redirects that follow originate
+// from PayU's page under PayU's own policy, not ours.
+const PAYU_FORM_ORIGINS = [
+  ...new Set(Object.values(PAYU_ENDPOINTS).map(u => new URL(u).origin)),
+  'https://payu.in',
+  'https://*.payu.in',
+];
 
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }, // allow static uploads to be fetched cross-origin
