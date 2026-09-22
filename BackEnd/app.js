@@ -31,6 +31,11 @@ var app = express();
 
 const IS_PROD = process.env.NODE_ENV === 'production';
 
+// Origins the PayU redirect form posts to, derived from the service that builds
+// that form so the two cannot drift apart.
+const { ENDPOINTS: PAYU_ENDPOINTS } = require('./services/PayUService');
+const PAYU_FORM_ORIGINS = [...new Set(Object.values(PAYU_ENDPOINTS).map(u => new URL(u).origin))];
+
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' }, // allow static uploads to be fetched cross-origin
 
@@ -51,7 +56,12 @@ app.use(helmet({
       objectSrc:      ["'none'"],
       frameAncestors: ["'none'"],
       baseUri:        ["'self'"],
-      formAction:     ["'self'"],
+      // PayU is reached by POSTing a self-submitting form to its gateway, so
+      // its origin must be allowed here or the browser blocks the redirect and
+      // the Pay button hangs. Taken from PayUService's own endpoint list, both
+      // environments at once — the form-action origin is not a secret, and
+      // pinning it to PAYU_ENV would break the moment that var is switched.
+      formAction:     ["'self'"].concat(PAYU_FORM_ORIGINS),
     },
   },
 }));

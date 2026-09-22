@@ -175,4 +175,4 @@ function buildPaymentFields(opts) {
   };
 }
 
-module.exports = { generateTxnId, buildPaymentFields, verifyResponseHash, computeRequestHash };
+module.exports = { generateTxnId, buildPaymentFields, verifyResponseHash, computeRequestHash, ENDPOINTS };
