@@ -84,6 +84,9 @@ export default function ApplicationDetail({ collegeId, appId }) {
   const [feeError,        setFeeError]        = useState('')
   const [division,    setDivision]    = useState('')
   const [divisions,   setDivisions]   = useState([])
+  // Bumped when the installment plan is saved, to make the collect panel
+  // re-read the fee status it caches internally.
+  const [feeRefresh,  setFeeRefresh]  = useState(0)
   const [error, setError]     = useState('')
 
   function fetchApp() {
@@ -228,6 +231,9 @@ export default function ApplicationDetail({ collegeId, appId }) {
         <Row label="Course"        value={d.course_name} />
         <Row label="Year"          value={YEAR_LABEL[d.year_of_study]} />
         <Row label="Academic Year" value={d.academic_year} />
+        {/* Assigned at confirmation and used to pick the fee slab, so it belongs
+            on the review alongside the rest of the context. */}
+        <Row label="Division"      value={d.app_division ? `Division ${d.app_division}` : ''} />
         {collegeFeeEnabled && <Row label="Fees Category" value={d.fees_category} />}
       </Section>
 
@@ -339,16 +345,23 @@ export default function ApplicationDetail({ collegeId, appId }) {
           initialTotal={d.fee_total_amount}
           initialPayNow={d.fee_pay_now_amount}
           readonly={d.status === 'fees_paid'}
-          onSaved={fetchApp}
+          // Saving a plan rewrites the fee total and the instalment schedule, so
+          // the collect panel below has to re-read them — it holds its own copy.
+          onSaved={() => { fetchApp(); setFeeRefresh(k => k + 1) }}
         />
       )}
 
-      {/* ── Collect Fee Payment — hidden when college_fee feature is off ── */}
-      {collegeFeeEnabled && ((['confirmed', 'fees_paid'].includes(d.status) || !!d.has_pending_link) && canFees) && (
+      {/* ── Collect Fee Payment ──
+          Hidden when the college_fee feature is off, and until an installment
+          plan exists: fee_total_amount is written only by saving a plan, so it
+          doubles as the "plan set" flag. The backend enforces the same rule. */}
+      {collegeFeeEnabled && parseFloat(d.fee_total_amount) > 0 &&
+       ((['confirmed', 'fees_paid'].includes(d.status) || !!d.has_pending_link) && canFees) && (
         <CollegeCollectPayPanel
           appId={appId}
           collegeId={collegeId}
           onPaid={fetchApp}
+          refreshKey={feeRefresh}
         />
       )}
 
@@ -940,6 +953,8 @@ function InstallmentPlanInput({ installments, onChange, feeTotal, onError }) {
 // Displays fee breakdown + installment plan; allows editing until fees_paid.
 function FeeAmountPanel({ collegeId, appId, initialTotal, initialPayNow, readonly, onSaved }) {
   const locked   = readonly
+  // A saved plan is what writes initialTotal, so it doubles as the "plan set" flag.
+  const hasPlan  = parseFloat(initialTotal) > 0
   const totalNum = parseFloat(initialTotal) || 0
   const [saving,    setSaving]    = useState(false)
   const [error,     setError]     = useState('')
@@ -1008,7 +1023,11 @@ function FeeAmountPanel({ collegeId, appId, initialTotal, initialPayNow, readonl
       <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
         <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Fee Details</p>
         <p className="text-xs text-slate-400 mt-0.5">
-          {locked ? 'Fee amounts are locked.' : 'Update the installment plan if needed.'}
+          {locked
+            ? 'Fee amounts are locked.'
+            : hasPlan
+              ? 'Update the installment plan if needed.'
+              : 'Save an installment plan to open fee collection for this application.'}
         </p>
       </div>
       <div className="px-4 py-4 space-y-4">

@@ -37,6 +37,7 @@ import Step6Review       from './wizard/Step6Review.jsx'
 const BASE_STEPS  = ['Context', 'Personal', 'Other Details', 'Exam Details', 'Documents']
 const REVIEW_STEP = 7
 const GROUP_STEP  = 6
+const EXAM_STEP   = 4
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 
@@ -94,6 +95,11 @@ export default function ApplyWizard() {
 
   const stepProps = { data, errors, globalError, saving, onChange: handleChange, setField, readOnly, features }
 
+  // The exam step's table is 10 columns with min-widths totalling ~1160px, so it
+  // scrolled sideways at the old max-w-3xl. Every other step is a short form
+  // that reads worse stretched, so the shell widens only where it has to.
+  const shellWidth  = currentStep === EXAM_STEP ? 'max-w-7xl' : 'max-w-5xl'
+
   // A draft saved before the group step existed resumes at 6, which is now the
   // group step — correct when the course has groups, but it would strand a
   // course that has none, so send those straight to Review.
@@ -105,7 +111,7 @@ export default function ApplyWizard() {
     <div className="min-h-screen bg-slate-50">
       {/* Top bar */}
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white px-4 py-3">
-        <div className="mx-auto max-w-3xl flex items-center gap-3">
+        <div className={`mx-auto ${shellWidth} flex items-center gap-3`}>
           <button
             onClick={() => navigate(applicationsPath)}
             className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition"
@@ -122,7 +128,7 @@ export default function ApplyWizard() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-3xl px-4 py-6 space-y-6">
+      <div className={`mx-auto ${shellWidth} px-4 py-6 space-y-6`}>
         {/* Step indicator */}
         <StepIndicator steps={steps} current={displayStep} />
 

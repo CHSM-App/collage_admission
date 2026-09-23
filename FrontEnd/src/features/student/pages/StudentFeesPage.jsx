@@ -16,8 +16,8 @@ import { useCollegePayment } from '../../../shared/hooks/useCollegePayment.js'
 import { getMiscFeeStatus, initiateMiscFeePayment } from '../../../services/paymentService.js'
 import PaymentReceipts from './PaymentReceipts.jsx'
 import { SkeletonTable, SkeletonCards } from '../../../shared/components/Skeleton.jsx'
+import { FEE_STATUSES } from '../constants/feeStatuses.js'
 
-const FEE_STATUSES = ['confirmed', 'fees_paid', 'roll_assigned', 'enrolled']
 const YEAR_LABEL   = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 
 function fmtINR(n) { return `₹${Number(n || 0).toLocaleString('en-IN')}` }

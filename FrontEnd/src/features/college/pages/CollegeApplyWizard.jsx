@@ -37,8 +37,11 @@ import Step3Other     from '../../student/pages/wizard/Step3Other.jsx'
 import Step4Exam      from '../../student/pages/wizard/Step4Exam.jsx'
 import Step5Documents from '../../student/pages/wizard/Step5Documents.jsx'
 import Step6Groups    from '../../student/pages/wizard/Step6Groups.jsx'
+import GroupSelectionReview from '../../student/pages/wizard/GroupSelectionReview.jsx'
 
-const ALL_STEPS     = ['Personal', 'Other Details', 'Exam Details', 'Documents', 'Subject Group', 'Review', 'Division & Fees']
+const ALL_STEPS     = ['Personal', 'Other Details', 'Exam Details', 'Documents', 'Subject Group', 'Review', 'Fees & Confirmation']
+// Exam Details is step 3 here (the college side has no Context step).
+const EXAM_STEP     = 3
 const STEPS_NO_FEE  = ['Personal', 'Other Details', 'Exam Details', 'Documents', 'Subject Group', 'Review']
 
 // Wizard step index → actual application step number for saving (offset by 1 vs student wizard)
@@ -368,11 +371,16 @@ export default function CollegeApplyWizard() {
 
   const stepProps = { data, errors, globalError, saving, onChange: handleChange, setField, features }
 
+  // The exam step's table is 10 columns with min-widths totalling ~1160px, so it
+  // scrolled sideways at the old max-w-3xl. Every other step is a short form
+  // that reads worse stretched, so the shell widens only where it has to.
+  const shellWidth = currentStep === EXAM_STEP ? 'max-w-7xl' : 'max-w-5xl'
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Top bar */}
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white px-4 py-3">
-        <div className="mx-auto max-w-3xl flex items-center gap-3">
+        <div className={`mx-auto ${shellWidth} flex items-center gap-3`}>
           <button
             onClick={() => navigate('/college/dashboard?section=inbox')}
             className="rounded-md p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition"
@@ -395,7 +403,7 @@ export default function CollegeApplyWizard() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-3xl px-4 py-6 space-y-6">
+      <div className={`mx-auto ${shellWidth} px-4 py-6 space-y-6`}>
         <StepIndicator steps={features?.payment?.college_fee === false ? STEPS_NO_FEE : ALL_STEPS} current={currentStep} />
 
         {globalError && (
@@ -467,6 +475,7 @@ export default function CollegeApplyWizard() {
           {currentStep === 6 && (
             <CollegeReviewStep
               data={data}
+              appId={applicationId}
               saving={saving}
               submitError={submitError}
               isEditMode={isEditMode}
@@ -533,7 +542,7 @@ function SkipButton({ onClick, saving }) {
 
 // ── Review step (college-specific — shows fee info, all docs skippable) ──────
 function CollegeReviewStep({
-  data, saving, submitError, isEditMode, onBack, onEditStep, onSubmit, onSaveAndReturn, onProceedToFees,
+  data, appId, saving, submitError, isEditMode, onBack, onEditStep, onSubmit, onSaveAndReturn, onProceedToFees,
   submitted, registrationNumber, features, appFee,
   feeCollected, linkSent, feeMode, setFeeMode, feeError, setFeeError,
   feeCollecting, onlinePaying, linkSending, linkPhone, setLinkPhone,
@@ -588,7 +597,7 @@ function CollegeReviewStep({
                 ['Special Status', d.special_status],
                 feesEnabled                   && ['Fees Category', d.fees_category],
                 ['Address', [d.address, d.taluka, d.district, d.state].filter(Boolean).join(', ')],
-                ['Native Address', [d.native_address, d.native_taluka, d.native_district].filter(Boolean).join(', ')],
+                ['Native Address', [d.native_address, d.native_taluka, d.native_district, d.native_state].filter(Boolean).join(', ')],
               ].filter(Boolean)}
             />
           )
@@ -703,6 +712,9 @@ function CollegeReviewStep({
             }
           </div>
         </div>
+
+        {/* Subject Group — renders nothing when the course defines no groups */}
+        <GroupSelectionReview appId={appId} onEdit={() => onEditStep(5)} />
 
         {submitError && (
           <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
@@ -940,7 +952,7 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
       <div className="border-b border-slate-100 px-5 py-5">
         <h2 className="text-base font-bold text-slate-950">Fee &amp; Admission Confirmation</h2>
         <p className="mt-1 text-sm text-slate-500">
-          Review the fee breakdown below. Optionally set an installment plan, then confirm admission to proceed to fee collection.
+          Review the fee breakdown, set the installment plan, then confirm admission to proceed to fee collection.
         </p>
       </div>
 
@@ -1498,6 +1510,7 @@ function buildAutofill(app, lastApp, profile) {
     native_address:       ap('native_address')     || '',
     native_taluka:        ap('native_taluka')      || '',
     native_district:      ap('native_district')    || '',
+    native_state:         ap('native_state')       || '',
     parent_mobile:        ap('parent_mobile')      || '',
     land_line:            ap('land_line')          || '',
     guardian_relation:    ap('guardian_relation')  || '',

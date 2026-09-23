@@ -1337,7 +1337,10 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
       return res.status(400).json({ success: false, message: 'Application must be in confirmed or fees_paid status.' });
     }
 
-    const totalFee        = parseFloat(app.fee_total_amount)    || 0;
+    // fee_total_amount is written only by the installment plan (set-fee), so it
+    // doubles as "a plan exists". No plan means nothing may be collected yet —
+    // enforced here and not just hidden in the UI, since this is a money path.
+    const totalFee        = parseFloat(app.fee_total_amount)   || 0;
     const payNowThreshold = parseFloat(app.fee_pay_now_amount) || totalFee;
 
     // Check already paid
@@ -1351,6 +1354,14 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
     const alreadyPaid = parseFloat(paidRes.recordset[0].total_paid) || 0;
     const remaining   = Math.max(0, totalFee - alreadyPaid);
 
+    // Distinguish "no plan yet" from "nothing owed" — reporting an unset fee as
+    // fully paid is what previously made an unpaid application look settled.
+    if (totalFee <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Set up an installment plan for this application before collecting any payment.',
+      });
+    }
     if (remaining <= 0) {
       return res.status(400).json({ success: false, message: 'Fee has already been fully paid.' });
     }

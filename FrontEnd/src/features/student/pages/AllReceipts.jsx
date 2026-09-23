@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 import { getApplications } from '../../../services/applicationService.js'
 import { useCollege } from '../../../context/CollegeContext.jsx'
+import { FEE_STATUSES } from '../constants/feeStatuses.js'
 import {
   getCollegeFeeStatus,
   getMiscFeeStatus,
@@ -45,7 +46,8 @@ export default function AllReceipts() {
 
   useEffect(() => {
     getApplications(user.id, college?.id)
-      .then(r => setApps(r.data.data || []))
+      // Drafts carry no fee obligation yet — they are not submitted.
+      .then(r => setApps((r.data.data || []).filter(a => FEE_STATUSES.includes(a.status))))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [user.id, college?.id])

@@ -571,7 +571,7 @@ router.get('/student-profile/autofill', async (req, res) => {
     const profRes = await db.request()
       .input('sid', mssql.Int, parseInt(student_id))
       .query(`
-        SELECT full_name, email, phone, city, address, prn
+        SELECT full_name, surname, first_name, middle_name, email, phone, city, address, prn
         FROM students WHERE id = @sid
       `);
 
@@ -605,7 +605,7 @@ router.get('/student-profile/autofill', async (req, res) => {
           app_father_surname, app_father_first_name, app_father_middle_name,
           app_mother_surname, app_mother_first_name, app_mother_middle_name,
           -- General-college fields (migration 034)
-          app_native_address, app_native_taluka, app_native_district,
+          app_native_address, app_native_taluka, app_native_district, app_native_state,
           app_parent_mobile, app_land_line, app_guardian_relation,
           -- HSC subjects / hostel / category (migration 030)
           app_hsc_maths, app_hsc_biology, app_hostel_facility, app_other_category
@@ -687,7 +687,7 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
     father_surname, father_first_name, father_middle_name,
     mother_surname, mother_first_name, mother_middle_name,
     date_of_admission, is_diploma_direct_sy, name_as_on_aadhaar, son_of,
-    native_address, native_taluka, native_district,
+    native_address, native_taluka, native_district, native_state,
     parent_mobile, land_line, guardian_relation,
     semester,
   } = req.body;
@@ -739,7 +739,7 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
     category: 50, special_status: 50, fees_category: 50,
     admitted_category: 50, other_category: 50, admission_quota: 50,
     name_as_on_aadhaar: 200, son_of: 200,
-    native_address: 300, native_taluka: 100, native_district: 100,
+    native_address: 300, native_taluka: 100, native_district: 100, native_state: 100,
     parent_mobile: 20, land_line: 20, guardian_relation: 50,
     father_surname: 100, father_first_name: 100, father_middle_name: 100,
     mother_surname: 100, mother_first_name: 100, mother_middle_name: 100,
@@ -798,6 +798,7 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
       .input('naddr',    mssql.NVarChar, native_address    || null)
       .input('ntal',     mssql.NVarChar, native_taluka     || null)
       .input('ndist',    mssql.NVarChar, native_district   || null)
+      .input('nstate',   mssql.NVarChar, native_state      || null)
       .input('pmob',     mssql.NVarChar, parent_mobile     || null)
       .input('landl',    mssql.NVarChar, land_line         || null)
       .input('grel',     mssql.NVarChar, guardian_relation || null)
@@ -822,7 +823,7 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
           app_mother_surname=@msn, app_mother_first_name=@mfn2, app_mother_middle_name=@mmn,
           app_date_of_admission=@doa, app_is_diploma_direct_sy=@diploma,
           app_name_as_on_aadhaar=@aadname, app_son_of=@sonof,
-          app_native_address=@naddr, app_native_taluka=@ntal, app_native_district=@ndist,
+          app_native_address=@naddr, app_native_taluka=@ntal, app_native_district=@ndist, app_native_state=@nstate,
           app_parent_mobile=@pmob, app_land_line=@landl, app_guardian_relation=@grel,
           app_semester=@sem,
           current_step = CASE WHEN current_step < @step THEN @step ELSE current_step END,

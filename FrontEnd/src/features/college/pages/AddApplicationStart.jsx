@@ -9,12 +9,18 @@ import { registerStudentByCollege } from '../../auth/services/authService.js'
 import { getCollegeAdminAdmissionPeriods, getStudentAppliedCourses, searchStudents, sendTransferOtp, verifyTransferOtp } from '../../../services/collegeAdminService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
+import { sanitizeName, toTitleCase } from '../../../shared/validators.js'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 
+// Captured in parts so the admission form can autofill surname / first /
+// middle instead of making the student retype their own name.
 const EMPTY_REG = {
-  full_name: '', email: '', phone: '',
+  surname: '', first_name: '', middle_name: '', email: '', phone: '',
 }
+
+const fullNameOf = (f) =>
+  [f.surname, f.first_name, f.middle_name].map(s => s.trim()).filter(Boolean).join(' ')
 
 export default function AddApplicationStart() {
   const { user }   = useAuthContext()
@@ -127,7 +133,8 @@ export default function AddApplicationStart() {
     setShowRegForm(true)
     setNoResults(false)
     setStudents([])
-    setRegForm({ ...EMPTY_REG, full_name: query.trim() })
+    // Whatever they searched for is most likely the surname they were looking up.
+    setRegForm({ ...EMPTY_REG, surname: sanitizeName(query.trim()) })
     setRegError('')
   }
 
@@ -140,8 +147,14 @@ export default function AddApplicationStart() {
   // ── Register new student ────────────────────────────────────
   async function handleRegister() {
     setRegError('')
-    const { full_name, email, phone } = regForm
-    if (!full_name.trim()) { setRegError('Full name is required.'); return }
+    const { email, phone } = regForm
+    // Title-cased on submit rather than per keystroke, so typing is not fought.
+    const surname     = toTitleCase(regForm.surname)
+    const first_name  = toTitleCase(regForm.first_name)
+    const middle_name = toTitleCase(regForm.middle_name)
+    const full_name   = fullNameOf({ surname, first_name, middle_name })
+    if (!surname)    { setRegError('Surname is required.'); return }
+    if (!first_name) { setRegError('First name is required.'); return }
     if (!email.trim())     { setRegError('Email is required.'); return }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setRegError('Enter a valid email address.'); return }
     if (!phone.trim()) { setRegError('Mobile number is required.'); return }
@@ -150,9 +163,10 @@ export default function AddApplicationStart() {
     setRegistering(true)
     try {
       const res = await registerStudentByCollege({
-        full_name: full_name.trim(),
-        email:     email.trim().toLowerCase(),
-        phone:     phone.trim() || undefined,
+        full_name, surname, first_name,
+        middle_name: middle_name || undefined,
+        email:       email.trim().toLowerCase(),
+        phone:       phone.trim() || undefined,
       })
       const newStudent = res.data.user
       handleSelectStudent({ id: newStudent.id, full_name: newStudent.name, email: newStudent.email, phone: phone.trim() || '' })
@@ -361,12 +375,25 @@ export default function AddApplicationStart() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Same order as the admission form, so the autofill lines up. */}
+            <RegField
+              label="Surname" required nameOnly
+              value={regForm.surname}
+              onChange={v => setRegForm(f => ({ ...f, surname: v }))}
+              placeholder="e.g. Sharma"
+            />
+            <RegField
+              label="First Name" required nameOnly
+              value={regForm.first_name}
+              onChange={v => setRegForm(f => ({ ...f, first_name: v }))}
+              placeholder="e.g. Aarav"
+            />
             <div className="sm:col-span-2">
               <RegField
-                label="Full Name" required
-                value={regForm.full_name}
-                onChange={v => setRegForm(f => ({ ...f, full_name: v }))}
-                placeholder="e.g. Aarav Sharma"
+                label="Middle Name" nameOnly
+                value={regForm.middle_name}
+                onChange={v => setRegForm(f => ({ ...f, middle_name: v }))}
+                placeholder="e.g. Rajesh (father's name)"
               />
             </div>
             <RegField
@@ -449,7 +476,7 @@ export default function AddApplicationStart() {
   )
 }
 
-function RegField({ label, value, onChange, placeholder, type = 'text', required, maxLength, inputMode }) {
+function RegField({ label, value, onChange, placeholder, type = 'text', required, maxLength, inputMode, nameOnly }) {
   return (
     <div>
       <label className="block text-xs font-semibold text-slate-600 mb-1">
@@ -461,6 +488,7 @@ function RegField({ label, value, onChange, placeholder, type = 'text', required
         onChange={e => {
           let v = e.target.value
           if (inputMode === 'numeric') v = v.replace(/\D/g, '').slice(0, maxLength || 10)
+          else if (nameOnly) v = sanitizeName(v)
           onChange(v)
         }}
         placeholder={placeholder}

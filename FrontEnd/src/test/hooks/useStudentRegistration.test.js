@@ -11,7 +11,8 @@ vi.mock('../../features/auth/services/authService.js', () => ({
 import { sendOtp, verifyOtp, authService } from '../../features/auth/services/authService.js'
 
 const VALID_FORM = {
-  full_name: 'Rahul Sharma', email: 'rahul@test.com',
+  surname: 'Sharma', first_name: 'Rahul', middle_name: '',
+  email: 'rahul@test.com',
   password: 'Test@1234', confirm_password: 'Test@1234',
   phone: '9876543210', city: 'Pune', category: 'general',
 }
@@ -29,9 +30,9 @@ describe('useStudentRegistration', () => {
   it('handleChange updates form field and clears error', async () => {
     const { result } = renderHook(() => useStudentRegistration())
     act(() => {
-      result.current.handleChange({ target: { name: 'full_name', value: 'Alice' } })
+      result.current.handleChange({ target: { name: 'first_name', value: 'Alice' } })
     })
-    expect(result.current.form.full_name).toBe('Alice')
+    expect(result.current.form.first_name).toBe('Alice')
   })
 
   it('handleChange formats phone field', () => {
@@ -50,7 +51,11 @@ describe('useStudentRegistration', () => {
 
   it('handleSendOtp shows error on invalid email', async () => {
     const { result } = renderHook(() => useStudentRegistration())
-    act(() => result.current.handleChange({ target: { name: 'email', value: 'rahulgmail.@com' } }))
+    act(() => {
+      result.current.handleChange({ target: { name: 'surname', value: VALID_FORM.surname } })
+      result.current.handleChange({ target: { name: 'first_name', value: VALID_FORM.first_name } })
+      result.current.handleChange({ target: { name: 'email', value: 'rahulgmail.@com' } })
+    })
     await act(async () => { await result.current.handleSendOtp({ preventDefault: vi.fn() }) })
     expect(result.current.error).toMatch(/email/i)
     expect(result.current.step).toBe(REG_STEPS.FORM)
@@ -59,6 +64,8 @@ describe('useStudentRegistration', () => {
   it('handleSendOtp shows error on invalid phone', async () => {
     const { result } = renderHook(() => useStudentRegistration())
     act(() => {
+      result.current.handleChange({ target: { name: 'surname', value: VALID_FORM.surname } })
+      result.current.handleChange({ target: { name: 'first_name', value: VALID_FORM.first_name } })
       result.current.handleChange({ target: { name: 'email', value: VALID_FORM.email } })
       result.current.handleChange({ target: { name: 'phone', value: '1234' } })
     })
@@ -70,6 +77,8 @@ describe('useStudentRegistration', () => {
   it('handleSendOtp shows error on invalid password', async () => {
     const { result } = renderHook(() => useStudentRegistration())
     act(() => {
+      result.current.handleChange({ target: { name: 'surname', value: VALID_FORM.surname } })
+      result.current.handleChange({ target: { name: 'first_name', value: VALID_FORM.first_name } })
       result.current.handleChange({ target: { name: 'email', value: VALID_FORM.email } })
       result.current.handleChange({ target: { name: 'phone', value: '9876543210' } })
       result.current.handleChange({ target: { name: 'password', value: 'weak' } })
@@ -81,6 +90,8 @@ describe('useStudentRegistration', () => {
   it('handleSendOtp shows error when passwords do not match', async () => {
     const { result } = renderHook(() => useStudentRegistration())
     act(() => {
+      result.current.handleChange({ target: { name: 'surname', value: VALID_FORM.surname } })
+      result.current.handleChange({ target: { name: 'first_name', value: VALID_FORM.first_name } })
       result.current.handleChange({ target: { name: 'email', value: VALID_FORM.email } })
       result.current.handleChange({ target: { name: 'phone', value: '9876543210' } })
       result.current.handleChange({ target: { name: 'password', value: 'Test@1234' } })

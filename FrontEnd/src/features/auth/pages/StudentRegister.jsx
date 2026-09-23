@@ -125,11 +125,27 @@ export default function StudentRegister() {
   return (
     <AuthLayout title="Create student account" subtitle="Register to start applying to colleges.">
       <form className="space-y-4" onSubmit={handleSendOtp}>
+        {/* Captured in parts, in the same order the admission form uses, so it
+            autofills there instead of being retyped. */}
+        <div className="grid grid-cols-2 gap-3">
+          <Input
+            id="surname" label="Surname" name="surname" type="text"
+            placeholder="Shetty"
+            value={form.surname} onChange={handleChange}
+            disabled={loading} required
+          />
+          <Input
+            id="first_name" label="First name" name="first_name" type="text"
+            placeholder="Aarav"
+            value={form.first_name} onChange={handleChange}
+            disabled={loading} required
+          />
+        </div>
         <Input
-          id="full_name" label="Full name" name="full_name" type="text"
-          placeholder="Aarav Shetty"
-          value={form.full_name} onChange={handleChange}
-          disabled={loading} required
+          id="middle_name" label="Middle name (optional)" name="middle_name" type="text"
+          placeholder="Rajesh"
+          value={form.middle_name} onChange={handleChange}
+          disabled={loading}
         />
         <Input
           id="email" label="Email address" name="email" type="email"

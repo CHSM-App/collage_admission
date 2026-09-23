@@ -17,6 +17,39 @@ export const uploadCollegeLogo = (collegeId, file) => {
   return api.post(`admin/colleges/${collegeId}/logo`, form)
 }
 
+// ── Universities & the shared program catalogue ──────────────
+// Programs are identical across the colleges of one university and their codes
+// must stay fixed for coursemaster/groupmaster imports, so the super admin
+// curates one catalogue per university and colleges receive all of it.
+export const getUniversities = () =>
+  api.get('admin/universities')
+
+export const createUniversity = (data) =>
+  api.post('admin/universities', data)
+
+export const updateUniversity = (universityId, data) =>
+  api.put(`admin/universities/${universityId}`, data)
+
+export const getCatalogPrograms = (universityId) =>
+  api.get(`admin/universities/${universityId}/programs`)
+
+export const createCatalogProgram = (universityId, data) =>
+  api.post(`admin/universities/${universityId}/programs`, data)
+
+export const updateCatalogProgram = (programId, data) =>
+  api.put(`admin/programs/${programId}`, data)
+
+// What one college actually holds, with the counts that say whether hiding is safe.
+export const getCollegePrograms = (collegeId) =>
+  api.get(`admin/colleges/${collegeId}/programs`)
+
+export const setCollegeProgramActive = (collegeId, codeNo, isActive) =>
+  api.put(`admin/colleges/${collegeId}/programs/${codeNo}`, { is_active: isActive })
+
+// Adds catalogue programs the college is missing; never edits or removes.
+export const syncCollegePrograms = (collegeId) =>
+  api.post(`admin/colleges/${collegeId}/programs/sync`)
+
 // Roles
 export const getRoles = (collegeId) =>
   api.get(`admin/colleges/${collegeId}/roles`)

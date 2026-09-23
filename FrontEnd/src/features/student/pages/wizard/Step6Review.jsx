@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { StepHeader } from './Step1Context.jsx'
 import Button from '../../../../shared/components/Button.jsx'
 import { useApplicationSubmit } from '../../hooks/useApplicationSubmit.js'
+import GroupSelectionReview from './GroupSelectionReview.jsx'
 
 const YEAR_LABEL = { 1: 'FY — First Year', 2: 'SY — Second Year', 3: 'TY — Third Year', 4: '4Y — Fourth Year', 5: '5Y — Fifth Year' }
 const EXAM_ROWS  = {
@@ -87,8 +88,8 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
           {data.land_line && <Row label="Land Line" value={data.land_line} />}
           <Row label="Email"         value={data.email} />
           <Row label="Address"       value={[data.address, data.taluka, data.district, data.state].filter(Boolean).join(', ')} />
-          {[data.native_address, data.native_taluka, data.native_district].some(Boolean) && (
-            <Row label="Native Address" value={[data.native_address, data.native_taluka, data.native_district].filter(Boolean).join(', ')} />
+          {[data.native_address, data.native_taluka, data.native_district, data.native_state].some(Boolean) && (
+            <Row label="Native Address" value={[data.native_address, data.native_taluka, data.native_district, data.native_state].filter(Boolean).join(', ')} />
           )}
           {data.guardian_relation && <Row label="Guardian's Relation" value={data.guardian_relation} />}
           <Row label="Category"      value={data.category} />
@@ -183,13 +184,15 @@ export default function Step6Review({ data, errors, globalError, saving, appId, 
           }
         </ReviewSection>
 
+        {/* Subject Group — renders nothing when the course defines no groups */}
+        <GroupSelectionReview appId={appId} onEdit={() => onEditStep(6)} />
+
         {/* Declaration */}
         <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
           <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Declaration</p>
           <p className="text-sm text-slate-700 leading-relaxed">
             I declare that the information provided is true to the best of my knowledge. I understand
-            that any false information may lead to cancellation of admission. I have read and accept
-            the college's rules and the application fee non-refundability policy.
+            that any false information may lead to cancellation of admission.
           </p>
           <label className="flex items-start gap-3 cursor-pointer">
             <input

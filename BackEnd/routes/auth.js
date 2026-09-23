@@ -386,7 +386,7 @@ const otpSendValidators = [
 // ── Send OTP for phone verification ─────────────────────────
 // POST /auth/otp/send   body: { phone, ...registrationFields }
 router.post('/otp/send', otpLimiter, otpSendValidators, validate, async (req, res) => {
-  const { phone, full_name, email, password, confirm_password, city, category } = req.body;
+  const { phone, full_name, email, password, confirm_password, city, category, surname, first_name, middle_name } = req.body;
 
   const pwdErr = validatePassword(password);
   if (pwdErr) return res.status(400).json({ message: pwdErr });
@@ -414,6 +414,7 @@ router.post('/otp/send', otpLimiter, otpSendValidators, validate, async (req, re
     await whatsapp.sendOtp(normPhone, otp);
     await saveOtp(normPhone, otp, 'registration', {
       full_name, email: email.trim().toLowerCase(), password, phone: phone.trim(), city, category,
+      surname, first_name, middle_name,
     });
 
     return res.json({ message: 'OTP sent to your WhatsApp number. Valid for 10 minutes.' });
@@ -439,11 +440,14 @@ router.post('/otp/verify', otpVerifyValidators, validate, async (req, res) => {
     const { valid, reason, pendingData } = await verifyAndConsumeOtp(normPhone, otp, 'registration');
     if (!valid) return res.status(400).json({ message: reason });
 
-    const { full_name, email, password, phone: rawPhone, city, category } = pendingData;
+    const { full_name, email, password, phone: rawPhone, city, category, surname, first_name, middle_name } = pendingData;
     const hash = await bcrypt.hash(password, 10);
 
     const result = await db.request()
       .input('full_name', full_name)
+      .input('surname',     surname     || null)
+      .input('first_name',  first_name  || null)
+      .input('middle_name', middle_name || null)
       .input('email',     email)
       .input('hash',      hash)
       .input('phone',     rawPhone || null)
@@ -451,9 +455,9 @@ router.post('/otp/verify', otpVerifyValidators, validate, async (req, res) => {
       .input('category',  category || 'general')
       .query(`
         DECLARE @t TABLE (id INT, full_name NVARCHAR(150), email NVARCHAR(150));
-        INSERT INTO students (full_name, email, password_hash, phone, city, category, created_by)
+        INSERT INTO students (full_name, surname, first_name, middle_name, email, password_hash, phone, city, category, created_by)
         OUTPUT INSERTED.id, INSERTED.full_name, INSERTED.email INTO @t
-        VALUES (@full_name, @email, @hash, @phone, @city, @category, 'self');
+        VALUES (@full_name, @surname, @first_name, @middle_name, @email, @hash, @phone, @city, @category, 'self');
         SELECT id, full_name, email FROM @t;
       `);
 
@@ -471,7 +475,7 @@ router.post('/otp/verify', otpVerifyValidators, validate, async (req, res) => {
 
 // ── Student registration ────────────────────────────────────
 router.post('/register/student', registerLimiter, async (req, res) => {
-  const { full_name, password, phone, dob, gender, address, city, category } = req.body;
+  const { full_name, password, phone, dob, gender, address, city, category, surname, first_name, middle_name } = req.body;
 
   if (!full_name || !req.body.email) {
     return res.status(400).json({ message: 'Name and email are required.' });
@@ -538,6 +542,9 @@ router.post('/register/student', registerLimiter, async (req, res) => {
 
     const result = await db.request()
       .input('full_name', full_name)
+      .input('surname',     surname     || null)
+      .input('first_name',  first_name  || null)
+      .input('middle_name', middle_name || null)
       .input('email',     email)
       .input('hash',      hash)
       .input('phone',     phone     || null)
@@ -548,9 +555,9 @@ router.post('/register/student', registerLimiter, async (req, res) => {
       .input('category',  category  || 'general')
       .query(`
         DECLARE @t TABLE (id INT, full_name NVARCHAR(150), email NVARCHAR(150));
-        INSERT INTO students (full_name, email, password_hash, phone, dob, gender, address, city, category, created_by)
+        INSERT INTO students (full_name, surname, first_name, middle_name, email, password_hash, phone, dob, gender, address, city, category, created_by)
         OUTPUT INSERTED.id, INSERTED.full_name, INSERTED.email INTO @t
-        VALUES (@full_name, @email, @hash, @phone, @dob, @gender, @address, @city, @category, 'self');
+        VALUES (@full_name, @surname, @first_name, @middle_name, @email, @hash, @phone, @dob, @gender, @address, @city, @category, 'self');
         SELECT id, full_name, email FROM @t;
       `);
 

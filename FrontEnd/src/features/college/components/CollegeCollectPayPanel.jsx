@@ -12,6 +12,8 @@
  *   header     {ReactNode}        — optional custom header (for modal variant)
  *   onClose    {() => void}       — if provided, renders a ✕ button in the header
  *   showReceipts {boolean}        — whether to show PaymentReceipts toggle (modal variant)
+ *   refreshKey {number}           — bump to re-read the fee status after something
+ *                                   outside this panel changed it (installment plan)
  */
 import { useState } from 'react'
 import { useCollegePayment } from '../../../shared/hooks/useCollegePayment.js'
@@ -34,7 +36,7 @@ function fmtTime(str) {
   return d ? d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : ''
 }
 
-export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, header, onClose, showReceipts: enableReceipts = false }) {
+export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, header, onClose, showReceipts: enableReceipts = false, refreshKey }) {
   const [payMode, setPayMode]           = useState(null)   // null | 'cash' | 'online' | 'link'
   const [amount, setAmount]             = useState('')
   const [note, setNote]                 = useState('')
@@ -54,7 +56,7 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
     payCash,
     setPayError: setErr,
     setPaidMsg: setMsg,
-  } = useCollegePayment(appId, collegeId, { onPaid })
+  } = useCollegePayment(appId, collegeId, { onPaid, refreshKey })
 
   const fs      = feeStatus
   const allPaid = fs && fs.total_fee > 0 && fs.remaining <= 0
@@ -65,17 +67,22 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
   // Amount is fixed (read-only) when there are installments and current_due < remaining
   // (meaning the student is still in a fixed-installment phase, not free payment phase)
   const amtIsFixed  = fs && fs.installments?.length > 0 && amtDue < fs.remaining - 0.01
+  // A fixed instalment is dictated by the plan, not typed. Derive it rather than
+  // mirror it into state, so it stays correct when the plan changes while this
+  // form is open — the amount was captured once, on entering pay mode, and would
+  // otherwise keep (and submit) the pre-plan figure.
+  const amountValue = amtIsFixed ? String(amtDue) : amount
 
   async function handleCash(e) {
     e.preventDefault()
-    await payCash({ amount: parseFloat(amount), note }, {
+    await payCash({ amount: parseFloat(amountValue), note }, {
       onSuccess: () => { setAmount(''); setNote(''); setPayMode(null); setReceiptsOpen(true) },
     })
   }
 
   async function handleOnline(e) {
     e.preventDefault()
-    const amt = parseFloat(amount)
+    const amt = parseFloat(amountValue)
     if (!amt || amt <= 0) { setErr('Enter a valid amount.'); return }
     await payOnline(amt, {
       onSuccess: () => { setPayMode(null); setReceiptsOpen(true) },
@@ -86,7 +93,7 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
     e.preventDefault()
     const phone = linkPhone.trim().replace(/\D/g, '')
     if (phone.length < 10) { setLinkErr('Enter a valid 10-digit mobile number.'); return }
-    const amt = parseFloat(amount)
+    const amt = parseFloat(amountValue)
     if (!amt || amt <= 0) { setLinkErr('Enter a valid amount.'); return }
     if (amt > fs.remaining + 0.01) { setLinkErr(`Amount cannot exceed remaining balance ${fmtINR(fs.remaining)}.`); return }
     setLinkSending(true)
@@ -259,7 +266,7 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
                     </label>
                     <input
                       type="text" inputMode="numeric"
-                      value={amount}
+                      value={amountValue}
                       onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
                       readOnly={amtIsFixed}
                       placeholder={`Max ${fmtINR(fs.remaining)}`}
@@ -300,7 +307,7 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
                     </label>
                     <input
                       type="text" inputMode="numeric"
-                      value={amount}
+                      value={amountValue}
                       onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
                       readOnly={amtIsFixed}
                       placeholder={`Max ${fmtINR(fs.remaining)}`}
@@ -341,7 +348,7 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
                         </label>
                         <input
                           type="text" inputMode="numeric"
-                          value={amount}
+                          value={amountValue}
                           onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
                           readOnly={amtIsFixed}
                           placeholder={`Max ${fmtINR(fs.remaining)}`}

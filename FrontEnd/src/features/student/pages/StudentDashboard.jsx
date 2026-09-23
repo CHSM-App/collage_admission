@@ -7,7 +7,8 @@ import { useMyApplications } from '../hooks/useMyApplications.js'
 // college search replaced by /c/:collegeCode — remove once settled
 // import BrowseColleges from './BrowseColleges.jsx'
 import MyApplications from './MyApplications.jsx'
-import StudentDocuments from './StudentDocuments.jsx'
+// documents removed from the student dashboard — sidebar link and card both gone
+// import StudentDocuments from './StudentDocuments.jsx'
 import ApplyForm from './ApplyForm.jsx'
 import AllReceipts from './AllReceipts.jsx'
 import StudentFeesPage from './StudentFeesPage.jsx'
@@ -24,7 +25,7 @@ export default function StudentDashboard() {
   // college search replaced by /c/:collegeCode — remove once settled
   // if (section === 'browse') return <BrowseColleges />
   if (section === 'applications') return <MyApplications />
-  if (section === 'documents') return <StudentDocuments />
+  // if (section === 'documents') return <StudentDocuments />
   if (section === 'receipts') return <AllReceipts />
   if (section === 'fees') return <StudentFeesPage />
   if (section === 'notifications') return <StudentNotifications />
@@ -66,7 +67,7 @@ function Overview({ user }) {
           </div>
         )}
         <p className="mt-2 max-w-2xl text-slate-600">
-          Apply to colleges, track your applications, and manage your documents — all in one place.
+          Apply to colleges and track your applications — all in one place.
         </p>
       </div>
 
@@ -84,13 +85,6 @@ function Overview({ user }) {
           btnLabel="View applications"
           onClick={() => navigate(`${base}?section=applications`)}
           accent="blue"
-        />
-        <ActionCard
-          title="My Documents"
-          desc="View and manage documents you've uploaded."
-          btnLabel="Manage documents"
-          onClick={() => navigate(`${base}?section=documents`)}
-          accent="violet"
         />
       </div>
 

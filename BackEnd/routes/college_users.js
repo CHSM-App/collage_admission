@@ -31,6 +31,7 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
 const logger  = require('../config/logger');
 const { presetForType, isValidType, COLLEGE_TYPES } = require('../constants/collegePresets');
+const { seedProgramsFromTemplates } = require('../lib/programSeed');
 // file-type v22 is ESM-only; load it lazily via dynamic import from CommonJS.
 const fileTypeFromBuffer = async (buf) => (await import('file-type')).fileTypeFromBuffer(buf);
 
@@ -112,6 +113,25 @@ router.put('/colleges/:id', authenticate, requireAdmin, async (req, res) => {
         .input('actor',    mssql.NVarChar, String(req.user.id))
         .query(`UPDATE colleges SET college_type = @ctype, features_config = @features, updated_by = @actor WHERE id = @id`);
       return res.json({ success: true, message: 'College type updated.' });
+    } catch (err) {
+      logger.error({ err });
+      return res.status(500).json({ success: false, message: 'Server error.' });
+    }
+  }
+
+  // Assign the college to a university. Does not re-seed on its own — the
+  // programs panel has an explicit sync, so changing this never silently writes
+  // a pile of new faculty_master rows.
+  if (req.body.university_id !== undefined) {
+    const uid = req.body.university_id === null || req.body.university_id === ''
+      ? null : parseInt(req.body.university_id);
+    try {
+      await db.request()
+        .input('uid',   mssql.Int,      uid)
+        .input('id',    mssql.Int,      id)
+        .input('actor', mssql.NVarChar, String(req.user.id))
+        .query(`UPDATE colleges SET university_id = @uid, updated_by = @actor WHERE id = @id`);
+      return res.json({ success: true, message: 'University updated.' });
     } catch (err) {
       logger.error({ err });
       return res.status(500).json({ success: false, message: 'Server error.' });
@@ -287,9 +307,11 @@ router.get('/colleges', authenticate, requireAdmin, async (req, res) => {
     const dataRes = await db.request().query(`
       SELECT c.id, c.name, c.city, c.address, c.phone, c.email, c.college_code,
              c.application_fee, c.is_enabled, c.college_type, c.logo_url,
+             c.university_id, u.name AS university_name,
              (SELECT COUNT(*) FROM college_users cu WHERE cu.college_id = c.id AND cu.is_active = 1) AS active_users,
              (SELECT COUNT(*) FROM college_roles cr WHERE cr.college_id = c.id) AS roles_count
       FROM colleges c
+      LEFT JOIN universities u ON u.id = c.university_id
       ORDER BY c.name
       ${paginateQuery(offset, limit)}
     `);
@@ -616,6 +638,265 @@ router.delete('/colleges/:collegeId/users/:userId', authenticate, requireAdmin, 
       .input('id', mssql.Int, userId)
       .query(`DELETE FROM college_users WHERE id = @id`);
     return res.json({ success: true, message: 'User deleted.' });
+  } catch (err) {
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// UNIVERSITIES & THE SHARED PROGRAM CATALOGUE
+// ═══════════════════════════════════════════════════════════════
+// Programs are identical for every college of a university and their codes must
+// stay fixed, because coursemaster/groupmaster imports resolve against
+// degree_course_code and university_faculty_no. The super admin curates one
+// template per university; a new college receives all of them and then has the
+// ones it does not offer hidden.
+
+// ── GET /admin/universities ──────────────────────────────────
+router.get('/universities', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const r = await db.request().query(`
+      SELECT u.id, u.name, u.short_code, u.is_active,
+             (SELECT COUNT(*) FROM program_templates pt WHERE pt.university_id = u.id) AS program_count,
+             (SELECT COUNT(*) FROM colleges c WHERE c.university_id = u.id) AS college_count
+      FROM universities u
+      ORDER BY u.name
+    `);
+    return res.json({ success: true, data: r.recordset });
+  } catch (err) {
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── POST /admin/universities ─────────────────────────────────
+router.post('/universities', authenticate, requireAdmin, async (req, res) => {
+  const { name, short_code } = req.body;
+  if (!name || !String(name).trim()) {
+    return res.status(400).json({ success: false, message: 'University name is required.' });
+  }
+  try {
+    const r = await db.request()
+      .input('name',  mssql.NVarChar, String(name).trim())
+      .input('code',  mssql.NVarChar, short_code ? String(short_code).trim().toUpperCase() : null)
+      .input('actor', mssql.NVarChar, String(req.user.id))
+      .query(`
+        DECLARE @t TABLE (id INT);
+        INSERT INTO universities (name, short_code, created_by)
+        OUTPUT INSERTED.id INTO @t
+        VALUES (@name, @code, @actor);
+        SELECT id FROM @t;
+      `);
+    return res.status(201).json({ success: true, data: { id: r.recordset[0].id } });
+  } catch (err) {
+    if (err.number === 2627 || err.number === 2601) {
+      return res.status(409).json({ success: false, message: 'A university with that name already exists.' });
+    }
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── PUT /admin/universities/:id ──────────────────────────────
+router.put('/universities/:id', authenticate, requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { name, short_code, is_active } = req.body;
+  const sets = [];
+  const r = db.request().input('id', mssql.Int, id);
+  if (name !== undefined) {
+    if (!String(name).trim()) return res.status(400).json({ success: false, message: 'University name cannot be empty.' });
+    r.input('name', mssql.NVarChar, String(name).trim()); sets.push('name = @name');
+  }
+  if (short_code !== undefined) {
+    r.input('code', mssql.NVarChar, short_code ? String(short_code).trim().toUpperCase() : null);
+    sets.push('short_code = @code');
+  }
+  if (is_active !== undefined) { r.input('act', mssql.Bit, is_active ? 1 : 0); sets.push('is_active = @act'); }
+  if (!sets.length) return res.status(400).json({ success: false, message: 'Nothing to update.' });
+
+  try {
+    await r.query(`UPDATE universities SET ${sets.join(', ')} WHERE id = @id`);
+    return res.json({ success: true, message: 'University updated.' });
+  } catch (err) {
+    if (err.number === 2627 || err.number === 2601) {
+      return res.status(409).json({ success: false, message: 'A university with that name already exists.' });
+    }
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// Columns a template shares with faculty_master, so a template row copies
+// across column-for-column. Listed once and reused by both write paths.
+const TEMPLATE_FIELDS = [
+  'degree_course_code', 'degree_course_name', 'duration_years', 'university_faculty_no',
+  ...Array.from({ length: 10 }, (_, i) => `unique_code_sem${i + 1}`),
+  ...Array.from({ length: 5 },  (_, i) => `exam_seat_code_year${i + 1}`),
+];
+
+// ── GET /admin/universities/:id/programs ─────────────────────
+router.get('/universities/:id/programs', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const r = await db.request()
+      .input('uid', mssql.Int, parseInt(req.params.id))
+      .query(`SELECT * FROM program_templates WHERE university_id = @uid ORDER BY university_faculty_no, degree_course_code`);
+    return res.json({ success: true, data: r.recordset });
+  } catch (err) {
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── POST /admin/universities/:id/programs ────────────────────
+router.post('/universities/:id/programs', authenticate, requireAdmin, async (req, res) => {
+  const universityId = parseInt(req.params.id);
+  const body = req.body || {};
+  if (!body.degree_course_code || !String(body.degree_course_code).trim()) {
+    return res.status(400).json({ success: false, message: 'Degree Course Code is required.' });
+  }
+  if (!body.degree_course_name || !String(body.degree_course_name).trim()) {
+    return res.status(400).json({ success: false, message: 'Degree Course Name is required.' });
+  }
+  try {
+    const r = db.request()
+      .input('uid',   mssql.Int,      universityId)
+      .input('actor', mssql.NVarChar, String(req.user.id));
+    const cols = ['university_id'], vals = ['@uid'];
+    for (const f of TEMPLATE_FIELDS) {
+      if (body[f] === undefined) continue;
+      const v = body[f] === '' ? null : body[f];
+      if (f === 'duration_years' || f === 'university_faculty_no') {
+        r.input(f, mssql.Int, v == null ? null : parseInt(v));
+      } else {
+        r.input(f, mssql.NVarChar, v == null ? null : String(v).trim());
+      }
+      cols.push(f); vals.push(`@${f}`);
+    }
+    cols.push('created_by'); vals.push('@actor');
+    await r.query(`INSERT INTO program_templates (${cols.join(',')}) VALUES (${vals.join(',')})`);
+    return res.status(201).json({ success: true, message: 'Program added to the catalogue.' });
+  } catch (err) {
+    if (err.number === 2627 || err.number === 2601) {
+      return res.status(409).json({ success: false, message: 'That course code or university faculty number is already used in this university.' });
+    }
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── PUT /admin/programs/:id ──────────────────────────────────
+// Edits the catalogue only. Colleges already seeded keep their copy — changing a
+// code here would orphan the course/group rows that reference the college's own
+// faculty_master row, so existing colleges are deliberately not rewritten.
+router.put('/programs/:id', authenticate, requireAdmin, async (req, res) => {
+  const body = req.body || {};
+  const r = db.request()
+    .input('id',    mssql.Int,      parseInt(req.params.id))
+    .input('actor', mssql.NVarChar, String(req.user.id));
+  const sets = [];
+  for (const f of TEMPLATE_FIELDS) {
+    if (body[f] === undefined) continue;
+    const v = body[f] === '' ? null : body[f];
+    if (f === 'duration_years' || f === 'university_faculty_no') {
+      r.input(f, mssql.Int, v == null ? null : parseInt(v));
+    } else {
+      r.input(f, mssql.NVarChar, v == null ? null : String(v).trim());
+    }
+    sets.push(`${f} = @${f}`);
+  }
+  if (body.is_active !== undefined) { r.input('act', mssql.Bit, body.is_active ? 1 : 0); sets.push('is_active = @act'); }
+  if (!sets.length) return res.status(400).json({ success: false, message: 'Nothing to update.' });
+
+  try {
+    await r.query(`UPDATE program_templates
+                   SET ${sets.join(', ')}, modified_by = @actor, modified_on = GETDATE()
+                   WHERE id = @id`);
+    return res.json({ success: true, message: 'Catalogue program updated.' });
+  } catch (err) {
+    if (err.number === 2627 || err.number === 2601) {
+      return res.status(409).json({ success: false, message: 'That course code or university faculty number is already used in this university.' });
+    }
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── GET /admin/colleges/:collegeId/programs ──────────────────
+// What this college holds, with the counts that say whether hiding one is safe.
+router.get('/colleges/:collegeId/programs', authenticate, requireAdmin, async (req, res) => {
+  try {
+    const r = await db.request()
+      .input('cid', mssql.Int, parseInt(req.params.collegeId))
+      .query(`
+        SELECT f.code_no, f.degree_course_code, f.degree_course_name, f.duration_years,
+               f.university_faculty_no, f.is_active,
+               (SELECT COUNT(*) FROM course_master cm  WHERE cm.faculty_master_id = f.code_no) AS course_count,
+               (SELECT COUNT(*) FROM group_master  gm  WHERE gm.faculty_master_id = f.code_no) AS group_count,
+               (SELECT COUNT(*) FROM applications  a   WHERE a.course_id          = f.code_no) AS application_count
+        FROM faculty_master f
+        WHERE f.college_id = @cid
+        ORDER BY f.university_faculty_no, f.degree_course_code
+      `);
+    return res.json({ success: true, data: r.recordset });
+  } catch (err) {
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── PUT /admin/colleges/:collegeId/programs/:codeNo ──────────
+// Show/hide one program for one college. This is the knob the super admin uses
+// to tailor the shared catalogue down to what a college actually offers.
+router.put('/colleges/:collegeId/programs/:codeNo', authenticate, requireAdmin, async (req, res) => {
+  const { is_active } = req.body;
+  if (is_active === undefined) {
+    return res.status(400).json({ success: false, message: 'is_active is required.' });
+  }
+  try {
+    const r = await db.request()
+      .input('cid',   mssql.Int,      parseInt(req.params.collegeId))
+      .input('code',  mssql.Int,      parseInt(req.params.codeNo))
+      .input('act',   mssql.Bit,      is_active ? 1 : 0)
+      .input('actor', mssql.NVarChar, String(req.user.id))
+      .query(`UPDATE faculty_master
+              SET is_active = @act, modified_by = @actor, modified_on = GETDATE()
+              WHERE code_no = @code AND college_id = @cid`);
+    if (!r.rowsAffected[0]) {
+      return res.status(404).json({ success: false, message: 'Program not found for this college.' });
+    }
+    return res.json({ success: true, message: is_active ? 'Program shown.' : 'Program hidden.' });
+  } catch (err) {
+    logger.error({ err });
+    return res.status(500).json({ success: false, message: 'Server error.' });
+  }
+});
+
+// ── POST /admin/colleges/:collegeId/programs/sync ────────────
+// Re-runs the seeding for an existing college — used when the catalogue gains a
+// program after the college was created, and to backfill colleges onboarded
+// before the catalogue existed. Only inserts what is missing; never edits or
+// removes a program the college already holds.
+router.post('/colleges/:collegeId/programs/sync', authenticate, requireAdmin, async (req, res) => {
+  const collegeId = parseInt(req.params.collegeId);
+  try {
+    const uni = await db.request()
+      .input('cid', mssql.Int, collegeId)
+      .query('SELECT university_id FROM colleges WHERE id = @cid');
+    if (!uni.recordset.length) {
+      return res.status(404).json({ success: false, message: 'College not found.' });
+    }
+    const universityId = uni.recordset[0].university_id;
+    if (!universityId) {
+      return res.status(400).json({ success: false, message: 'Assign this college to a university first.' });
+    }
+
+    const added = await seedProgramsFromTemplates(collegeId, universityId, String(req.user.id));
+    return res.json({
+      success: true,
+      message: added ? `${added} program${added === 1 ? '' : 's'} added.` : 'Already up to date.',
+      data: { added },
+    });
   } catch (err) {
     logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });

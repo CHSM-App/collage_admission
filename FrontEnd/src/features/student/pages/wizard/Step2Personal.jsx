@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import FormField from '../../../../shared/components/FormField.jsx'
+import { sanitizeName } from '../../../../shared/validators.js'
 import { StepHeader, StepFooter } from './Step1Context.jsx'
 import { getFaculty, getDivisions, computeFees, getCategoryMaster } from '../../../../services/masterService.js'
 
@@ -55,6 +56,31 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
     return { category: fc.category_name, reason: `${fc.category_name} assigned.` }
   }
 
+  // ── Permanent address mirrors the residential one ─────────────
+  // Not a stored field: an address that already equals the residential one reads
+  // as "same", so a resumed draft shows the box ticked with no column for it.
+  // Once the user touches the box their choice wins, which is what the override
+  // is for — otherwise autofill arriving late would flip it under them.
+  const ADDRESS_PAIRS = [
+    ['address', 'native_address'], ['taluka', 'native_taluka'],
+    ['district', 'native_district'], ['state', 'native_state'],
+  ]
+  const [sameOverride, setSameAsResidential] = useState(null)
+  const hasResidential   = !!String(data.address || '').trim()
+  const addressesMatch   = ADDRESS_PAIRS.every(([r, n]) =>
+    String(data[n] || '').trim() === String(data[r] || '').trim())
+  const sameAsResidential = sameOverride ?? (hasResidential && addressesMatch)
+
+  // Mirror while ticked, so editing the residential address keeps both in step.
+  useEffect(() => {
+    if (!sameAsResidential || readOnly) return
+    for (const [r, n] of ADDRESS_PAIRS) {
+      if (String(data[n] || '') !== String(data[r] || '')) {
+        onChange({ target: { name: n, value: data[r] || '' } })
+      }
+    }
+  }, [sameAsResidential, readOnly, data.address, data.taluka, data.district, data.state])
+
   // Special status only enabled for castes marked is_gen_type
   const selectedCasteRow      = categoryMaster?.castes?.find(c => c.caste_name === data.category)
   const specialStatusDisabled = categoryMaster ? !selectedCasteRow?.is_gen_type : data.category !== 'Gen.'
@@ -93,11 +119,15 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
   }, [data.college_id, data.course_id, data.year_of_study])
 
   // ── Clear special_status when selected caste doesn't allow it ──
+  // Depends on the disabled flag and the value itself, not on what happens to
+  // derive them: keying this on [data.category, categoryMaster] meant a status
+  // set while the group was already disabled never got cleared, and the ✕ is
+  // hidden on a disabled group — leaving it stuck checked with no way out.
   useEffect(() => {
     if (specialStatusDisabled && data.special_status) {
       onChange({ target: { name: 'special_status', value: '' } })
     }
-  }, [data.category, categoryMaster])
+  }, [specialStatusDisabled, data.special_status])
 
   // ── Auto-determine fees_category from caste+special_status ──
   useEffect(() => {
@@ -286,11 +316,13 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
     })
   }
 
-  // Auto-capitalize first letter for name fields
+  // Name fields: strip anything that is not name-legal, and capitalise the first
+  // letter of each word. Deliberately does NOT lowercase the rest — full title
+  // casing on every keystroke would fight the typist and mangle "McDonald".
   function onNameChange(e) {
-    const val = e.target.value
-    const capitalized = val.length > 0 ? val.charAt(0).toUpperCase() + val.slice(1) : val
-    onChange({ target: { name: e.target.name, value: capitalized } })
+    const value = sanitizeName(e.target.value)
+      .replace(/(^|\s)(\p{L})/gu, (_, sep, ch) => sep + ch.toLocaleUpperCase())
+    onChange({ target: { name: e.target.name, value } })
   }
 
   const e = errors
@@ -360,17 +392,17 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
             <div>
               <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Father's / Husband's Name</p>
               <div className="grid grid-cols-3 gap-3">
-                <FormField label="Surname"    name="father_surname"     value={data.father_surname     || ''} onChange={onChange} placeholder="Shetty" />
-                <FormField label="First Name" name="father_first_name"  value={data.father_first_name  || ''} onChange={onChange} placeholder="Ramesh" />
-                <FormField label="Middle Name"name="father_middle_name" value={data.father_middle_name || ''} onChange={onChange} placeholder="Kumar" />
+                <FormField label="Surname"    name="father_surname"     value={data.father_surname     || ''} onChange={onNameChange} placeholder="Shetty" />
+                <FormField label="First Name" name="father_first_name"  value={data.father_first_name  || ''} onChange={onNameChange} placeholder="Ramesh" />
+                <FormField label="Middle Name"name="father_middle_name" value={data.father_middle_name || ''} onChange={onNameChange} placeholder="Kumar" />
               </div>
             </div>
             <div>
               <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Mother's Name (from paternal side)</p>
               <div className="grid grid-cols-3 gap-3">
-                <FormField label="Surname"    name="mother_surname"     value={data.mother_surname     || ''} onChange={onChange} placeholder="Shetty" />
-                <FormField label="First Name" name="mother_first_name"  value={data.mother_first_name  || ''} onChange={onChange} placeholder="Sunita" />
-                <FormField label="Middle Name"name="mother_middle_name" value={data.mother_middle_name || ''} onChange={onChange} placeholder="Devi" />
+                <FormField label="Surname"    name="mother_surname"     value={data.mother_surname     || ''} onChange={onNameChange} placeholder="Shetty" />
+                <FormField label="First Name" name="mother_first_name"  value={data.mother_first_name  || ''} onChange={onNameChange} placeholder="Sunita" />
+                <FormField label="Middle Name"name="mother_middle_name" value={data.mother_middle_name || ''} onChange={onNameChange} placeholder="Devi" />
               </div>
             </div>
           </div>
@@ -415,13 +447,26 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
 
         {/* Native (Permanent) Address */}
         <div>
-          <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-400">Native / Permanent Address</p>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Native / Permanent Address</p>
+            <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={sameAsResidential}
+                onChange={e => setSameAsResidential(e.target.checked)}
+                disabled={readOnly}
+                className="h-4 w-4 accent-slate-800"
+              />
+              Same as residential address
+            </label>
+          </div>
           <div className="space-y-3">
             <FormField label="Address" name="native_address" type="textarea" rows={2} value={data.native_address || ''}
-              onChange={onChange} placeholder="House no., Street, Area…" />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <FormField label="Taluka"   name="native_taluka"   value={data.native_taluka   || ''} onChange={onChange} placeholder="Vengurla" />
-              <FormField label="District" name="native_district" value={data.native_district || ''} onChange={onChange} placeholder="Sindhudurg" />
+              onChange={onChange} placeholder="House no., Street, Area…" readOnly={sameAsResidential} />
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <FormField label="Taluka"   name="native_taluka"   value={data.native_taluka   || ''} onChange={onChange} placeholder="Vengurla"    readOnly={sameAsResidential} />
+              <FormField label="District" name="native_district" value={data.native_district || ''} onChange={onChange} placeholder="Sindhudurg"  readOnly={sameAsResidential} />
+              <FormField label="State"    name="native_state"    value={data.native_state    || ''} onChange={onChange} placeholder="Maharashtra" readOnly={sameAsResidential} />
             </div>
           </div>
         </div>
@@ -701,7 +746,9 @@ function RadioGroup({ name, options, value, onChange, disabled, clearable, autoV
           </label>
         )
       })}
-      {clearable && value && !disabled && (
+      {/* Shown even when disabled: a disabled group holding a stale value is
+          exactly the case the user needs to clear out of. */}
+      {clearable && value && (
         <button type="button" onClick={() => onChange('')} className="text-xs text-slate-400 hover:text-red-500 self-center">✕</button>
       )}
     </div>

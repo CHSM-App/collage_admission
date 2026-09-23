@@ -19,10 +19,13 @@ import { recordCashPayment } from '../../services/collegeAdminService.js'
 /**
  * @param {string|number} appId  - application ID
  * @param {string|number} [collegeId] - required only for cash payments (recordCashPayment)
- * @param {{ onPaid?: () => void }} [options]
+ * @param {{ onPaid?: () => void, refreshKey?: number }} [options]
+ *   refreshKey — bump to re-read the fee status after something outside this
+ *   hook changed it, e.g. saving an installment plan. Without it the panel
+ *   keeps showing the totals it loaded on mount.
  */
 export function useCollegePayment(appId, collegeId, options = {}) {
-  const { onPaid } = options
+  const { onPaid, refreshKey } = options
   const { redirectToPayU } = usePayU()
   const toast = useToast()
 
@@ -40,7 +43,7 @@ export function useCollegePayment(appId, collegeId, options = {}) {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { fetchStatus() }, [appId])
+  useEffect(() => { fetchStatus() }, [appId, refreshKey])
 
   /**
    * Pay online via PayU (browser redirect).

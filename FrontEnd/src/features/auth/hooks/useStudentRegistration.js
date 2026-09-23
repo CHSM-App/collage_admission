@@ -6,11 +6,30 @@ import { useState } from 'react'
 import { authService, sendOtp, verifyOtp } from '../services/authService.js'
 import { validatePassword, validatePhone, validateEmail, formatPhone } from '../../../shared/hooks/usePasswordValidation.js'
 import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
+import { sanitizeName, toTitleCase } from '../../../shared/validators.js'
 
 export const REG_STEPS = { FORM: 'form', OTP: 'otp' }
 
+const NAME_FIELDS = ['surname', 'first_name', 'middle_name']
+
+/** Registration payload: parts kept, plus the joined full_name the rest of the app reads. */
+function withFullName(form) {
+  const parts = {
+    surname:     toTitleCase(form.surname),
+    first_name:  toTitleCase(form.first_name),
+    middle_name: toTitleCase(form.middle_name),
+  }
+  return {
+    ...form,
+    ...parts,
+    full_name: [parts.surname, parts.first_name, parts.middle_name].filter(Boolean).join(' '),
+  }
+}
+
 const EMPTY_FORM = {
-  full_name: '', email: '', password: '', confirm_password: '',
+  // Name captured in parts so the admission form can autofill it later.
+  surname: '', first_name: '', middle_name: '',
+  email: '', password: '', confirm_password: '',
   phone: '', city: '', category: 'general',
 }
 
@@ -26,6 +45,7 @@ export function useStudentRegistration() {
     setError('')
     let value = e.target.value
     if (e.target.name === 'phone') value = formatPhone(value)
+    else if (NAME_FIELDS.includes(e.target.name)) value = sanitizeName(value)
     setForm(f => ({ ...f, [e.target.name]: value }))
   }
 
@@ -38,6 +58,8 @@ export function useStudentRegistration() {
   async function handleSendOtp(e) {
     e?.preventDefault()
     setError('')
+    if (!form.surname.trim())    { setError('Surname is required.'); return }
+    if (!form.first_name.trim()) { setError('First name is required.'); return }
     const emailErr = validateEmail(form.email)
     if (emailErr) { setError(emailErr); return }
     const phoneErr = validatePhone(form.phone)
@@ -50,7 +72,7 @@ export function useStudentRegistration() {
     }
     setLoading(true)
     try {
-      const { data } = await sendOtp(form)
+      const { data } = await sendOtp(withFullName(form))
       setInfo(data.message)
       setStep(REG_STEPS.OTP)
     } catch (err) {
@@ -87,7 +109,7 @@ export function useStudentRegistration() {
     setOtpRaw('')
     setLoading(true)
     try {
-      const { data } = await sendOtp(form)
+      const { data } = await sendOtp(withFullName(form))
       setInfo(data.message)
     } catch (err) {
       setError(getErrorMessage(err, 'Failed to resend OTP.'))

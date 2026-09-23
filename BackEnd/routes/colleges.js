@@ -18,6 +18,7 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 const logger  = require('../config/logger');
 const { presetForType, isValidType, COLLEGE_TYPES } = require('../constants/collegePresets');
 const { filledSeatsSql } = require('../constants/seatStatuses');
+const { seedProgramsFromTemplates } = require('../lib/programSeed');
 
 // ── Generate next college code (CL001, CL002, …) ────────────
 async function generateCollegeCode() {
@@ -34,7 +35,7 @@ async function generateCollegeCode() {
 
 // Create a new college (admin onboarding) — requires super-admin auth
 router.post('/', authenticate, requireAdmin, async (req, res) => {
-  const { name, address, city, phone, email, admin_email, admin_password, college_code, application_fee, college_type } = req.body
+  const { name, address, city, phone, email, admin_email, admin_password, college_code, application_fee, college_type, university_id } = req.body
 
   if (!name || !email || !admin_email || !admin_password) {
     return res.status(400).json({ success: false, message: 'name, email, admin_email and admin_password are required.' })
@@ -85,16 +86,29 @@ router.post('/', authenticate, requireAdmin, async (req, res) => {
       .input('fee',   mssql.Decimal,   application_fee ? parseFloat(application_fee) : null)
       .input('ctype', mssql.NVarChar,  type)
       .input('feat',  mssql.NVarChar,  featuresConfig)
+      .input('uni',   mssql.Int,       university_id ? parseInt(university_id) : null)
       .input('actor', mssql.NVarChar,  String(req.user.id))
       .query(`
         DECLARE @t TABLE (id INT, name NVARCHAR(200), admin_email NVARCHAR(150), college_code NVARCHAR(50));
-        INSERT INTO colleges (name, address, city, phone, email, admin_email, admin_password_hash, college_code, application_fee, college_type, features_config, created_by)
+        INSERT INTO colleges (name, address, city, phone, email, admin_email, admin_password_hash, college_code, application_fee, college_type, features_config, university_id, created_by)
         OUTPUT INSERTED.id, INSERTED.name, INSERTED.admin_email, INSERTED.college_code INTO @t
-        VALUES (@name, @addr, @city, @phone, @email, @ae, @hash, @code, @fee, @ctype, @feat, @actor);
+        VALUES (@name, @addr, @city, @phone, @email, @ae, @hash, @code, @fee, @ctype, @feat, @uni, @actor);
         SELECT id, name, admin_email, college_code FROM @t;
       `)
 
     const college = result.recordset[0]
+
+    // Give the college its university's whole catalogue up front. A failure here
+    // must not undo a created college — the super admin can re-seed from the
+    // programs panel — so it is logged, reported, and never thrown.
+    let programs_seeded = 0
+    try {
+      programs_seeded = await seedProgramsFromTemplates(
+        college.id, university_id ? parseInt(university_id) : null, String(req.user.id))
+    } catch (seedErr) {
+      logger.error({ err: seedErr, collegeId: college.id }, 'program template seeding failed')
+    }
+
     return res.status(201).json({
       success: true,
       message: 'College created successfully.',
@@ -103,6 +117,7 @@ router.post('/', authenticate, requireAdmin, async (req, res) => {
         name:         college.name,
         admin_email:  college.admin_email,
         college_code: college.college_code,
+        programs_seeded,
       },
     })
   } catch (err) {
