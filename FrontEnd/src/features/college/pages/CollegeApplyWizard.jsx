@@ -13,6 +13,7 @@
  *   5 — Review & submit
  *   6 — Division & Fee & Payment (confirm admission + collect college fee)
  */
+import scrollToField from '../../../shared/scrollToField.js'
 import { useEffect, useReducer, useCallback, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
@@ -240,7 +241,7 @@ export default function CollegeApplyWizard() {
       dispatch({ type: 'SET_STEP', step: nextStep })
     } catch (err) {
       const resp = err?.response?.data
-      if (resp?.errors) dispatch({ type: 'SET_ERRORS', errors: resp.errors })
+      if (resp?.errors) { dispatch({ type: 'SET_ERRORS', errors: resp.errors }); scrollToField(Object.keys(resp.errors)[0]) }
       else dispatch({ type: 'SET_GLOBAL_ERR', message: resp?.message || 'Save failed.' })
     } finally {
       dispatch({ type: 'SET_SAVING', value: false })
@@ -405,6 +406,20 @@ export default function CollegeApplyWizard() {
 
       <div className={`mx-auto ${shellWidth} px-4 py-6 space-y-6`}>
         <StepIndicator steps={features?.payment?.college_fee === false ? STEPS_NO_FEE : ALL_STEPS} current={currentStep} />
+
+        {/* Only Personal is mandatory for college entry — the rest can be completed later */}
+        {currentStep >= 2 && currentStep <= 5 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
+            <p className="text-sm text-slate-600">Remaining steps are optional for college entry — you can fill them later.</p>
+            <button
+              type="button"
+              onClick={() => { dispatch({ type: 'SET_MAX_STEP', step: 6 }); goStep(6) }}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:border-slate-500"
+            >
+              Skip to Review →
+            </button>
+          </div>
+        )}
 
         {globalError && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -634,7 +649,12 @@ function CollegeReviewStep({
         {/* Exam */}
         <div className="rounded-lg border border-slate-200 overflow-hidden">
           <div className="flex items-center justify-between bg-slate-50 px-4 py-2.5 border-b border-slate-100">
-            <p className="text-xs font-bold uppercase tracking-wide text-slate-600">Exam Details</p>
+            <div className="flex items-center gap-2">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-600">Exam Details</p>
+              {Object.keys(d.exams || {}).length === 0 && (
+                <span className="rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-xs font-semibold text-amber-700">Not filled</span>
+              )}
+            </div>
             <button onClick={() => onEditStep(3)} className="text-xs text-blue-600 hover:underline">Edit</button>
           </div>
           <div className="px-4 py-3 overflow-x-auto">
@@ -1454,7 +1474,7 @@ function ReviewSection({ title, optional, onEdit, rows }) {
         <div className="flex items-center gap-2">
           <p className="text-xs font-bold uppercase tracking-wide text-slate-600">{title}</p>
           {optional && !hasData && (
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-400">skipped</span>
+            <span className="rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-xs font-semibold text-amber-700">Not filled</span>
           )}
         </div>
         <button onClick={onEdit} className="text-xs text-blue-600 hover:underline">Edit</button>

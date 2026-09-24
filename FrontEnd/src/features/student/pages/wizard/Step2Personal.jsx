@@ -3,6 +3,60 @@ import FormField from '../../../../shared/components/FormField.jsx'
 import { sanitizeName } from '../../../../shared/validators.js'
 import { StepHeader, StepFooter } from './Step1Context.jsx'
 import { getFaculty, getDivisions, computeFees, getCategoryMaster } from '../../../../services/masterService.js'
+import api from '../../../../services/api'
+import scrollToField from '../../../../shared/scrollToField.js'
+
+const inputCls = err => 'w-full rounded-lg border px-3 py-2.5 text-sm transition focus:outline-none focus:ring-2 ' +
+  (err ? 'border-red-300 bg-red-50 focus:border-red-400 focus:ring-red-100' : 'border-slate-200 bg-white focus:border-slate-400 focus:ring-slate-100')
+
+// LGD location master (State → District → Taluka). Lists never change during a
+// session, so each URL is fetched once and kept for the page's lifetime.
+const locationCache = new Map()
+function useLocationList(url) {
+  const [list, setList] = useState(() => locationCache.get(url) || [])
+  useEffect(() => {
+    if (!url) { setList([]); return }
+    if (locationCache.has(url)) { setList(locationCache.get(url)); return }
+    let live = true
+    api.get(url)
+      .then(({ data }) => { locationCache.set(url, data.data); if (live) setList(data.data) })
+      .catch(() => { if (live) setList([]) })   // field stays typeable if the lookup fails
+    return () => { live = false }
+  }, [url])
+  return list
+}
+const findByName = (list, name) => list.find(x => x.name.toLowerCase() === String(name || '').trim().toLowerCase())
+
+// Searchable State → District → Taluka inputs. `prefix` selects the field set
+// ('' → state/district/taluka, 'native_' → native_state/…). Picking a parent
+// clears its children so an impossible combination can't be left behind.
+function LocationFields({ prefix = '', data, onChange, errors = {}, required, readOnly }) {
+  const [sKey, dKey, tKey] = ['state', 'district', 'taluka'].map(k => prefix + k)
+  const states      = useLocationList('api/states')
+  const stateRow    = findByName(states, data[sKey])
+  const districts   = useLocationList(stateRow && `api/states/${stateRow.id}/districts`)
+  const districtRow = findByName(districts, data[dKey])
+  const talukas     = useLocationList(districtRow && `api/districts/${districtRow.id}/talukas`)
+
+  const set = (name, value) => onChange({ target: { name, value } })
+  const field = (key, label, list, placeholder, children) => (
+    <FormField label={label} error={errors[key]} required={required}>
+      <input list={`dl-${key}`} name={key} value={data[key] ?? ''} autoComplete="off"
+        placeholder={readOnly ? '' : placeholder} readOnly={readOnly}
+        className={`${inputCls(errors[key])} ${readOnly ? 'cursor-default bg-slate-50' : ''}`}
+        onChange={ev => { set(key, ev.target.value); children.forEach(c => data[c] && set(c, '')) }} />
+      <datalist id={`dl-${key}`}>{list.map(x => <option key={x.id} value={x.name} />)}</datalist>
+    </FormField>
+  )
+
+  return (
+    <>
+      {field(sKey, 'State',    states,    'Search state…', [dKey, tKey])}
+      {field(dKey, 'District', districts, stateRow ? 'Search district…' : 'Select state first', [tKey])}
+      {field(tKey, 'Taluka',   talukas,   districtRow ? 'Search taluka…' : 'Select district first', [])}
+    </>
+  )
+}
 
 const YEAR_LEVEL_MAP = { 1: 'FY', 2: 'SY', 3: 'TY' }
 const SEX_OPTIONS    = [{ value: 'Male', label: 'Male' }, { value: 'Female', label: 'Female' }, { value: 'Other', label: 'Other' }]
@@ -17,7 +71,8 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
   const [determined, setDetermined]         = useState({ category: '', reason: '' })
   const [overrideMode, setOverrideMode]     = useState(!!data.fees_category_override)
   const [overrideRemark, setOverrideRemark] = useState(data.fees_category_override_remark || '')
-  const [localError, setLocalError]         = useState('')
+  // Client-side check failure: { field, msg, value }. Shown under the field until the value changes.
+  const [localError, setLocalError]         = useState(null)
 
   // Category master (dynamic, from backend)
   const [categoryMaster, setCategoryMaster] = useState(null)
@@ -256,31 +311,23 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
   }, [showDateOfAdmission])
 
   function handleNext() {
-    // Validate division (college only)
-    if (isCollege && divisions.length > 0 && !data.division) {
-      setLocalError('Division selection is required.'); return
+    // Checked in on-screen order, so the scroll lands on the topmost problem
+    const checks = [
+      [showSemester && !data.semester,                             'semester',          'Semester is required.'],
+      [data.mobile && !/^[6-9]\d{9}$/.test(data.mobile.trim()),    'mobile',            'Mobile number must be 10 digits starting with 6–9.'],
+      [isCollege && divisions.length > 0 && !data.division,        'division',          'Division selection is required.'],
+      [showCasteCategory && !data.category,                        'category',          'Caste / Community Category is required.'],
+      [showAdmittedCategory && !data.admitted_category,            'admitted_category', 'Admitted Category is required.'],
+      [showAdmissionQuota && !data.admission_quota,                'admission_quota',   'Admission Quota is required.'],
+    ]
+    const failed = checks.find(([bad]) => bad)
+    if (failed) {
+      const [, field, msg] = failed
+      setLocalError({ field, msg, value: data[field] })
+      scrollToField(field)
+      return
     }
-    // Validate caste selection (only if feature is enabled)
-    if (showCasteCategory && !data.category) {
-      setLocalError('Caste / Community Category is required.'); return
-    }
-    // Validate admitted category (only if feature is enabled)
-    if (showAdmittedCategory && !data.admitted_category) {
-      setLocalError('Admitted Category is required.'); return
-    }
-    // Validate admission quota (only if feature is enabled)
-    if (showAdmissionQuota && !data.admission_quota) {
-      setLocalError('Admission Quota is required.'); return
-    }
-    // Validate semester (only if feature is enabled)
-    if (showSemester && !data.semester) {
-      setLocalError('Semester is required.'); return
-    }
-    // Validate mobile
-    if (data.mobile && !/^[6-9]\d{9}$/.test(data.mobile.trim())) {
-      setLocalError('Mobile number must be 10 digits starting with 6–9.'); return
-    }
-    setLocalError('')
+    setLocalError(null)
     onNext({
       surname: data.surname, first_name: data.first_name,
       middle_name: data.middle_name, mother_name: data.mother_name,
@@ -325,7 +372,9 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
     onChange({ target: { name: e.target.name, value } })
   }
 
-  const e = errors
+  const e = localError && data[localError.field] === localError.value
+    ? { ...errors, [localError.field]: localError.msg }
+    : errors
 
   return (
     <div>
@@ -342,7 +391,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
                 label={<span>Semester <span className="text-red-500">*</span></span>}
                 name="semester" type="select"
                 value={data.semester || ''} onChange={onChange}
-                placeholder="Select semester…"
+                placeholder="Select semester…" error={e.semester}
                 options={semesterOptions.map(n => ({ value: String(n), label: `Semester ${n}` }))}
               />
             )}
@@ -438,9 +487,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
             <FormField label="Address" name="address" type="textarea" rows={2} value={data.address}
               onChange={onChange} error={e.address} required={!isCollege} placeholder="House no., Street, Area…" />
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <FormField label="Taluka"   name="taluka"   value={data.taluka}   onChange={onChange} error={e.taluka}   required={!isCollege} placeholder="Vengurla" />
-              <FormField label="District" name="district" value={data.district} onChange={onChange} error={e.district} required={!isCollege} placeholder="Sindhudurg" />
-              <FormField label="State"    name="state"    value={data.state}    onChange={onChange} error={e.state}    required={!isCollege} placeholder="Maharashtra" />
+              <LocationFields data={data} onChange={onChange} errors={e} required={!isCollege} />
             </div>
           </div>
         </div>
@@ -464,9 +511,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
             <FormField label="Address" name="native_address" type="textarea" rows={2} value={data.native_address || ''}
               onChange={onChange} placeholder="House no., Street, Area…" readOnly={sameAsResidential} />
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <FormField label="Taluka"   name="native_taluka"   value={data.native_taluka   || ''} onChange={onChange} placeholder="Vengurla"    readOnly={sameAsResidential} />
-              <FormField label="District" name="native_district" value={data.native_district || ''} onChange={onChange} placeholder="Sindhudurg"  readOnly={sameAsResidential} />
-              <FormField label="State"    name="native_state"    value={data.native_state    || ''} onChange={onChange} placeholder="Maharashtra" readOnly={sameAsResidential} />
+              <LocationFields prefix="native_" data={data} onChange={onChange} readOnly={sameAsResidential} />
             </div>
           </div>
         </div>
@@ -485,7 +530,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
 
         {/* Division — college only */}
         {isCollege && divisions.length > 0 && (
-          <div>
+          <div data-field="division" tabIndex={-1} className="outline-none">
             <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Division <span className="text-red-500">*</span></p>
             <div className="flex flex-wrap gap-2">
               {divisions.map(d => (
@@ -504,6 +549,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
                 </button>
               ))}
             </div>
+            {e.division && <p className="mt-1 text-xs font-medium text-red-600">{e.division}</p>}
           </div>
         )}
 
@@ -614,7 +660,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
               value={data.admitted_category}
               onChange={v => onChange({ target: { name: 'admitted_category', value: v } })}
             />
-            {errors.admitted_category && <p className="mt-1 text-xs font-medium text-red-600">{errors.admitted_category}</p>}
+            {e.admitted_category && <p className="mt-1 text-xs font-medium text-red-600">{e.admitted_category}</p>}
           </FormField>
         )}
 
@@ -640,15 +686,15 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
               value={data.admission_quota}
               onChange={v => onChange({ target: { name: 'admission_quota', value: v } })}
             />
-            {errors.admission_quota && <p className="mt-1 text-xs font-medium text-red-600">{errors.admission_quota}</p>}
+            {e.admission_quota && <p className="mt-1 text-xs font-medium text-red-600">{e.admission_quota}</p>}
           </FormField>
         )}
 
         {/* Fee Breakdown */}
         {/* <FeeBreakdown result={feeResult} loading={feeLoading} /> */}
 
-        {(localError || globalError) && (
-          <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{localError || globalError}</p>
+        {globalError && (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{globalError}</p>
         )}
 
         <StepFooter onBack={onBack} onNext={handleNext} saving={saving} readOnly={readOnly} />

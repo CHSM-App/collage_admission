@@ -80,20 +80,36 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
         }
       }
     }
+    // Month & Year: valid YYYY-MM, not in the future, each exam after the previous one
+    const thisMonth = new Date().toISOString().slice(0, 7)
+    let prev = null
+    for (const type of rows) {
+      const my = String(getRow(type).month_year || '').trim()
+      if (!my) continue
+      let msg = ''
+      if (!/^(19|20)\d{2}-(0[1-9]|1[0-2])$/.test(my)) msg = 'must be a valid month (e.g. 2024-03)'
+      else if (my > thisMonth) msg = 'cannot be in the future'
+      else if (prev && my <= prev.my) msg = `must be after ${ROW_LABEL[prev.type]} (${prev.my})`
+      if (msg) {
+        setLocalError(`${ROW_LABEL[type]}: Month & Year of Passing ${msg}.`)
+        return
+      }
+      prev = { type, my }
+    }
     setLocalError('')
     onNext({ exams })
   }
 
   const COLS = [
-    { key: 'institute',      label: 'Name of Institute with Place *', width: 'min-w-[160px]' },
-    { key: 'board',          label: 'Board / University *',           width: 'min-w-[120px]' },
-    { key: 'month_year',     label: 'Month & Year of Passing *',      width: 'min-w-[110px]' },
-    { key: 'seat_no',        label: 'Seat No. *',                     width: 'min-w-[90px]' },
-    { key: 'marks_obtained', label: 'Marks Obtained *',               width: 'min-w-[80px]' },
-    { key: 'marks_max',      label: 'Out of *',                       width: 'min-w-[70px]' },
-    { key: 'percentage',     label: '% *',                            width: 'min-w-[60px]', readOnly: true },
-    { key: 'class_grade',    label: 'Class / Grade *',                width: 'min-w-[80px]' },
-    { key: 'remark',         label: 'Remark',                         width: 'min-w-[80px]' },
+    { key: 'institute',      label: 'Name of Institute with Place *', width: 'w-[19%]', placeholder: 'e.g. R K High School, Vengurla' },
+    { key: 'board',          label: 'Board / University *',           width: 'w-[11%]', placeholder: 'e.g. Kolhapur' },
+    { key: 'month_year',     label: 'Month & Year of Passing *',      width: 'w-[14%]', placeholder: 'YYYY-MM' },
+    { key: 'seat_no',        label: 'Seat No. *',                     width: 'w-[10%]', placeholder: 'e.g. M123456' },
+    { key: 'marks_obtained', label: 'Marks Obtained *',               width: 'w-[8%]',  placeholder: '450' },
+    { key: 'marks_max',      label: 'Out of *',                       width: 'w-[7%]',  placeholder: '500' },
+    { key: 'percentage',     label: '% *',                            width: 'w-[7%]',  placeholder: 'Auto', readOnly: true },
+    { key: 'class_grade',    label: 'Class / Grade *',                width: 'w-[7%]',  placeholder: 'A+' },
+    { key: 'remark',         label: 'Remark',                         width: 'w-[10%]', placeholder: 'Pass' },
   ]
 
   return (
@@ -108,14 +124,14 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
 
         {/* Scrollable table */}
         <div className="overflow-x-auto rounded-lg border-2 border-slate-400">
-          <table className="w-full text-sm border-collapse">
+          <table className="w-full min-w-[860px] table-fixed text-sm border-collapse">
             <thead className="bg-slate-100 border-b-2 border-slate-400">
               <tr>
-                <th className="border border-slate-200 px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-slate-600 whitespace-nowrap min-w-[70px]">
+                <th className="border border-slate-200 px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-slate-600 align-bottom w-[7%]">
                   Exam
                 </th>
                 {COLS.map(col => (
-                  <th key={col.key} className={`border border-slate-200 px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-slate-600 whitespace-nowrap ${col.width}`}>
+                  <th key={col.key} className={`border border-slate-200 px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-slate-600 align-bottom leading-tight ${col.width}`}>
                     {col.label}
                   </th>
                 ))}
@@ -134,12 +150,13 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
                     {COLS.map(col => (
                       <td key={col.key} className="border border-slate-200 p-1">
                         <input
-                          type={['marks_obtained', 'marks_max', 'percentage'].includes(col.key) ? 'number' : 'text'}
+                          type={col.key === 'month_year' ? 'month' : ['marks_obtained', 'marks_max', 'percentage'].includes(col.key) ? 'number' : 'text'}
+                          max={col.key === 'month_year' ? new Date().toISOString().slice(0, 7) : undefined}
                           value={row[col.key] || ''}
                           onChange={e => setRowField(type, col.key, e.target.value)}
                           readOnly={col.readOnly || readOnly}
-                          placeholder=""
-                          className={`w-full px-2 py-1.5 text-sm rounded border-0 outline-none focus:ring-2 focus:ring-blue-200 focus:bg-blue-50 transition ${
+                          placeholder={readOnly ? '' : col.placeholder}
+                          className={`w-full min-w-0 px-2 py-1.5 text-sm rounded border-0 outline-none focus:ring-2 focus:ring-blue-200 focus:bg-blue-50 transition ${
                             col.readOnly || readOnly
                               ? 'bg-slate-100 text-slate-500 cursor-default'
                               : 'bg-white hover:bg-slate-50'

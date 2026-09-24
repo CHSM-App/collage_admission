@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 import { useNotifications } from '../hooks/useNotifications.js'
@@ -23,6 +24,9 @@ export default function StudentNotifications() {
   const { user } = useAuthContext()
   const navigate  = useNavigate()
   const { notifications, loading, markSeen, clearAll } = useNotifications(user?.id)
+
+  // Opening this page counts as viewing everything listed — clears the badge
+  useEffect(() => { if (!loading) markSeen() }, [loading, markSeen])
 
   function handleClick(notif) {
     markSeen()

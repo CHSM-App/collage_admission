@@ -30,6 +30,11 @@ const ENDPOINTS = {
   production: 'https://secure.payu.in/_payment',
 };
 
+// Never let the salt reach a log line — it is what lets anyone forge a PayU response.
+function maskSalt(pre, salt) {
+  return salt ? pre.split(salt).join('<SALT>') : pre;
+}
+
 function cfg() {
   return {
     key:      process.env.PAYU_MERCHANT_KEY,
@@ -77,11 +82,8 @@ function computeRequestHash({ txnid, amount, productinfo, firstname, email, udf1
 
   const hash = crypto.createHash('sha512').update(pre).digest('hex');
 
-  console.log('[PayU] pre-hash :', pre);
-  console.log('[PayU] hash     :', hash);
-
   if (debug) {
-    logger.info({ pre_hash: pre, hash }, '[PayU] request pre-hash string');
+    logger.info({ pre_hash: maskSalt(pre, salt), hash }, '[PayU] request pre-hash string');
   }
 
   return hash;
@@ -100,22 +102,25 @@ function verifyResponseHash(params) {
   const { salt, debug } = cfg();
   const { key, txnid, amount, productinfo, firstname, email,
           udf1 = '', udf2 = '', udf3 = '', udf4 = '', udf5 = '',
-          status, hash: receivedHash } = params;
+          status, hash: receivedHash, additionalCharges } = params;
 
   const amtStr = parseFloat(amount).toFixed(2);
 
   // Reverse formula from docs:
   // SALT|status||||||udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key
   // 5 empty strings after status → "status||||||udf5" (5 pipes between status and udf5)
-  const pre = [
+  let pre = [
     salt, status,
     '', '', '', '', '',  // 5 empty slots
     udf5, udf4, udf3, udf2, udf1,
     email, firstname, productinfo, amtStr, txnid, key,
   ].join('|');
+  // When PayU levies convenience charges it returns additionalCharges, and the
+  // documented response hash is then prefixed: additionalCharges|SALT|status|…
+  if (additionalCharges) pre = `${additionalCharges}|${pre}`;
 
   if (debug) {
-    logger.info({ pre_hash: pre }, '[PayU] response pre-hash string');
+    logger.info({ pre_hash: maskSalt(pre, salt) }, '[PayU] response pre-hash string');
   }
 
   const expected = crypto.createHash('sha512').update(pre).digest('hex');

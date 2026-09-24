@@ -18,6 +18,7 @@ var uploadsRouter        = require('./routes/uploads');
 var { publicLimiter, authedLimiter } = require('./middleware/rateLimits');
 var paymentsRouter       = require('./routes/payments');
 var mastersRouter        = require('./routes/masters');
+var locationsRouter      = require('./routes/locations');
 var collegeUsersRouter   = require('./routes/college_users');
 var notificationsRouter  = require('./routes/notifications');
 var certificatesRouter   = require('./routes/certificates');
@@ -131,6 +132,7 @@ app.use('/',              indexRouter);
 app.use('/auth',          authRouter);
 app.use('/colleges',      publicLimiter, collegesRouter);
 app.use('/applications',  authedLimiter, applicationsRouter);
+app.use('/api',           locationsRouter);   // public, own limiter; must precede the authed /api router
 app.use('/api',           authedLimiter, applicationFormRouter);
 app.use('/college-admin', authedLimiter, collegeAdminRouter);
 app.use('/payments',      authedLimiter, paymentsRouter);

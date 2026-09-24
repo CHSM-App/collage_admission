@@ -88,6 +88,8 @@ export default function DashboardLayout() {
   const permissions   = user?.permissions || {}
 
   // College feature flags — hide fee-related nav when college_fee is off
+  // Staff screens (application review, reports, masters) carry wide tables; student pages stay narrow
+  const contentWidth = role === 'student' ? 'max-w-5xl' : 'max-w-7xl'
   const { collegeFeeEnabled, isAgriculture } = useCollegeFeatures(role === 'college' ? user?.id : null)
 
   // ── Notifications (student only) ──────────────────────────
@@ -319,7 +321,7 @@ export default function DashboardLayout() {
 
         {/* Top header bar */}
         <header className="sticky top-0 z-10 border-b border-slate-200 bg-white px-4 py-3 sm:px-5 sm:py-4">
-          <div className="mx-auto flex max-w-5xl items-center justify-between gap-3">
+          <div className={`mx-auto flex ${contentWidth} items-center justify-between gap-3`}>
             <div className="flex items-center gap-3 min-w-0">
               {/* Hamburger — visible only on mobile */}
               <button
@@ -426,7 +428,7 @@ export default function DashboardLayout() {
           </div>
         </header>
 
-        <main className="mx-auto max-w-5xl px-4 py-6 sm:px-5 sm:py-8">
+        <main className={`mx-auto ${contentWidth} px-4 py-6 sm:px-5 sm:py-8`}>
           <ErrorBoundary key={location.pathname + location.search}>
             <Outlet />
           </ErrorBoundary>

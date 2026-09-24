@@ -8,6 +8,7 @@
  * - setField / handleChange
  * - saveAndNext(endpoint, body, nextStep)
  */
+import scrollToField from '../../../shared/scrollToField.js'
 import { useEffect, useReducer, useCallback } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
@@ -342,6 +343,7 @@ export function useApplicationForm() {
       const resp = err?.response?.data
       if (resp?.errors) {
         dispatch({ type: 'SET_ERRORS', errors: resp.errors })
+        scrollToField(Object.keys(resp.errors)[0])
       } else {
         dispatch({ type: 'SET_GLOBAL_ERR', message: resp?.message || 'Save failed. Please try again.' })
       }

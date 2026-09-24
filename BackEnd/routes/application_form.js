@@ -562,6 +562,21 @@ router.get('/applications/:id/form', async (req, res) => {
   }
 });
 
+// ── GET /api/ifsc/:code — proxy (ifsclookup.in sends no CORS headers) ──
+router.get('/ifsc/:code', async (req, res) => {
+  const code = String(req.params.code).toUpperCase();
+  if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(code)) return res.status(400).json({ error: 'Invalid IFSC' });
+  try {
+    const r = await fetch(`https://ifsclookup.in/api/ifsc/${code}`, { signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return res.status(404).json({ error: 'IFSC not found' });
+    const b = await r.json();
+    res.json({ bank_name: b.bank_name, branch: b.branch });
+  } catch (err) {
+    logger.warn('IFSC lookup failed', { code, err: err.message });
+    res.status(502).json({ error: 'IFSC lookup unavailable' });
+  }
+});
+
 // ── GET /api/student-profile/autofill ───────────────────────
 router.get('/student-profile/autofill', async (req, res) => {
   const { student_id } = req.query;
@@ -884,7 +899,11 @@ router.patch('/applications/:id/other-details', async (req, res) => {
   const anyBank = bank_account || bank_ifsc || bank_name || bank_branch;
   if (anyBank) {
     if (!bank_account) errors.bank_account = 'Bank account number is required when bank details are provided.';
+    else if (!/^\d{9,18}$/.test(String(bank_account).trim()))
+      errors.bank_account = 'Bank account number must be 9–18 digits.';
     if (!bank_ifsc)    errors.bank_ifsc    = 'IFSC code is required when bank details are provided.';
+    else if (!/^[A-Z]{4}0[A-Z0-9]{6}$/i.test(String(bank_ifsc).trim()))
+      errors.bank_ifsc = 'Enter a valid 11-character IFSC code (e.g. SBIN0001234).';
   }
 
   if (Object.keys(errors).length) {

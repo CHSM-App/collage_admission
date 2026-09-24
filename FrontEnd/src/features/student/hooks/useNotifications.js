@@ -1,9 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { getStudentNotifications } from '../../../services/notificationService.js'
 import { useCollege } from '../../../context/CollegeContext.jsx'
 
+// localStorage, per student — persists across sessions so the badge doesn't return on re-login
 const SEEN_KEY    = 'notif_last_seen'
-const CLEARED_KEY = 'notif_cleared_at' // localStorage — persists across sessions
+const CLEARED_KEY = 'notif_cleared_at'
+// Several components use this hook at once (layout bell + notifications page);
+// markSeen/clearAll broadcast this so every instance recomputes its badge.
+const CHANGE_EVENT = 'notifications:changed'
+
+const readTs = key => parseInt(localStorage.getItem(key) || '0')
+const tsOf   = n => (n.updated_at ? new Date(n.updated_at).getTime() : 0)
 
 export function useNotifications(studentId) {
   // Scoped to the college portal in view — see getApplications.
@@ -11,51 +18,45 @@ export function useNotifications(studentId) {
   const [allNotifications, setAllNotifications] = useState([])
   const [unread, setUnread]                     = useState(0)
   const [loading, setLoading]                   = useState(false)
+  const raw = useRef([])
 
-  const computeState = useCallback((data) => {
-    const clearedAt = parseInt(localStorage.getItem(`${CLEARED_KEY}_${studentId}`) || '0')
-    const lastSeen  = parseInt(sessionStorage.getItem(SEEN_KEY) || '0')
-
-    // Visible = newer than cleared timestamp
-    const visible = data.filter(n => {
-      const t = n.updated_at ? new Date(n.updated_at).getTime() : 0
-      return t > clearedAt
-    })
-
-    // Unread = visible and newer than last seen
-    const newCount = visible.filter(n => {
-      const t = n.updated_at ? new Date(n.updated_at).getTime() : 0
-      return t > lastSeen
-    }).length
-
+  const computeState = useCallback(() => {
+    const clearedAt = readTs(`${CLEARED_KEY}_${studentId}`)
+    const lastSeen  = readTs(`${SEEN_KEY}_${studentId}`)
+    const visible   = raw.current.filter(n => tsOf(n) > clearedAt)
     setAllNotifications(visible)
-    setUnread(newCount)
+    setUnread(visible.filter(n => tsOf(n) > lastSeen).length)
   }, [studentId])
 
   const fetch = useCallback(() => {
     if (!studentId) return
     setLoading(true)
     getStudentNotifications(studentId, collegeId)
-      .then(r => computeState(r.data.data || []))
+      .then(r => { raw.current = r.data.data || []; computeState() })
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [studentId, collegeId, computeState])
 
+  useEffect(() => { fetch() }, [fetch])
+
   useEffect(() => {
-    fetch()
-  }, [fetch])
+    window.addEventListener(CHANGE_EVENT, computeState)
+    return () => window.removeEventListener(CHANGE_EVENT, computeState)
+  }, [computeState])
 
-  function markSeen() {
-    sessionStorage.setItem(SEEN_KEY, Date.now().toString())
-    setUnread(0)
-  }
+  const markSeen = useCallback(() => {
+    if (!studentId) return
+    localStorage.setItem(`${SEEN_KEY}_${studentId}`, Date.now().toString())
+    window.dispatchEvent(new Event(CHANGE_EVENT))
+  }, [studentId])
 
-  function clearAll() {
-    localStorage.setItem(`${CLEARED_KEY}_${studentId}`, Date.now().toString())
-    sessionStorage.setItem(SEEN_KEY, Date.now().toString())
-    setAllNotifications([])
-    setUnread(0)
-  }
+  const clearAll = useCallback(() => {
+    if (!studentId) return
+    const now = Date.now().toString()
+    localStorage.setItem(`${CLEARED_KEY}_${studentId}`, now)
+    localStorage.setItem(`${SEEN_KEY}_${studentId}`, now)
+    window.dispatchEvent(new Event(CHANGE_EVENT))
+  }, [studentId])
 
   return { notifications: allNotifications, unread, loading, markSeen, clearAll, refetch: fetch }
 }

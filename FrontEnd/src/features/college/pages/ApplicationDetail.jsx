@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getApplicationDetail, postApplicationAction, confirmApplication, setApplicationFee, getComputedFee, getAppInstallments } from '../../../services/collegeAdminService.js'
 import { getDivisions } from '../../../services/masterService.js'
-import { getSubjectSelections } from '../../../services/applicationService.js'
+import { getSubjectSelections, getApplicationGroups } from '../../../services/applicationService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { usePermissions } from '../hooks/usePermissions.js'
 import { useDocumentPreview } from '../hooks/useDocumentPreview.js'
@@ -184,7 +184,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
   const features = app.features || hookFeatures
 
   return (
-    <section className="space-y-5 max-w-3xl">
+    <section className="space-y-5">
       <button
         onClick={() => goBackToInbox()}
         className="text-sm text-blue-600 hover:underline"
@@ -604,9 +604,12 @@ const ACTION_META = {
   payment_link_opened:    { label: 'Payment Link Opened by Student',  color: 'bg-green-400',   actor: 'Student' },
 }
 
+// Routine student-side events — still kept in the audit log, just not shown on the timeline
+const HIDDEN_ACTIONS = new Set(['group_selected', 'subject_selected', 'payment_link_opened'])
+
 function ActivityTimeline({ app, collegeFeeEnabled = true }) {
   const [open, setOpen] = useState(true)
-  const activity = app.activity || []
+  const activity = (app.activity || []).filter(a => !HIDDEN_ACTIONS.has(a.action))
 
   const entries = activity.map(a => {
     const meta = ACTION_META[a.action] || { label: a.action, color: 'bg-slate-400', actor: a.actor_role }
@@ -678,18 +681,22 @@ function ActivityTimeline({ app, collegeFeeEnabled = true }) {
 
 function SelectedSubjectsSection({ appId }) {
   const [data, setData]     = useState(null)
+  const [groups, setGroups] = useState([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    getSubjectSelections(appId)
-      .then(r => setData(r.data.data))
-      .catch(() => {})
+    Promise.allSettled([getSubjectSelections(appId), getApplicationGroups(appId)])
+      .then(([subj, grp]) => {
+        if (subj.status === 'fulfilled') setData(subj.value.data.data)
+        if (grp.status === 'fulfilled') setGroups(grp.value.data.data?.selections || [])
+      })
       .finally(() => setLoading(false))
   }, [appId])
 
   const sem1 = data?.semester1 || []
   const sem2 = data?.semester2 || []
-  const hasAny = sem1.length > 0 || sem2.length > 0
+  const groupFor = sem => groups.find(g => Number(g.semester) === sem)
+  const hasAny = sem1.length > 0 || sem2.length > 0 || groups.length > 0
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
@@ -705,10 +712,18 @@ function SelectedSubjectsSection({ appId }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {[1, 2].map(sem => {
               const rows = sem === 1 ? sem1 : sem2
-              if (rows.length === 0) return null
+              const group = groupFor(sem)
+              if (rows.length === 0 && !group) return null
               return (
                 <div key={sem}>
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Semester {sem}</p>
+                  {group && (
+                    <div className="mb-2 flex items-center gap-3 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-sm">
+                      <span className="text-xs font-semibold uppercase text-slate-500 shrink-0">Group</span>
+                      <span className="font-mono text-xs text-slate-600 shrink-0">{group.group_code}</span>
+                      <span className="font-semibold text-slate-800">{group.group_description || '—'}</span>
+                    </div>
+                  )}
                   <div className="space-y-1">
                     {rows.map((s, i) => (
                       <div key={i} className="flex items-center gap-3 text-sm">
@@ -738,8 +753,8 @@ function ExamDetailsSection({ exams, yearOfStudy }) {
         <p className="text-sm text-slate-500 col-span-2">No exam details filled.</p>
       ) : (
         <div className="col-span-2 -mx-4 px-4 overflow-x-auto">
-          <div className="rounded-lg border-2 border-slate-400 overflow-hidden min-w-max">
-            <table className="text-xs border-collapse">
+          <div className="rounded-lg border-2 border-slate-400 overflow-hidden">
+            <table className="w-full text-xs border-collapse">
               <thead className="bg-slate-100 border-b-2 border-slate-400">
                 <tr>
                   {['Exam','Institute','Board/Univ.','Month & Year','Seat No.','Marks','Out of','%','Class/Grade','Remark'].map(h => (
@@ -751,7 +766,7 @@ function ExamDetailsSection({ exams, yearOfStudy }) {
                 {entries.map(([type, r]) => (
                   <tr key={type} className="even:bg-slate-50 hover:bg-blue-50 transition">
                     <td className="border border-slate-200 px-2 py-1 font-semibold text-slate-700 whitespace-nowrap">{EXAM_LABEL[type] || type}</td>
-                    <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.institute || '—'}</td>
+                    <td className="border border-slate-200 px-2 py-1 min-w-[180px]">{r.institute || '—'}</td>
                     <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.board || '—'}</td>
                     <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.month_year || '—'}</td>
                     <td className="border border-slate-200 px-2 py-1 whitespace-nowrap">{r.seat_no || '—'}</td>

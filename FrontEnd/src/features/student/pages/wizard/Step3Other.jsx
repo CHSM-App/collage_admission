@@ -1,5 +1,6 @@
 import FormField from '../../../../shared/components/FormField.jsx'
 import { StepHeader, StepFooter } from './Step1Context.jsx'
+import api from '../../../../services/api'
 
 const MARITAL = [{ value:'Unmarried', label:'Unmarried' }, { value:'Married', label:'Married' }]
 const BLOOD   = ['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(v => ({ value: v, label: v }))
@@ -10,6 +11,19 @@ const maxBirthDate = (() => {
 })()
 
 export default function Step3Other({ data, errors, globalError, saving, onChange, onBack, onNext, extraFooter, readOnly, features }) {
+  function onIfscChange(ev) {
+    const ifsc = ev.target.value.toUpperCase().trim()
+    onChange({ target: { name: 'bank_ifsc', value: ifsc } })
+    if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc)) return
+    api.get(`api/ifsc/${ifsc}`)
+      .then(({ data: b }) => {
+        if (!b?.bank_name) return
+        onChange({ target: { name: 'bank_name', value: b.bank_name } })
+        onChange({ target: { name: 'bank_branch', value: b.branch } })
+      })
+      .catch(() => {}) // lookup is a convenience; user can still type manually
+  }
+
   function handleNext() {
     onNext({
       birth_date: data.birth_date, birth_place: data.birth_place,
@@ -182,10 +196,13 @@ export default function Step3Other({ data, errors, globalError, saving, onChange
               If you provide any bank detail, Account Number and IFSC become mandatory.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <FormField label="Account Number" name="bank_account" value={data.bank_account}
-                onChange={onChange} error={e.bank_account} placeholder="Your bank account number" />
               <FormField label="IFSC Code" name="bank_ifsc" value={data.bank_ifsc}
-                onChange={onChange} error={e.bank_ifsc} placeholder="SBIN0001234" />
+                onChange={onIfscChange} error={e.bank_ifsc} placeholder="SBIN0001234" maxLength={11}
+                hint="Bank name and branch fill automatically" />
+              <FormField label="Account Number" name="bank_account" value={data.bank_account}
+                onChange={ev => onChange({ target: { name: 'bank_account', value: ev.target.value.replace(/\D/g, '').slice(0, 18) } })}
+                error={e.bank_account} placeholder="Your bank account number" inputMode="numeric" maxLength={18}
+                hint="Digits only, 9–18" />
               <FormField label="Bank Name" name="bank_name" value={data.bank_name}
                 onChange={onChange} placeholder="State Bank of India" />
               <FormField label="Branch" name="bank_branch" value={data.bank_branch}
