@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { getAdminColleges, updateAdminCollege, uploadCollegeLogo, getUniversities } from '../../../services/adminService.js'
+import { getAdminColleges, updateAdminCollege, uploadCollegeLogo } from '../../../services/adminService.js'
 import Pagination from '../../../shared/components/Pagination.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import RolesPanel      from './RolesPanel.jsx'
-import ProgramsPanel   from './ProgramsPanel.jsx'
 import FeaturesPanel  from './FeaturesPanel.jsx'
 import { SkeletonTable } from '../../../shared/components/Skeleton.jsx'
 import FacultyMaster   from '../../college/pages/masters/FacultyMaster.jsx'
@@ -18,7 +17,6 @@ import CategoryMaster  from '../../college/pages/masters/CategoryMaster.jsx'
 
 const TABS = [
   { key: 'roles',      label: 'Roles & Staff' },
-  { key: 'programs',   label: 'Programs' },
   { key: 'faculty',    label: 'Program' },
   // { key: 'class',      label: 'Classes' },
   { key: 'course',     label: 'Courses' },
@@ -187,14 +185,6 @@ export default function CollegeList() {
             {selected.city && (
               <span className="text-sm text-slate-500">{selected.city}</span>
             )}
-            <UniversitySelect
-              college={selected}
-              onChanged={(university_id, university_name) => {
-                setSelected(s => ({ ...s, university_id, university_name }))
-                setColleges(list => list.map(c =>
-                  c.id === selected.id ? { ...c, university_id, university_name } : c))
-              }}
-            />
             <button
               onClick={e => toggleEnabled(selected, e)}
               disabled={toggling === selected.id}
@@ -341,7 +331,6 @@ export default function CollegeList() {
         {/* Tab content */}
         <div>
           {tab === 'roles'     && <RolesPanel      college={selected} />}
-          {tab === 'programs'  && <ProgramsPanel   college={selected} />}
           {tab === 'faculty'   && <FacultyMaster   collegeId={selected.id} />}
           {tab === 'class'     && <ClassMaster     collegeId={selected.id} />}
           {tab === 'course'    && <CourseMaster     collegeId={selected.id} />}
@@ -477,41 +466,5 @@ function LogoUpload({ college, onUploaded }) {
       />
       {error && <span className="text-xs font-semibold text-red-600">{error}</span>}
     </div>
-  )
-}
-
-// Which university's catalogue this college draws its programs from. Changing
-// it deliberately does not re-seed — the Programs tab has an explicit sync, so
-// a mis-click never writes a pile of new programs.
-function UniversitySelect({ college, onChanged }) {
-  const [unis, setUnis] = useState([])
-  const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    getUniversities().then(r => setUnis(r.data.data || [])).catch(() => {})
-  }, [])
-
-  async function change(e) {
-    const id = e.target.value ? parseInt(e.target.value) : null
-    setSaving(true)
-    try {
-      await updateAdminCollege(college.id, { university_id: id })
-      onChanged(id, unis.find(u => u.id === id)?.name || null)
-    } catch {
-      alert('Failed to update university.')
-    } finally { setSaving(false) }
-  }
-
-  return (
-    <select
-      value={college.university_id ?? ''}
-      onChange={change}
-      disabled={saving}
-      title="University whose program catalogue this college receives"
-      className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-400 disabled:opacity-50"
-    >
-      <option value="">— No university —</option>
-      {unis.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-    </select>
   )
 }

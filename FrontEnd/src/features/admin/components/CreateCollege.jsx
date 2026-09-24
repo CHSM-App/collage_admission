@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { createCollege } from '../../../services/collegeService.js'
-import { getUniversities } from '../../../services/adminService.js'
 import Button from '../../../shared/components/Button.jsx'
 import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
 
@@ -8,7 +7,6 @@ const EMPTY = {
   name: '', address: '', city: '', phone: '',
   email: '', admin_email: '', admin_password: '', college_code: '', application_fee: '',
   college_type: 'general',
-  university_id: '',
 }
 
 const COLLEGE_TYPE_OPTIONS = [
@@ -35,12 +33,6 @@ export default function CreateCollege({ onCreated }) {
   const [success, setSuccess]   = useState(null)
   const [error, setError]       = useState('')
   const [showPass, setShowPass] = useState(false)
-  const [unis, setUnis]         = useState([])
-
-  // The new college receives this university's whole program catalogue on save.
-  useEffect(() => {
-    getUniversities().then(r => setUnis(r.data.data || [])).catch(() => {})
-  }, [])
 
   function handleChange(e) {
     let value = e.target.value
@@ -83,11 +75,6 @@ export default function CreateCollege({ onCreated }) {
             <span className="font-mono font-bold">{success.college_code}</span>
           </p>
           <p className="text-sm text-emerald-700">
-            {success.programs_seeded > 0
-              ? <>{success.programs_seeded} program{success.programs_seeded === 1 ? '' : 's'} seeded from the university catalogue — hide any it does not offer from its Programs tab.</>
-              : <>No programs seeded. Assign a university on the college, then use “Sync from catalogue”.</>}
-          </p>
-          <p className="text-sm text-emerald-700">
             Admission link: <span className="font-mono">{window.location.origin}/c/{success.college_code}</span>
           </p>
         </div>
@@ -108,19 +95,6 @@ export default function CreateCollege({ onCreated }) {
               ))}
             </select>
             <p className="mt-1 text-xs text-slate-400">Determines which admission-form fields this college collects.</p>
-          </Field>
-          <Field label="University">
-            <select name="university_id" value={form.university_id} onChange={handleChange} className={inputCls}>
-              <option value="">— None —</option>
-              {unis.map(u => (
-                <option key={u.id} value={u.id}>{u.name} ({u.program_count} programs)</option>
-              ))}
-            </select>
-            <p className="mt-1 text-xs text-slate-400">
-              The college receives all of this university&rsquo;s programs on creation, with the codes
-              that coursemaster/groupmaster imports rely on. Hide the ones it does not offer from
-              the college&rsquo;s Programs tab afterwards.
-            </p>
           </Field>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="City" required>
