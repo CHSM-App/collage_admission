@@ -540,7 +540,7 @@ router.get('/:collegeId/applications', requirePerm('review_application'), async 
     `;
 
     // Use separate request objects — mssql requests are single-use
-    const [countRes, dataRes, statusCountRes] = await Promise.all([
+    const [countRes, dataRes, statusCountRes, optionsRes] = await Promise.all([
       makeRequest().query(`SELECT COUNT(*) AS total ${joins} ${where}`),
       makeRequest().query(`
         SELECT
@@ -556,6 +556,15 @@ router.get('/:collegeId/applications', requirePerm('review_application'), async 
         ${paginateQuery(offset, limit)}
       `),
       makeBaseRequest().query(`SELECT a.status, COUNT(*) AS cnt ${joins} ${whereBase} GROUP BY a.status`),
+      // Filter dropdown options over ALL of the college's applications, ignoring every
+      // filter — so choosing one filter never shrinks the choices in the others.
+      pool.request().input('col', collegeId).query(`
+        SELECT DISTINCT a.course_id, a.year_of_study, a.app_division,
+          COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name
+        FROM applications a
+        LEFT JOIN faculty_master fm ON fm.code_no = a.course_id AND fm.college_id = a.college_id
+        WHERE a.college_id = @col AND a.status <> 'draft'
+      `),
     ]);
 
     // status_counts: { <status>: <count>, ... } and a grand total across all statuses.
@@ -569,6 +578,13 @@ router.get('/:collegeId/applications', requirePerm('review_application'), async 
     const resp = paginatedResponse(dataRes.recordset, countRes.recordset[0].total, page, limit);
     resp.status_counts = status_counts;
     resp.status_total  = status_total;
+    const rows = optionsRes.recordset;
+    const courses = new Map(rows.filter(r => r.course_id).map(r => [r.course_id, r.course_name]));
+    resp.filter_options = {
+      courses:   [...courses].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
+      years:     [...new Set(rows.map(r => r.year_of_study).filter(Boolean))].sort(),
+      divisions: [...new Set(rows.map(r => r.app_division).filter(Boolean))].sort(),
+    };
     return res.json(resp);
   } catch (err) {
     logger.error({ err });
@@ -655,7 +671,10 @@ router.get('/:collegeId/applications/export', requirePerm('review_application'),
 
 router.get('/:collegeId/applications/:appId', requirePerm('review_application'), async (req, res) => {
   try {
-    const result = await db.request()
+    // All four lookups need only the id, so they run together (one DB round trip
+    // instead of four). The college check is in the first; the rest are discarded on 404.
+    const [result, docs, examRes, activityRes] = await Promise.all([
+      db.request()
       .input('id',  parseInt(req.params.appId))
       .input('col', parseInt(req.params.collegeId))
       .query(`
@@ -674,13 +693,8 @@ router.get('/:collegeId/applications/:appId', requirePerm('review_application'),
         LEFT JOIN faculty_master fm  ON fm.code_no = a.course_id AND fm.college_id = a.college_id
         JOIN colleges       col ON col.id    = a.college_id
         WHERE a.id = @id AND a.college_id = @col
-      `);
-
-    if (result.recordset.length === 0) {
-      return res.status(404).json({ success: false, message: 'Application not found.' });
-    }
-
-    const docs = await db.request()
+      `),
+      db.request()
       .input('appId', parseInt(req.params.appId))
       .query(`
         SELECT ad.id, ad.is_verified, ad.verified_at,
@@ -691,9 +705,8 @@ router.get('/:collegeId/applications/:appId', requirePerm('review_application'),
         JOIN student_documents sd ON sd.id = ad.student_document_id
         JOIN document_types    dt ON dt.id = ad.document_type_id
         WHERE ad.application_id = @appId
-      `);
-
-    const examRes = await db.request()
+      `),
+      db.request()
       .input('appId', parseInt(req.params.appId))
       .query(`
         SELECT
@@ -710,15 +723,8 @@ router.get('/:collegeId/applications/:appId', requirePerm('review_application'),
         FROM application_previous_exam ape
         WHERE ape.application_id = @appId
         ORDER BY ape.id
-      `);
-
-    const exams = {};
-    for (const row of examRes.recordset) {
-      exams[row.exam_type || 'SSC'] = row;
-    }
-    const exam = examRes.recordset[0] || null;
-
-    const activityRes = await db.request()
+      `),
+      db.request()
       .input('appId', parseInt(req.params.appId))
       .query(`
         SELECT id, action, actor_role, note,
@@ -726,7 +732,18 @@ router.get('/:collegeId/applications/:appId', requirePerm('review_application'),
         FROM application_activity_log
         WHERE application_id = @appId
         ORDER BY created_at ASC
-      `);
+      `),
+    ]);
+
+    if (result.recordset.length === 0) {
+      return res.status(404).json({ success: false, message: 'Application not found.' });
+    }
+
+    const exams = {};
+    for (const row of examRes.recordset) {
+      exams[row.exam_type || 'SSC'] = row;
+    }
+    const exam = examRes.recordset[0] || null;
 
     // Parse the college's features_config so the review can gate fields using the
     // authoritative config (not a separately-cached self-features fetch).
@@ -868,9 +885,15 @@ async function computeFeeForApp(appId, collegeId, divisionOverride) {
     .input('id',  mssqlShared.Int, appId)
     .input('col', mssqlShared.Int, collegeId)
     .query(`
-      SELECT course_id, year_of_study, academic_year, app_division, app_category,
-             app_special_status, fees_category, student_id
-      FROM applications WHERE id=@id AND college_id=@col
+      SELECT a.course_id, a.year_of_study, a.academic_year, a.app_division, a.app_category,
+             a.app_special_status, a.fees_category, a.student_id,
+             -- prior confirmed admission at this college (same query, saves a round trip)
+             CASE WHEN EXISTS (
+               SELECT 1 FROM applications p
+               WHERE p.student_id = a.student_id AND p.college_id = a.college_id AND p.id <> a.id
+                 AND p.status IN ('confirmed', 'fees_paid', 'roll_assigned')
+             ) THEN 1 ELSE 0 END AS has_prior_admission
+      FROM applications a WHERE a.id=@id AND a.college_id=@col
     `);
   if (!r.recordset.length) return null;
   const a = r.recordset[0];
@@ -879,21 +902,7 @@ async function computeFeeForApp(appId, collegeId, divisionOverride) {
   // Determine if this student is new to this college:
   // FY (year 1) → always new.
   // Higher years → new if no prior confirmed/fees_paid application exists at this college.
-  let isNewStudent = a.year_of_study === 1;
-  if (!isNewStudent) {
-    const priorRes = await db.request()
-      .input('sid', mssqlShared.Int, a.student_id)
-      .input('col', mssqlShared.Int, collegeId)
-      .input('cur', mssqlShared.Int, appId)
-      .query(`
-        SELECT TOP 1 id FROM applications
-        WHERE student_id = @sid
-          AND college_id = @col
-          AND id <> @cur
-          AND status IN ('confirmed', 'fees_paid', 'roll_assigned')
-      `);
-    isNewStudent = priorRes.recordset.length === 0;
-  }
+  const isNewStudent = a.year_of_study === 1 || !a.has_prior_admission;
 
   const result = await feeSvc.compute({
     collegeId,

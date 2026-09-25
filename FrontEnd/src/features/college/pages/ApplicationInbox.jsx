@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useApplicationsList } from '../hooks/useApplicationsList.js'
 import { useCollegeFeatures } from '../hooks/useCollegeFeatures.js'
@@ -72,27 +72,15 @@ export default function ApplicationInbox({ collegeId, collegeName = '' }) {
   const setFilterDivision = v => setParam('ib_div',    v)
   const setPendingLink    = v => setParam('ib_plink',  v ? '1' : '')
 
-  const { apps, loading, pagination, fetchApps, statusCounts, statusTotal } = useApplicationsList(collegeId, {
+  const { apps, loading, pagination, fetchApps, statusCounts, statusTotal, filterOptions } = useApplicationsList(collegeId, {
     page, filterStatus, filterCourse, filterYear, filterDivision, pendingLink,
   })
 
-  const courseOptions = useMemo(() => {
-    const map = new Map()
-    apps.forEach(a => { if (a.course_id) map.set(a.course_id, a.course_name) })
-    return [...map.entries()].sort((a, b) => a[1].localeCompare(b[1]))
-  }, [apps])
-
-  const yearOptions = useMemo(() => {
-    const set = new Set(apps.map(a => a.year_of_study).filter(Boolean))
-    return [...set].sort()
-  }, [apps])
-
-  const [seenDivisions, setSeenDivisions] = useState([])
-  useEffect(() => {
-    const fresh = apps.map(a => a.app_division).filter(Boolean)
-    if (fresh.length > 0)
-      setSeenDivisions(prev => [...new Set([...prev, ...fresh])].sort())
-  }, [apps])
+  // From the server, over all applications — not the current (filtered) page, which
+  // made the other dropdowns shrink to whatever matched the chosen filter.
+  const courseOptions = filterOptions.courses.map(c => [c.id, c.name])
+  const yearOptions   = filterOptions.years
+  const seenDivisions = filterOptions.divisions
 
   // Client-side search filter (haystack join) then sort via shared hook
   const searched = useMemo(() => {

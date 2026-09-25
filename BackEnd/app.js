@@ -5,6 +5,7 @@ var cookieParser= require('cookie-parser');
 var logger      = require('morgan');
 var cors        = require('cors');
 var helmet      = require('helmet');
+var compression = require('compression');
 var pinoLogger  = require('./config/logger');
 var { startOtpCleanup } = require('./jobs/otpCleanup');
 
@@ -85,6 +86,8 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 app.use(logger('dev'));
+// gzip responses (JS bundles and JSON shrink ~70%)
+app.use(compression());
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
 app.use(cookieParser());
@@ -100,6 +103,10 @@ app.use('/uploads',       uploadsRouter);
 // build empties that directory on every deploy.
 app.use('/logos',         express.static(path.join(__dirname, 'uploads', 'logos')));
 
+// Build files carry a content hash in their name, so they never change — let
+// browsers keep them for a year instead of re-checking every file on every visit.
+// index.html (below) stays revalidated, so a new deploy is still picked up at once.
+app.use('/assets', express.static(path.join(__dirname, 'public', 'assets'), { maxAge: '1y', immutable: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ── SPA navigation fallback ──────────────────────────────────

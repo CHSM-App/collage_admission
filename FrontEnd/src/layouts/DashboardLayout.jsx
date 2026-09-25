@@ -66,6 +66,8 @@ function getDisplayName(user) {
 export default function DashboardLayout() {
   const location = useLocation()
   const navigate  = useNavigate()
+  const pageParams = new URLSearchParams(location.search)
+  const pageKey    = `${location.pathname}|${pageParams.get('section') || ''}|${pageParams.get('app_id') || ''}`
   const college   = useCollege()   // null on the college/admin dashboards
   const { user, role, logout } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -429,7 +431,10 @@ export default function DashboardLayout() {
         </header>
 
         <main className={`mx-auto ${contentWidth} px-4 py-6 sm:px-5 sm:py-8`}>
-          <ErrorBoundary key={location.pathname + location.search}>
+          {/* Reset the boundary per page (path + section + app), NOT per query string:
+              search boxes and filters live in the URL, and a key that changed on every
+              keystroke remounted the whole page, dropping input focus mid-typing. */}
+          <ErrorBoundary key={pageKey}>
             <Outlet />
           </ErrorBoundary>
         </main>

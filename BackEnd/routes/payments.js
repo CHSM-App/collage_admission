@@ -554,12 +554,10 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
     }
     const app = appRes.recordset[0];
 
-    const feeInfo = await getCollegeFeTotal(app);
-    const totalFee = feeInfo?.source === 'manual'
-      ? (feeInfo?.total_fee ?? 0)
-      : (feeInfo?.student_payable ?? feeInfo?.total_fee ?? 0);
-
-    // Fetch fee breakdown from FeeDeterminationService for head-level payment display
+    // Everything below depends only on `app`, so fetch it all at once — the DB is a
+    // network hop away and running these one after another cost ~1.5 s per call.
+    // Fee breakdown from FeeDeterminationService for head-level payment display
+    const breakdownP = (async () => {
     let breakdown = [];
     try {
       // Determine if student is new to this college:
@@ -597,8 +595,13 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
         return t !== 'misc' && t !== 'examfees';
       });
     } catch (_) { /* breakdown stays empty if fee not configured */ }
+    return breakdown;
+    })();
 
-    const paidRes = await db.request()
+    const [feeInfo, breakdown, paidRes, instRes, linkRes] = await Promise.all([
+      getCollegeFeTotal(app),
+      breakdownP,
+      db.request()
       .input('appId', mssql.Int, appId)
       .query(`
         SELECT p.id, p.payment_type, p.amount, p.gateway, p.gateway_txnid, p.gateway_payment_id, p.completed_at, p.receipt_no,
@@ -607,7 +610,18 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
         LEFT JOIN payment_link_tokens plt ON plt.gateway_txnid = p.gateway_txnid AND plt.gateway_txnid IS NOT NULL
         WHERE p.application_id = @appId AND p.payment_type = 'college_fee' AND p.status = 'success'
         ORDER BY p.completed_at
-      `);
+      `),
+      db.request()
+        .input('appId', mssql.Int, appId)
+        .query(`SELECT installment_no, due_date, amount FROM fee_installments WHERE application_id=@appId ORDER BY installment_no`),
+      // Only used when no fee is configured; cheap enough to always fetch alongside
+      db.request()
+        .input('appId', mssql.Int, appId)
+        .query(`SELECT TOP 1 amount FROM payment_link_tokens WHERE application_id=@appId AND used=0 AND expires_at > GETDATE() ORDER BY created_at DESC`),
+    ]);
+    const totalFee = feeInfo?.source === 'manual'
+      ? (feeInfo?.total_fee ?? 0)
+      : (feeInfo?.student_payable ?? feeInfo?.total_fee ?? 0);
     const paidRecords = paidRes.recordset;
     const totalPaid   = paidRecords.reduce((s, p) => s + parseFloat(p.amount), 0);
 
@@ -655,10 +669,7 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
       return clearedBreakdown.find(c => c.fees_code === h.fees_code) || h;
     });
 
-    // Fetch installment plan
-    const instRes = await db.request()
-      .input('appId', mssql.Int, appId)
-      .query(`SELECT installment_no, due_date, amount FROM fee_installments WHERE application_id=@appId ORDER BY installment_no`);
+    // Installment plan (fetched above)
     const installments = instRes.recordset.map(r => ({ ...r, amount: parseFloat(r.amount) }));
 
     // Compute current due amount from installment plan:
@@ -682,9 +693,6 @@ router.get('/college-fee-status/:applicationId', async (req, res) => {
     let effectiveTotalFee = effectiveTotalFeeBase || 0;
     let pendingLinkAmount = null;
     if (effectiveTotalFee === 0) {
-      const linkRes = await db.request()
-        .input('appId', mssql.Int, appId)
-        .query(`SELECT TOP 1 amount FROM payment_link_tokens WHERE application_id=@appId AND used=0 AND expires_at > GETDATE() ORDER BY created_at DESC`);
       if (linkRes.recordset.length) {
         pendingLinkAmount = parseFloat(linkRes.recordset[0].amount);
         effectiveTotalFee = pendingLinkAmount;

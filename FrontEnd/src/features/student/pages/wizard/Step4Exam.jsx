@@ -101,15 +101,15 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
   }
 
   const COLS = [
-    { key: 'institute',      label: 'Name of Institute with Place *', width: 'w-[19%]', placeholder: 'e.g. R K High School, Vengurla' },
-    { key: 'board',          label: 'Board / University *',           width: 'w-[11%]', placeholder: 'e.g. Kolhapur' },
-    { key: 'month_year',     label: 'Month & Year of Passing *',      width: 'w-[14%]', placeholder: 'YYYY-MM' },
-    { key: 'seat_no',        label: 'Seat No. *',                     width: 'w-[10%]', placeholder: 'e.g. M123456' },
-    { key: 'marks_obtained', label: 'Marks Obtained *',               width: 'w-[8%]',  placeholder: '450' },
-    { key: 'marks_max',      label: 'Out of *',                       width: 'w-[7%]',  placeholder: '500' },
-    { key: 'percentage',     label: '% *',                            width: 'w-[7%]',  placeholder: 'Auto', readOnly: true },
-    { key: 'class_grade',    label: 'Class / Grade *',                width: 'w-[7%]',  placeholder: 'A+' },
-    { key: 'remark',         label: 'Remark',                         width: 'w-[10%]', placeholder: 'Pass' },
+    { key: 'institute',      label: 'Name of Institute with Place *', width: 'w-[19%]' },
+    { key: 'board',          label: 'Board / University *',           width: 'w-[11%]' },
+    { key: 'month_year',     label: 'Month & Year of Passing *',      width: 'w-[14%]' },
+    { key: 'seat_no',        label: 'Seat No. *',                     width: 'w-[10%]' },
+    { key: 'marks_obtained', label: 'Marks Obtained *',               width: 'w-[8%]' },
+    { key: 'marks_max',      label: 'Out of *',                       width: 'w-[7%]' },
+    { key: 'percentage',     label: '% *',                            width: 'w-[7%]', readOnly: true },
+    { key: 'class_grade',    label: 'Class / Grade *',                width: 'w-[7%]' },
+    { key: 'remark',         label: 'Remark',                         width: 'w-[10%]' },
   ]
 
   return (
@@ -155,7 +155,6 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
                           value={row[col.key] || ''}
                           onChange={e => setRowField(type, col.key, e.target.value)}
                           readOnly={col.readOnly || readOnly}
-                          placeholder={readOnly ? '' : col.placeholder}
                           className={`w-full min-w-0 px-2 py-1.5 text-sm rounded border-0 outline-none focus:ring-2 focus:ring-blue-200 focus:bg-blue-50 transition ${
                             col.readOnly || readOnly
                               ? 'bg-slate-100 text-slate-500 cursor-default'

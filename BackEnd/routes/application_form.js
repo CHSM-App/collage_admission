@@ -94,6 +94,12 @@ router.post('/applications/init', async (req, res) => {
   }
 
   try {
+    // Applying to several courses is fine until one is confirmed; after that, no new
+    // application at this college for the same academic year.
+    const confirmedAdmission = await admissionGuard.findConfirmedFor(parseInt(student_id), parseInt(college_id), academic_year);
+    if (confirmedAdmission) {
+      return res.status(409).json({ success: false, message: admissionGuard.alreadyAdmittedMessage(confirmedAdmission), admission_confirmed: true });
+    }
     // The account may no longer exist (e.g. deleted while the user still holds a
     // valid session). Fail with a clear message instead of a raw FK violation.
     const studentExists = await db.request()
@@ -318,6 +324,12 @@ router.post('/applications/init-by-college', async (req, res) => {
   }
 
   try {
+    // Applying to several courses is fine until one is confirmed; after that, no new
+    // application at this college for the same academic year.
+    const confirmedAdmission = await admissionGuard.findConfirmedFor(parseInt(student_id), parseInt(college_id), academic_year);
+    if (confirmedAdmission) {
+      return res.status(409).json({ success: false, message: admissionGuard.alreadyAdmittedMessage(confirmedAdmission), admission_confirmed: true });
+    }
     // Guard: the selected student must still exist (avoids a raw FK violation).
     const studentExists = await db.request()
       .input('sid', mssql.Int, parseInt(student_id))
@@ -366,17 +378,17 @@ router.post('/applications/init-by-college', async (req, res) => {
     if (existing.recordset.length > 0) {
       const draft = existing.recordset[0];
 
-      // A draft the STUDENT started is theirs — the college must not take it over.
-      // Doing so would both hijack work the student is still doing and leave the
-      // application marked `created_by_role = 'student'`, sending a college-filled
-      // form through the full scrutiny pipeline instead of direct approval.
+      // A draft the STUDENT started for this same course: the college takes it over
+      // (the student is at the counter) instead of blocking or duplicating it. It
+      // becomes a college entry, so it gets direct approval on fee payment like any
+      // other college-filled form; what the student already filled is kept.
       if (draft.created_by_role !== 'college') {
-        return res.status(409).json({
-          success: false,
-          message: 'This student has already started an application for this course and it is still in progress. Ask them to complete and pay for it, or cancel their draft first.',
-          student_draft: true,
-          application_id: draft.id,
-        });
+        await db.request()
+          .input('id',    mssql.Int,      draft.id)
+          .input('actor', mssql.NVarChar, String(req.user?.staff_id || req.user?.id || 'college'))
+          .query(`UPDATE applications SET created_by_role = 'college', updated_at = GETDATE(), updated_by = @actor
+                  WHERE id = @id AND status = 'draft'`);
+        await logActivity(draft.id, 'application_updated', 'college', 'College took over the draft the student had started.');
       }
 
       return res.json({
@@ -1583,6 +1595,10 @@ router.get('/applications/:id/subject-selections', async (req, res) => {
 // ── POST /api/applications/:id/subject-selections ───────────
 // Save subject selections for a semester. Body: { semester, subjects: [{code, title}] }
 router.post('/applications/:id/subject-selections', async (req, res) => {
+  // Students choose a subject GROUP while applying; they no longer pick individual subjects.
+  if (req.user?.role === 'student') {
+    return res.status(403).json({ success: false, message: 'Subjects come from the subject group chosen in the application.' });
+  }
   const appId = parseInt(req.params.id);
   const { semester, subjects } = req.body;
 

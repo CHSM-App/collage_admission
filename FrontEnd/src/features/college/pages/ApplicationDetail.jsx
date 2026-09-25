@@ -11,6 +11,7 @@ import CollegeCollectPayPanel from '../components/CollegeCollectPayPanel.jsx'
 import { SkeletonDetail, SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 import { getErrorMessage } from '../../../shared/hooks/useNetworkError.js'
 import { useToast } from '../../../context/ToastContext.jsx'
+import scrollToField from '../../../shared/scrollToField.js'
 
 const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000/').replace(/\/$/, '')
 
@@ -97,6 +98,12 @@ export default function ApplicationDetail({ collegeId, appId }) {
   }
 
   useEffect(() => { fetchApp() }, [appId, collegeId])
+
+  // The Correction / Reject / Cancel panels open below the buttons — bring the
+  // one just opened into view and put the cursor in its text box.
+  useEffect(() => { if (showCorrection) scrollToField('correction_note') }, [showCorrection])
+  useEffect(() => { if (showReject)     scrollToField('reject_reason')   }, [showReject])
+  useEffect(() => { if (showCancel)     scrollToField('cancel_reason')   }, [showCancel])
 
   useEffect(() => {
     if (!app) return
@@ -328,9 +335,8 @@ export default function ApplicationDetail({ collegeId, appId }) {
       <DocumentsSection documents={app.documents} />
 
       {/* ── Selected Subjects ── */}
-      {['fees_paid', 'roll_assigned', 'enrolled'].includes(d.status) && (
-        <SelectedSubjectsSection appId={appId} />
-      )}
+      {/* Groups are chosen while applying, subjects after roll allotment — show whatever exists */}
+      <SelectedSubjectsSection appId={appId} />
 
       {error && (
         <p className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</p>
@@ -534,7 +540,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
         <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 space-y-3">
           <p className="text-sm font-semibold text-orange-800">Correction note (sent to student)</p>
           <p className="text-xs text-orange-600">Describe clearly what needs to be corrected. The student will see this and can edit and resubmit their application.</p>
-          <textarea
+          <textarea name="correction_note"
             rows={4}
             value={correctionNote}
             onChange={e => setCorrectionNote(e.target.value)}
@@ -550,7 +556,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
       {canReview && showReject && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-3">
           <p className="text-sm font-semibold text-red-800">Rejection reason (shown to student)</p>
-          <textarea
+          <textarea name="reject_reason"
             rows={3}
             value={reason}
             onChange={e => setReason(e.target.value)}
@@ -566,7 +572,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
       {canReview && showCancel && (
         <div className="rounded-lg border border-orange-200 bg-orange-50 p-4 space-y-3">
           <p className="text-sm font-semibold text-orange-800">Cancellation reason</p>
-          <textarea
+          <textarea name="cancel_reason"
             rows={3}
             value={reason}
             onChange={e => setReason(e.target.value)}
@@ -700,13 +706,13 @@ function SelectedSubjectsSection({ appId }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
       <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
-        <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Selected Subjects</p>
+        <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Subject Group &amp; Subjects</p>
       </div>
       <div className="px-4 py-3">
         {loading ? (
           <SkeletonLines rows={3} />
         ) : !hasAny ? (
-          <p className="text-sm text-slate-400">No subjects selected yet.</p>
+          <p className="text-sm text-slate-400">No subject group or subjects selected yet.</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {[1, 2].map(sem => {
@@ -851,15 +857,6 @@ function InstallmentPlanInput({ installments, onChange, feeTotal, onError }) {
   // Which rows have a value entered
   const filled = installments.map(i => i.amount !== '' && parseFloat(i.amount) > 0)
 
-  // Fixed installments: contiguous filled rows from the start
-  // e.g. [filled, filled, empty, empty] → 2 fixed
-  // e.g. [filled, empty, filled, empty] → 1 fixed (gap breaks the chain)
-  let fixedCount = 0
-  for (let i = 0; i < 4; i++) {
-    if (filled[i]) fixedCount = i + 1
-    else break
-  }
-
   const instTotal = installments.reduce((s, inst) => {
     const v = parseFloat(inst.amount)
     return s + (isNaN(v) ? 0 : v)
@@ -886,16 +883,10 @@ function InstallmentPlanInput({ installments, onChange, feeTotal, onError }) {
               <th className="px-3 py-2 text-left font-semibold">Installment</th>
               <th className="px-3 py-2 text-left font-semibold">Due Date</th>
               <th className="px-3 py-2 text-left font-semibold">Amount (₹)</th>
-              <th className="px-3 py-2 text-left font-semibold w-20">Type</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
             {installments.map((inst, idx) => {
-              const isFixed = filled[idx] && idx < fixedCount
-              const isFree  = filled[idx] && idx === fixedCount - 1 && !filled[idx + 1]
-                                && fixedCount > 0 && instTotal < (feeTotal || 0) - 0.01
-              // A row is "free last" if it's the last filled and doesn't reach total
-              const isFreeLast = filled[idx] && !filled[idx + 1] && instTotal < (feeTotal || 0) - 0.01 && fixedCount > 0
               return (
                 <tr key={idx} className={filled[idx] ? '' : 'opacity-50'}>
                   <td className="px-3 py-2 font-semibold text-slate-700">Installment {idx + 1}</td>
@@ -919,15 +910,6 @@ function InstallmentPlanInput({ installments, onChange, feeTotal, onError }) {
                       />
                     </div>
                   </td>
-                  <td className="px-3 py-2">
-                    {!filled[idx] ? (
-                      <span className="text-slate-300">—</span>
-                    ) : isFreeLast ? (
-                      <span className="text-xs text-amber-700 bg-amber-50 rounded-full px-2 py-0.5 font-semibold">Fixed</span>
-                    ) : filled[idx] ? (
-                      <span className="text-xs text-emerald-700 bg-emerald-50 rounded-full px-2 py-0.5 font-semibold">Fixed</span>
-                    ) : null}
-                  </td>
                 </tr>
               )
             })}
@@ -942,7 +924,6 @@ function InstallmentPlanInput({ installments, onChange, feeTotal, onError }) {
                     <span className="ml-2 text-amber-600 font-normal">(₹{(feeTotal - instTotal).toLocaleString('en-IN')} free)</span>
                   )}
                 </td>
-                <td />
               </tr>
             </tfoot>
           )}

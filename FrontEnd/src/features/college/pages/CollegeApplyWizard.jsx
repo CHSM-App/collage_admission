@@ -32,6 +32,7 @@ import StepIndicator from '../../../shared/components/StepIndicator.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import { SkeletonForm, SkeletonCards } from '../../../shared/components/Skeleton.jsx'
 import { useCollegePayment } from '../../../shared/hooks/useCollegePayment.js'
+import CollegeCollectPayPanel from '../components/CollegeCollectPayPanel.jsx'
 
 import Step2Personal  from '../../student/pages/wizard/Step2Personal.jsx'
 import Step3Other     from '../../student/pages/wizard/Step3Other.jsx'
@@ -1099,304 +1100,37 @@ function InstallmentPlanEditor({ applicationId, collegeId, feeTotal, existing, o
   )
 }
 
+// Step 7 payment area: optional installment plan + the same collect-payment panel
+// the application page uses, so both screens always behave identically.
 function CollegeFeePaySection({ applicationId, collegeId, onGoToInbox, onGoToDetail, onAddNew }) {
-  const [planVersion, setPlanVersion] = useState(0)
-  const [payMode,     setPayMode]     = useState(null)
-  const [amount,      setAmount]      = useState('')
-  const [note,        setNote]        = useState('')
-  const [linkPhone,   setLinkPhone]   = useState('')
-  const [linkSending, setLinkSending] = useState(false)
-  const [linkSent,    setLinkSent]    = useState(false)
-  const [linkErr,     setLinkErr]     = useState('')
-
-  const {
-    feeStatus: fs,
-    loading,
-    paying: saving,
-    payError: err,
-    paidMsg: msg,
-    payOnline,
-    payCash,
-    setPayError: setErr,
-    setPaidMsg: setMsg,
-  } = useCollegePayment(applicationId, collegeId, { refreshKey: planVersion })
-
-  const allPaid  = fs && fs.total_fee > 0 && fs.remaining <= 0
-  const amtDue   = fs ? (fs.current_due ?? fs.remaining) : 0
-  const amtIsFixed = fs && fs.installments?.length > 0 && amtDue < fs.remaining - 0.01
-
-  function fmtINR(n) { return `₹${Number(n).toLocaleString('en-IN')}` }
-
-  async function handleCash(e) {
-    e.preventDefault()
-    await payCash({ amount: parseFloat(amount), note }, {
-      onSuccess: () => { setAmount(''); setNote(''); setPayMode(null) },
-    })
-  }
-
-  async function handleOnline(e) {
-    e.preventDefault()
-    const amt = parseFloat(amount)
-    if (!amt || amt <= 0) { setErr('Enter a valid amount.'); return }
-    await payOnline(amt, { onSuccess: () => setPayMode(null) })
-  }
-
-  async function handleSendLink(e) {
-    e.preventDefault()
-    const phone = linkPhone.trim().replace(/\D/g, '')
-    if (phone.length < 10) { setLinkErr('Enter a valid 10-digit mobile number.'); return }
-    const amt = parseFloat(amount)
-    if (!amt || amt <= 0) { setLinkErr('Enter a valid amount.'); return }
-    setLinkSending(true); setLinkErr('')
-    try {
-      await sendPaymentLink({ application_id: applicationId, payment_type: 'college_fee', phone, amount: amt })
-      setLinkSent(true)
-    } catch (err) {
-      setLinkErr(err?.response?.data?.message || 'Failed to send link.')
-    } finally {
-      setLinkSending(false)
-    }
-  }
+  // Bumped on plan save or payment, so the plan editor and the panel re-read the fee status
+  const [feeVersion, setFeeVersion] = useState(0)
+  const { feeStatus: fs, loading } = useCollegePayment(applicationId, collegeId, { refreshKey: feeVersion })
+  const bump = () => setFeeVersion(v => v + 1)
 
   if (loading && !fs) return <SkeletonCards count={2} />
 
   return (
     <div className="space-y-4">
-    {/* Plan can be changed until something has been paid */}
-    {fs && fs.total_fee > 0 && !(fs.total_paid > 0) && (
-      <InstallmentPlanEditor
-        applicationId={applicationId}
-        collegeId={collegeId}
-        feeTotal={fs.total_fee}
-        existing={fs.installments}
-        onSaved={() => setPlanVersion(v => v + 1)}
-      />
-    )}
-    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Collect Fee Payment</p>
-          <p className="text-xs text-slate-400 mt-0.5">
-            {fs ? (allPaid ? 'All fees have been collected.' : `${fmtINR(fs.remaining)} remaining`) : ''}
-          </p>
-        </div>
-        {fs && (
-          allPaid
-            ? <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">Fully Paid</span>
-            : <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">Pending</span>
-        )}
+      {/* Plan can be changed until something has been paid */}
+      {fs && fs.total_fee > 0 && !(fs.total_paid > 0) && (
+        <InstallmentPlanEditor
+          key={JSON.stringify(fs.installments || [])}
+          applicationId={applicationId}
+          collegeId={collegeId}
+          feeTotal={fs.total_fee}
+          existing={fs.installments}
+          onSaved={bump}
+        />
+      )}
+
+      <CollegeCollectPayPanel appId={applicationId} collegeId={collegeId} refreshKey={feeVersion} onPaid={bump} />
+
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={onGoToDetail} variant="secondary">View Application Detail</Button>
+        <Button onClick={onAddNew} variant="secondary">+ Add New Application</Button>
+        <Button onClick={onGoToInbox} className="ml-auto">Go to Inbox →</Button>
       </div>
-
-      <div className="px-4 py-4 space-y-4">
-        {fs && (
-          <>
-            {/* Summary cards */}
-            <div className="grid grid-cols-3 gap-2 text-sm">
-              <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-center">
-                <p className="text-xs text-slate-400">Total Fee</p>
-                <p className="font-bold text-slate-950 mt-0.5">{fs.total_fee > 0 ? fmtINR(fs.total_fee) : '—'}</p>
-              </div>
-              <div className="rounded-lg bg-emerald-50 border border-emerald-100 p-3 text-center">
-                <p className="text-xs text-slate-400">Paid</p>
-                <p className="font-bold text-emerald-700 mt-0.5">{fmtINR(fs.total_paid)}</p>
-              </div>
-              <div className={`rounded-lg border p-3 text-center ${fs.remaining > 0 ? 'bg-amber-50 border-amber-100' : 'bg-slate-50 border-slate-100'}`}>
-                <p className="text-xs text-slate-400">Remaining</p>
-                <p className={`font-bold mt-0.5 ${fs.remaining > 0 ? 'text-amber-700' : 'text-slate-400'}`}>{fmtINR(fs.remaining)}</p>
-              </div>
-            </div>
-
-            {/* Fee head breakdown */}
-            {fs.breakdown?.filter(h => (h.fees_type || '').toLowerCase() !== 'platform').length > 0 && (
-              <div className="rounded-lg border border-slate-200 overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-semibold">Fee Head</th>
-                      <th className="px-3 py-2 text-right font-semibold w-24">Amount (₹)</th>
-                      <th className="px-3 py-2 text-right font-semibold w-24">Paid (₹)</th>
-                      <th className="px-3 py-2 text-center font-semibold w-20">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 bg-white">
-                    {fs.breakdown.filter(h => (h.fees_type || '').toLowerCase() !== 'platform').map(h => (
-                      <tr key={h.fees_code} className={h.status === 'paid' ? 'bg-emerald-50/40' : ''}>
-                        <td className="px-3 py-1.5 text-slate-700">
-                          {h.fees_head}
-                          {h.short_name && <span className="ml-1.5 text-slate-400">{h.short_name}</span>}
-                        </td>
-                        <td className="px-3 py-1.5 text-right font-mono text-slate-600">{parseFloat(h.amount).toLocaleString('en-IN')}</td>
-                        <td className="px-3 py-1.5 text-right font-mono text-slate-800">{h.paid_amount > 0 ? parseFloat(h.paid_amount).toLocaleString('en-IN') : '—'}</td>
-                        <td className="px-3 py-1.5 text-center">
-                          {h.status === 'paid'
-                            ? <span className="text-xs font-semibold text-emerald-700 bg-emerald-100 rounded-full px-2 py-0.5">Cleared</span>
-                            : h.status === 'partial'
-                            ? <span className="text-xs font-semibold text-amber-700 bg-amber-100 rounded-full px-2 py-0.5">Partial</span>
-                            : <span className="text-xs font-semibold text-slate-400 bg-slate-100 rounded-full px-2 py-0.5">Pending</span>
-                          }
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            {msg && <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800 font-medium">{msg}</div>}
-            {err && <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{err}</div>}
-
-            {allPaid && (
-              <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800 font-medium">
-                All fees have been paid in full.
-              </div>
-            )}
-
-            {/* Collect Payment mode chooser */}
-            {!allPaid && fs.total_fee > 0 && !payMode && (
-              <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Collect Payment</p>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    onClick={() => { setPayMode('cash'); setErr(''); setMsg(''); setAmount(String(amtDue)) }}
-                    className="flex flex-col items-center gap-1.5 rounded-xl border-2 border-slate-200 bg-white px-3 py-4 hover:border-slate-400 hover:bg-slate-50 transition"
-                  >
-                    <span className="text-xl">💵</span>
-                    <span className="text-xs font-semibold text-slate-800">Cash / Offline</span>
-                    <span className="text-xs text-slate-400 text-center leading-tight">Record cash received at counter</span>
-                  </button>
-                  <button
-                    onClick={() => { setPayMode('online'); setErr(''); setMsg(''); setAmount(String(amtDue)) }}
-                    className="flex flex-col items-center gap-1.5 rounded-xl border-2 border-slate-200 bg-white px-3 py-4 hover:border-blue-400 hover:bg-blue-50 transition"
-                  >
-                    <span className="text-xl">💳</span>
-                    <span className="text-xs font-semibold text-slate-800">Online (PayU)</span>
-                    <span className="text-xs text-slate-400 text-center leading-tight">Pay via UPI, card or netbanking</span>
-                  </button>
-                  <button
-                    onClick={() => { setPayMode('link'); setLinkErr(''); setLinkSent(false); setLinkPhone(''); setAmount(String(amtDue)) }}
-                    className="flex flex-col items-center gap-1.5 rounded-xl border-2 border-slate-200 bg-white px-3 py-4 hover:border-emerald-400 hover:bg-emerald-50 transition"
-                  >
-                    <span className="text-xl">📲</span>
-                    <span className="text-xs font-semibold text-slate-800">WhatsApp Link</span>
-                    <span className="text-xs text-slate-400 text-center leading-tight">Send payment link to student</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Cash form */}
-            {!allPaid && payMode === 'cash' && (
-              <form onSubmit={handleCash} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-slate-700">Record Cash / Offline Payment</p>
-                  <button type="button" onClick={() => { setPayMode(null); setErr('') }} className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
-                </div>
-                <div className="flex gap-3 items-end">
-                  <div className="flex-1">
-                    <label className="text-xs text-slate-500 mb-1 block">
-                      Amount (₹){amtIsFixed && <span className="ml-1 text-slate-400">(fixed instalment)</span>}
-                    </label>
-                    <input type="text" inputMode="numeric" value={amount}
-                      onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
-                      readOnly={amtIsFixed} placeholder={`Max ${fmtINR(fs.remaining)}`}
-                      className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 ${amtIsFixed ? 'bg-slate-100 border-slate-200 text-slate-600 cursor-not-allowed' : 'border-slate-200'}`}
-                      required />
-                  </div>
-                  <button type="submit" disabled={saving}
-                    className="shrink-0 rounded-lg bg-slate-900 text-white text-sm font-semibold px-4 py-2 hover:bg-slate-700 disabled:opacity-50 transition">
-                    {saving ? 'Saving…' : 'Collect Payment'}
-                  </button>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 mb-1 block">Note (optional)</label>
-                  <input type="text" value={note} onChange={e => setNote(e.target.value)}
-                    placeholder="e.g. Cash received at counter"
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
-                </div>
-              </form>
-            )}
-
-            {/* Online form */}
-            {!allPaid && payMode === 'online' && (
-              <form onSubmit={handleOnline} className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-blue-800">Online Payment via PayU</p>
-                  <button type="button" onClick={() => { setPayMode(null); setErr(''); setAmount('') }} className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
-                </div>
-                <div className="flex gap-3 items-end">
-                  <div className="flex-1">
-                    <label className="text-xs text-blue-700 mb-1 block">
-                      Amount (₹){amtIsFixed && <span className="ml-1 text-blue-400">(fixed instalment)</span>}
-                    </label>
-                    <input type="text" inputMode="numeric" value={amount}
-                      onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
-                      readOnly={amtIsFixed} placeholder={`Max ${fmtINR(fs.remaining)}`}
-                      className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${amtIsFixed ? 'bg-blue-100 border-blue-200 text-blue-700 cursor-not-allowed' : 'border-blue-200 bg-white'}`}
-                      required />
-                  </div>
-                  <button type="submit" disabled={saving}
-                    className="shrink-0 rounded-lg bg-blue-600 text-white text-sm font-semibold px-4 py-2 hover:bg-blue-700 disabled:opacity-50 transition">
-                    {saving ? 'Redirecting…' : 'Pay via PayU'}
-                  </button>
-                </div>
-                <p className="text-xs text-blue-600">You will be redirected to PayU for UPI, card, or netbanking payment.</p>
-              </form>
-            )}
-
-            {/* WhatsApp link form */}
-            {!allPaid && payMode === 'link' && (
-              <form onSubmit={handleSendLink} className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-emerald-800">Send Payment Link via WhatsApp</p>
-                  <button type="button" onClick={() => { setPayMode(null); setLinkErr(''); setLinkSent(false) }} className="text-xs text-slate-400 hover:text-slate-600">← Back</button>
-                </div>
-                {linkSent ? (
-                  <div className="rounded-lg bg-white border border-emerald-200 px-4 py-3 text-sm text-emerald-700 font-medium">
-                    ✓ Payment link sent to {linkPhone}. The student can pay via the link.
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex gap-3 items-end">
-                      <div className="flex-1">
-                        <label className="text-xs text-emerald-700 mb-1 block">
-                          Amount (₹){amtIsFixed && <span className="ml-1 text-emerald-500">(fixed instalment)</span>}
-                        </label>
-                        <input type="text" inputMode="numeric" value={amount}
-                          onChange={e => setAmount(e.target.value.replace(/[^0-9.]/g, ''))}
-                          readOnly={amtIsFixed} placeholder={`Max ${fmtINR(fs.remaining)}`}
-                          className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 ${amtIsFixed ? 'bg-emerald-100 border-emerald-200 text-emerald-700 cursor-not-allowed' : 'border-emerald-200 bg-white'}`}
-                          required />
-                      </div>
-                      <div className="flex-1">
-                        <label className="text-xs text-emerald-700 mb-1 block">Student Mobile Number</label>
-                        <input type="tel" inputMode="numeric" maxLength={10} value={linkPhone}
-                          onChange={e => setLinkPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                          placeholder="10-digit mobile"
-                          className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"
-                          required />
-                      </div>
-                    </div>
-                    {linkErr && <p className="text-xs text-red-600">{linkErr}</p>}
-                    <button type="submit" disabled={linkSending}
-                      className="w-full rounded-lg bg-emerald-600 text-white text-sm font-semibold px-4 py-2 hover:bg-emerald-700 disabled:opacity-50 transition">
-                      {linkSending ? 'Sending…' : 'Send via WhatsApp'}
-                    </button>
-                  </>
-                )}
-              </form>
-            )}
-          </>
-        )}
-
-        {/* Navigation */}
-        <div className="flex gap-2 pt-2">
-          <Button onClick={onGoToDetail} variant="secondary">View Application Detail</Button>
-          <Button onClick={onAddNew} variant="secondary">+ Add New Application</Button>
-          <Button onClick={onGoToInbox} className="ml-auto">Go to Inbox →</Button>
-        </div>
-      </div>
-    </div>
     </div>
   )
 }
@@ -1437,14 +1171,11 @@ function CollegeInstallmentInput({ installments, onChange, feeTotal, onError }) 
               <th className="px-3 py-2 text-left font-semibold text-slate-600 w-28">Installment</th>
               <th className="px-3 py-2 text-left font-semibold text-slate-600">Due Date</th>
               <th className="px-3 py-2 text-right font-semibold text-slate-600 w-32">Amount (₹)</th>
-              <th className="px-3 py-2 text-left font-semibold text-slate-600 w-20">Type</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
             {installments.map((inst, idx) => {
               const isFixed = filled[idx] && idx < fixedCount
-              const isFree  = filled[idx] && idx === fixedCount - 1 && !filled[idx + 1]
-                              && fixedCount > 0 && instTotal < (feeTotal || 0) - 0.01
               return (
                 <tr key={idx} className={isFixed ? 'bg-slate-50/70' : ''}>
                   <td className="px-3 py-1.5 font-medium text-slate-600">Installment {idx + 1}</td>
@@ -1464,9 +1195,6 @@ function CollegeInstallmentInput({ installments, onChange, feeTotal, onError }) 
                       placeholder="0"
                       className="w-24 rounded border border-slate-200 px-2 py-1 text-right text-xs focus:outline-none focus:ring-1 focus:ring-blue-300"
                     />
-                  </td>
-                  <td className="px-3 py-1.5 text-slate-400 text-xs">
-                    {isFixed && !isFree ? 'Fixed' : isFree ? 'Free' : '—'}
                   </td>
                 </tr>
               )

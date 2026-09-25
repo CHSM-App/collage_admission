@@ -627,6 +627,10 @@ router.get('/:id/subjects', async (req, res) => {
 
 // ── Submit subject selections ───────────────────────────────
 router.post('/:id/subjects', async (req, res) => {
+  // Students choose a subject GROUP while applying; they no longer pick individual subjects.
+  if (req.user?.role === 'student') {
+    return res.status(403).json({ success: false, message: 'Subjects come from the subject group chosen in the application.' });
+  }
   const appId      = parseInt(req.params.id);
   const { subject_ids } = req.body;
 

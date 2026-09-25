@@ -784,12 +784,17 @@ function RadioGroup({ name, options, value, onChange, disabled, clearable, autoV
         return (
           <label key={opt} className={`flex items-center gap-1.5 cursor-pointer ${disabled ? 'cursor-default' : ''}`}>
             <input
+              // Remount when checked flips: once a group is cleared to "nothing selected",
+              // the browser can keep the old dot filled even though React says unchecked.
+              key={`${opt}-${checked}`}
               type="radio"
               name={name}
               value={opt}
               checked={checked}
               disabled={disabled}
               onChange={() => !disabled && onChange(opt)}
+              // Clicking the selected option again clears it (clearable groups only)
+              onClick={() => { if (clearable && !disabled && value === opt) onChange('') }}
               className="h-3.5 w-3.5 accent-slate-800"
             />
             <span className={`text-sm px-2 py-0.5 rounded border transition select-none ${

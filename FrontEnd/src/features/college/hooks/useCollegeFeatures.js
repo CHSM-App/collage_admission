@@ -10,6 +10,17 @@ const DEFAULT_FEATURES = {
 
 // Per-college cache keyed by collegeId
 const cache = {}
+// In-flight request per college — layout, page and panels mount together and
+// would otherwise each fire their own identical request before the first returns.
+const pending = {}
+
+function loadFeatures(collegeId) {
+  pending[collegeId] ??= getCollegeSelfFeatures(collegeId)
+    .then(r => r.data.data || DEFAULT_FEATURES)
+    .catch(() => DEFAULT_FEATURES)
+    .then(f => { cache[collegeId] = f; delete pending[collegeId]; return f })
+  return pending[collegeId]
+}
 
 export function useCollegeFeatures(collegeId) {
   const [features, setFeatures] = useState(collegeId ? cache[collegeId] : null)
@@ -18,15 +29,10 @@ export function useCollegeFeatures(collegeId) {
   useEffect(() => {
     if (!collegeId) return
     if (cache[collegeId]) { setFeatures(cache[collegeId]); setLoading(false); return }
+    let live = true
     setLoading(true)
-    getCollegeSelfFeatures(collegeId)
-      .then(r => {
-        const f = r.data.data || DEFAULT_FEATURES
-        cache[collegeId] = f
-        setFeatures(f)
-      })
-      .catch(() => { cache[collegeId] = DEFAULT_FEATURES; setFeatures(DEFAULT_FEATURES) })
-      .finally(() => setLoading(false))
+    loadFeatures(collegeId).then(f => { if (live) { setFeatures(f); setLoading(false) } })
+    return () => { live = false }
   }, [collegeId])
 
   const collegeFeeEnabled = features?.payment?.college_fee !== false

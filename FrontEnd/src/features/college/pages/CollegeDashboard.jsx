@@ -1,26 +1,27 @@
-import { useState } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 import { STUDENT_PATHS } from '../../../app/routePaths.js'
 import { usePermissions }  from '../hooks/usePermissions.js'
 import { useCollegeFeatures } from '../hooks/useCollegeFeatures.js'
-import AdmissionPeriods    from './AdmissionPeriods.jsx'
-import ApplicationInbox    from './ApplicationInbox.jsx'
-import ApplicationDetail   from './ApplicationDetail.jsx'
-import RollNumbers         from './RollNumbers.jsx'
-import AddApplicationStart from './AddApplicationStart.jsx'
-import FacultyMaster       from './masters/FacultyMaster.jsx'
-import BankMaster          from './masters/BankMaster.jsx'
-import CourseMaster        from './masters/CourseMaster.jsx'
-import GroupMaster         from './masters/GroupMaster.jsx'
-import DivisionMaster      from './masters/DivisionMaster.jsx'
-import FeesMaster          from './masters/FeesMaster.jsx'
-import DocumentsMaster     from './masters/DocumentsMaster.jsx'
-import CategoryMaster      from './masters/CategoryMaster.jsx'
-import ExamRegistration    from './ExamRegistration.jsx'
-import FeeReceipts         from './FeeReceipts.jsx'
-import Reports             from './Reports.jsx'
-import Certificates from './certificates/Certificates.jsx'
+import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
+const AdmissionPeriods = lazy(() => import('./AdmissionPeriods.jsx'))
+const ApplicationInbox = lazy(() => import('./ApplicationInbox.jsx'))
+const ApplicationDetail = lazy(() => import('./ApplicationDetail.jsx'))
+const RollNumbers = lazy(() => import('./RollNumbers.jsx'))
+const AddApplicationStart = lazy(() => import('./AddApplicationStart.jsx'))
+const FacultyMaster = lazy(() => import('./masters/FacultyMaster.jsx'))
+const BankMaster = lazy(() => import('./masters/BankMaster.jsx'))
+const CourseMaster = lazy(() => import('./masters/CourseMaster.jsx'))
+const GroupMaster = lazy(() => import('./masters/GroupMaster.jsx'))
+const DivisionMaster = lazy(() => import('./masters/DivisionMaster.jsx'))
+const FeesMaster = lazy(() => import('./masters/FeesMaster.jsx'))
+const DocumentsMaster = lazy(() => import('./masters/DocumentsMaster.jsx'))
+const CategoryMaster = lazy(() => import('./masters/CategoryMaster.jsx'))
+const ExamRegistration = lazy(() => import('./ExamRegistration.jsx'))
+const FeeReceipts = lazy(() => import('./FeeReceipts.jsx'))
+const Reports = lazy(() => import('./Reports.jsx'))
+const Certificates = lazy(() => import('./certificates/Certificates.jsx'))
 
 function ReadOnlyBanner({ label }) {
   return (
@@ -39,7 +40,16 @@ function NavBlocked() {
   )
 }
 
+// Each section is its own download; this boundary keeps the sidebar/header on screen while one loads.
 export default function CollegeDashboard() {
+  return (
+    <Suspense fallback={<SkeletonLines rows={6} />}>
+      <DashboardSection />
+    </Suspense>
+  )
+}
+
+function DashboardSection() {
   const [searchParams] = useSearchParams()
   const section = searchParams.get('section') || 'overview'
   const appId   = searchParams.get('app_id')

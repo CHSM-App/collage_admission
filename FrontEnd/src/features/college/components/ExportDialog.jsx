@@ -9,7 +9,6 @@
  *   onClose        {() => void}
  */
 import { useState } from 'react'
-import * as XLSX from 'xlsx'
 import { exportApplications } from '../../../services/collegeAdminService.js'
 
 const YEAR_LABEL = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
@@ -61,7 +60,9 @@ function buildRows(data) {
   }))
 }
 
-function exportExcel(data, filename) {
+// xlsx is ~400 KB — loaded only when someone actually exports, not with the inbox
+async function exportExcel(data, filename) {
+  const XLSX = await import('xlsx')
   const rows = buildRows(data)
   const ws   = XLSX.utils.json_to_sheet(rows)
 
@@ -150,7 +151,7 @@ export default function ExportDialog({ collegeId, collegeName, courseOptions, ye
       const dateStr  = new Date().toISOString().slice(0, 10)
       const filename = `Applications_${collegeName.replace(/\s+/g, '_')}_${dateStr}`
 
-      if (format === 'excel') exportExcel(data, filename)
+      if (format === 'excel') await exportExcel(data, filename)
       else                    exportPDF(data, filename, collegeName, filterLabel)
 
       onClose()

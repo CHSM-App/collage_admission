@@ -42,11 +42,6 @@ function determineSlab(caste, specialStatus) {
  * Returns null if college has no category master configured (triggers fallback).
  */
 async function loadCollegeCategoryMaster(collegeId, pool) {
-  const countRes = await pool.request()
-    .input('col', mssql.Int, collegeId)
-    .query('SELECT COUNT(*) AS cnt FROM fees_categories WHERE college_id=@col AND is_active=1')
-  if (countRes.recordset[0].cnt === 0) return null
-
   const [catsRes, casteMapsRes, statusMapsRes] = await Promise.all([
     pool.request().input('col', mssql.Int, collegeId)
       .query('SELECT * FROM fees_categories WHERE college_id=@col AND is_active=1 ORDER BY display_order, slab_index'),
@@ -63,6 +58,7 @@ async function loadCollegeCategoryMaster(collegeId, pool) {
               JOIN fees_categories fc ON fc.id = fcs.fees_category_id
               WHERE fc.college_id=@col`),
   ])
+  if (catsRes.recordset.length === 0) return null
 
   return {
     categories:    catsRes.recordset,
@@ -98,6 +94,34 @@ function resolveSlabFromMaster(master, caste, specialStatus) {
   return { slab, slabReason }
 }
 
+// Outsider-specific fee heads for this class/year (only fetched for new students)
+function queryOutsiderHeads(resolvedPool, { collegeId, facultyMasterId, yearLevel, academicYear }) {
+  return resolvedPool.request()
+      .input('cid', mssql.Int,      collegeId)
+      .input('fid', mssql.Int,      facultyMasterId)
+      .input('yl',  mssql.NVarChar, yearLevel)
+      .input('ay',  mssql.NVarChar, academicYear || null)
+      .query(`
+        SELECT
+          fm.fees_code, fm.fees_head, fm.short_name, fm.fees_type, fm.is_refundable,
+          cf.cat1_amount AS cw_cat1, cf.cat2_amount AS cw_cat2,
+          cf.cat3_amount AS cw_cat3, cf.cat4_amount AS cw_cat4,
+          cf.cat5_amount AS cw_cat5, cf.cat6_amount AS cw_cat6,
+          cf.cat7_amount AS cw_cat7, cf.cat8_amount AS cw_cat8,
+          fm.fees_cat1_amount, fm.fees_cat2_amount, fm.fees_cat3_amount, fm.fees_cat4_amount,
+          fm.fees_cat5_amount, fm.fees_cat6_amount, fm.fees_cat7_amount, fm.fees_cat8_amount
+        FROM classwise_fees cf
+        JOIN fees_master fm ON fm.fees_code = cf.fees_code
+        WHERE cf.college_id = @cid
+          AND cf.faculty_master_id = @fid
+          AND cf.year_level = @yl
+          AND cf.student_type = 'Outsider'
+          AND (@ay IS NULL OR cf.academic_year = @ay)
+          AND fm.is_active = 1
+          AND (@ay IS NULL OR fm.academic_year = @ay)
+      `)
+}
+
 /**
  * compute({ collegeId, facultyMasterId, yearLevel, divisionLetter,
  *            caste, specialStatus, studentType, pool })
@@ -120,10 +144,11 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
   // pool may be a Promise (from db.js connect) — await it
   const resolvedPool = await Promise.resolve(pool)
 
-  // 1. Look up division funding type
-  let fundingType = null
-  if (divisionLetter && facultyMasterId && yearLevel) {
-    const divRes = await resolvedPool.request()
+  // The DB is a network hop away, so independent lookups run together:
+  //   wave 1 — division, category master, outsider heads
+  //   wave 2 — fee heads + outsider-only codes (both need the student type from wave 1)
+  const divP = (divisionLetter && facultyMasterId && yearLevel)
+    ? resolvedPool.request()
       .input('cid', mssql.Int,      collegeId)
       .input('fid', mssql.Int,      facultyMasterId)
       .input('yl',  mssql.NVarChar, yearLevel)
@@ -133,8 +158,12 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
         WHERE college_id=@cid AND faculty_master_id=@fid
           AND year_level=@yl AND division_letter=@dl AND is_active=1
       `)
-    if (divRes.recordset.length) fundingType = divRes.recordset[0].funding_type
-  }
+    : null
+  const outsiderP = (isNewStudent && facultyMasterId) ? queryOutsiderHeads(resolvedPool, { collegeId, facultyMasterId, yearLevel, academicYear }) : null
+  const [divRes, master, outsiderRes] = await Promise.all([divP, loadCollegeCategoryMaster(collegeId, resolvedPool), outsiderP])
+
+  // 1. Division funding type
+  const fundingType = divRes?.recordset.length ? divRes.recordset[0].funding_type : null
 
   // Derive student_type from division's funding_type.
   // funding_type 'Granted' → 'Grand', 'NonGranted' → 'NonGrand', 'Both' → use caller-supplied studentType.
@@ -147,15 +176,14 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
 
   // 2. Determine slab — dynamic master if available, else hardcoded fallback
   let slab, slabReason
-  const master = await loadCollegeCategoryMaster(collegeId, resolvedPool)
   if (master) {
     ;({ slab, slabReason } = resolveSlabFromMaster(master, caste, specialStatus))
   } else {
     ;({ slab, reason: slabReason } = determineSlab(caste, specialStatus))
   }
 
-  // 3. Fetch applicable fee heads + amounts (cat1–cat8)
-  const feesRes = await resolvedPool.request()
+  // 3. Fetch applicable fee heads + amounts (cat1–cat8) — together with step 4's lookup
+  const feesP = resolvedPool.request()
     .input('cid', mssql.Int,      collegeId)
     .input('fid', mssql.Int,      facultyMasterId || null)
     .input('yl',  mssql.NVarChar, yearLevel || null)
@@ -187,9 +215,8 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
   // 4. Build breakdown — classwise override takes priority; slab drives which column to use
   //    Also fetch the set of fees_codes that have classwise rows ONLY for 'Outsider'
   //    (no row for the resolved student type) — these must be excluded for non-new students.
-  let outsiderOnlyCodes = new Set()
-  if (facultyMasterId && yearLevel) {
-    const outsiderOnlyRes = await resolvedPool.request()
+  const outsiderOnlyP = (facultyMasterId && yearLevel)
+    ? resolvedPool.request()
       .input('cid', mssql.Int,      collegeId)
       .input('fid', mssql.Int,      facultyMasterId)
       .input('yl',  mssql.NVarChar, yearLevel)
@@ -213,8 +240,9 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
               AND (@ay IS NULL OR cf2.academic_year = @ay)
           )
       `)
-    outsiderOnlyCodes = new Set(outsiderOnlyRes.recordset.map(r => r.fees_code))
-  }
+    : null
+  const [feesRes, outsiderOnlyRes] = await Promise.all([feesP, outsiderOnlyP])
+  const outsiderOnlyCodes = new Set((outsiderOnlyRes?.recordset || []).map(r => r.fees_code))
 
   // A fee head is only charged when the college has CONFIGURED it for this exact
   // course + year + student-type — i.e. there is a classwise_fees row with a
@@ -239,31 +267,7 @@ async function compute({ collegeId, facultyMasterId, yearLevel, divisionLetter, 
 
   // 5. For new students, also include Outsider-specific fee heads configured for this
   //    class and year. New = FY always, or higher years with no prior app at this college.
-  if (isNewStudent && facultyMasterId) {
-    const outsiderRes = await resolvedPool.request()
-      .input('cid', mssql.Int,      collegeId)
-      .input('fid', mssql.Int,      facultyMasterId)
-      .input('yl',  mssql.NVarChar, yearLevel)
-      .input('ay',  mssql.NVarChar, academicYear || null)
-      .query(`
-        SELECT
-          fm.fees_code, fm.fees_head, fm.short_name, fm.fees_type, fm.is_refundable,
-          cf.cat1_amount AS cw_cat1, cf.cat2_amount AS cw_cat2,
-          cf.cat3_amount AS cw_cat3, cf.cat4_amount AS cw_cat4,
-          cf.cat5_amount AS cw_cat5, cf.cat6_amount AS cw_cat6,
-          cf.cat7_amount AS cw_cat7, cf.cat8_amount AS cw_cat8,
-          fm.fees_cat1_amount, fm.fees_cat2_amount, fm.fees_cat3_amount, fm.fees_cat4_amount,
-          fm.fees_cat5_amount, fm.fees_cat6_amount, fm.fees_cat7_amount, fm.fees_cat8_amount
-        FROM classwise_fees cf
-        JOIN fees_master fm ON fm.fees_code = cf.fees_code
-        WHERE cf.college_id = @cid
-          AND cf.faculty_master_id = @fid
-          AND cf.year_level = @yl
-          AND cf.student_type = 'Outsider'
-          AND (@ay IS NULL OR cf.academic_year = @ay)
-          AND fm.is_active = 1
-          AND (@ay IS NULL OR fm.academic_year = @ay)
-      `)
+  if (outsiderRes) {
 
     for (const row of outsiderRes.recordset) {
       // Only the student's slab amount counts, and only if it is actually set

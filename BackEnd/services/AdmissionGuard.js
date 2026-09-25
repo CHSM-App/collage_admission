@@ -35,6 +35,29 @@ async function findOtherConfirmed(appId) {
 }
 
 /**
+ * The student's confirmed admission at this college for this academic year, or
+ * null. Once one exists the student may not start another application there.
+ */
+async function findConfirmedFor(studentId, collegeId, academicYear) {
+  const r = await db.request()
+    .input('sid', mssql.Int, studentId)
+    .input('cid', mssql.Int, collegeId)
+    .input('ay',  mssql.NVarChar, academicYear)
+    .query(`
+      SELECT TOP 1 id, registration_number, status FROM applications
+      WHERE student_id = @sid AND college_id = @cid AND academic_year = @ay
+        AND status IN (${CONFIRMED_STATUSES.map(s => `'${s}'`).join(',')})
+    `)
+  return r.recordset[0] || null
+}
+
+/** Message for a refused new application. */
+function alreadyAdmittedMessage(existing) {
+  const ref = existing.registration_number ? ` (Reg. No. ${existing.registration_number})` : ''
+  return `Admission is already confirmed at this college for this academic year${ref}. A new application cannot be started.`
+}
+
+/**
  * Status for an application whose application fee was just paid. College-filled
  * applications are directly confirmed — unless the student already has a
  * confirmed admission this year, in which case it goes to review instead.
@@ -49,7 +72,7 @@ async function statusAfterFeePaid(appId, createdByCollege) {
 /** Message for a refused confirmation. */
 function duplicateMessage(other) {
   const ref = other.registration_number ? ` (Reg. No. ${other.registration_number})` : ` (application #${other.id})`
-  return `This student already has a confirmed admission at this college for this academic year${ref}. Only one admission can be confirmed per academic year — cancel that one first to confirm this application.`
+  return `This student already has a confirmed admission at this college for this academic year${ref}. Only one admission can be confirmed per academic year`
 }
 
-module.exports = { CONFIRMED_STATUSES, findOtherConfirmed, statusAfterFeePaid, duplicateMessage }
+module.exports = { CONFIRMED_STATUSES, findOtherConfirmed, findConfirmedFor, statusAfterFeePaid, duplicateMessage, alreadyAdmittedMessage }

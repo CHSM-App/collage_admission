@@ -7,7 +7,6 @@ import { STUDENT_PATHS } from '../../../app/routePaths.js'
 import { deleteApplication } from '../../../services/applicationService.js'
 import { useMyApplications } from '../hooks/useMyApplications.js'
 import { useSortableTable } from '../../../shared/hooks/useSortableTable.js'
-import SubjectSelection from './SubjectSelection.jsx'
 import StudentFeesMaster from './StudentFeesMaster.jsx'
 import PaymentReceipts from './PaymentReceipts.jsx'
 import ApplicationPrintView from './ApplicationPrintView.jsx'
@@ -49,7 +48,6 @@ export default function MyApplications() {
   const [filterStatus, setFilterStatus]     = useState('')
   const [feePayApp, setFeePayApp]           = useState(null)
   const [receiptsAppId, setReceiptsAppId]   = useState(null)
-  const [selectSubjectsApp, setSelectSubjectsApp] = useState(null)
   const [expandedId, setExpandedId]         = useState(null)
 
   const { apps, loading, fetchApps } = useMyApplications(user.id)
@@ -64,16 +62,6 @@ export default function MyApplications() {
       searchFields: ['college_name', 'course_name', 'registration_number'],
     }
   )
-
-  if (selectSubjectsApp) {
-    return (
-      <SubjectSelection
-        application={selectSubjectsApp}
-        onDone={() => { setSelectSubjectsApp(null); fetchApps() }}
-        onCancel={() => setSelectSubjectsApp(null)}
-      />
-    )
-  }
 
   if (feePayApp) {
     return (
@@ -188,7 +176,6 @@ export default function MyApplications() {
                 navigate={navigate}
                 setFeePayApp={setFeePayApp}
                 setReceiptsAppId={setReceiptsAppId}
-                setSelectSubjectsApp={setSelectSubjectsApp}
                 fetchApps={fetchApps}
               />
             ))}
@@ -268,7 +255,6 @@ export default function MyApplications() {
                               navigate={navigate}
                               setFeePayApp={setFeePayApp}
                               setReceiptsAppId={setReceiptsAppId}
-                              setSelectSubjectsApp={setSelectSubjectsApp}
                               fetchApps={fetchApps}
                             />
                           </td>
@@ -299,7 +285,7 @@ export default function MyApplications() {
 }
 
 // ── Mobile card ───────────────────────────────────────────────
-function MobileCard({ app, expandedId, setExpandedId, navigate, setFeePayApp, setReceiptsAppId, setSelectSubjectsApp, fetchApps }) {
+function MobileCard({ app, expandedId, setExpandedId, navigate, setFeePayApp, setReceiptsAppId, fetchApps }) {
   const meta       = statusMetaFor(app)
   const isExpanded = expandedId === app.id
   const isPrint    = expandedId === `print-${app.id}`
@@ -369,7 +355,6 @@ function MobileCard({ app, expandedId, setExpandedId, navigate, setFeePayApp, se
             navigate={navigate}
             setFeePayApp={setFeePayApp}
             setReceiptsAppId={setReceiptsAppId}
-            setSelectSubjectsApp={setSelectSubjectsApp}
             fetchApps={fetchApps}
           />
         </div>
@@ -389,10 +374,9 @@ function MobileCard({ app, expandedId, setExpandedId, navigate, setFeePayApp, se
   )
 }
 
-const btn = 'rounded-md border border-slate-300 bg-white px-4 py-1.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition'
 const btnPrimary = 'rounded-md bg-slate-800 px-4 py-1.5 text-sm font-semibold text-white hover:bg-slate-700 transition'
 
-function AppDetail({ app, navigate, setFeePayApp, setReceiptsAppId, setSelectSubjectsApp, fetchApps }) {
+function AppDetail({ app, navigate, setFeePayApp, setReceiptsAppId, fetchApps }) {
   const college = useCollege()
   return (
     <div className="space-y-2">
@@ -445,9 +429,6 @@ function AppDetail({ app, navigate, setFeePayApp, setReceiptsAppId, setSelectSub
               )}
             </p>
             {hasMore && <p className="text-xs text-slate-500">Paid ₹{paid.toLocaleString('en-IN')} of ₹{total.toLocaleString('en-IN')} total.</p>}
-            <div className="flex gap-2 flex-wrap">
-              <button onClick={() => setSelectSubjectsApp(app)} className={btnPrimary}>Select Subjects</button>
-            </div>
           </div>
         )
       })()}
@@ -470,9 +451,6 @@ function AppDetail({ app, navigate, setFeePayApp, setReceiptsAppId, setSelectSub
             {remaining > 0.01 && (
               <p className="text-xs text-slate-500">Paid ₹{paid.toLocaleString('en-IN')} of ₹{total.toLocaleString('en-IN')} total.</p>
             )}
-            <div className="flex gap-2 flex-wrap">
-              <button onClick={() => setSelectSubjectsApp(app)} className={btnPrimary}>Select Subjects</button>
-            </div>
           </div>
         )
       })()}
@@ -480,9 +458,6 @@ function AppDetail({ app, navigate, setFeePayApp, setReceiptsAppId, setSelectSub
       {app.status === 'enrolled' && (
         <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-3 space-y-2 text-sm text-slate-700">
           <p className="font-semibold">Enrollment complete. Welcome to {app.college_name}!</p>
-          <div className="flex gap-2 flex-wrap">
-            <button onClick={() => setSelectSubjectsApp(app)} className={btn}>View / Update Subjects</button>
-          </div>
         </div>
       )}
 
