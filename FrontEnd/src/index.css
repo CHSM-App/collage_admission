@@ -30,3 +30,14 @@
     min-height: 100vh;
   }
 }
+
+/* iPhone Safari zooms the page when focusing a field whose text is under 16px
+   (most inputs here are text-sm = 14px). 16px on phones stops the zoom without
+   disabling pinch-zoom. !important is needed to beat Tailwind's text-* classes. */
+@media (max-width: 639px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}

@@ -74,25 +74,35 @@ const ALL_PERMISSIONS = [
   'manage_admission_periods',
   'masters',
   'certificates',
+  'exams',
 ];
 
+// Must list every key the role editor (RolesPanel NAV_SECTIONS) sends — a key
+// missing here is never stored, and a missing nav row reads as "visible".
 const NAV_ITEMS = [
   'overview',
   'periods',
   'inbox',
   'add-application',
   'rollnumbers',
+  'exam-registration',
   'fee-receipts',
+  'reports',
   'master-faculty',
   'master-class',
   'master-bank',
   'master-course',
   'master-group',
   'master-division',
+  'master-categories',
   'master-fees',
   'master-documents',
   'certificates',
 ];
+
+// Admission Periods is only visible together with the Manage Admission Periods permission
+const navVisible = (key, nav_visibility, permissions) =>
+  nav_visibility[key] === true && (key !== 'periods' || !!permissions.manage_admission_periods) ? 1 : 0;
 
 // ── PUT /admin/colleges/:id ──────────────────────────────────
 router.put('/colleges/:id', authenticate, requireAdmin, async (req, res) => {
@@ -376,7 +386,7 @@ router.post('/colleges/:collegeId/roles', authenticate, requireAdmin, async (req
 
     // Insert nav visibility
     for (const key of NAV_ITEMS) {
-      const visible = nav_visibility[key] === true ? 1 : 0;
+      const visible = navVisible(key, nav_visibility, permissions);
       await db.request()
         .input('rid',   mssql.Int,      roleId)
         .input('perm',  mssql.NVarChar, `nav:${key}`)
@@ -429,7 +439,7 @@ router.put('/colleges/:collegeId/roles/:roleId', authenticate, requireAdmin, asy
 
     // Upsert nav visibility
     for (const key of NAV_ITEMS) {
-      const visible = nav_visibility[key] === true ? 1 : 0;
+      const visible = navVisible(key, nav_visibility, permissions);
       await db.request()
         .input('rid',   mssql.Int,      roleId)
         .input('perm',  mssql.NVarChar, `nav:${key}`)

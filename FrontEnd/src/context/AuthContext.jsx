@@ -56,8 +56,20 @@ export function AuthProvider({ children }) {
         localStorage.setItem(TOKEN_STORAGE_KEY, newToken)
         api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`
       }
-    }).catch(() => {
-      // If refresh fails (expired/invalid), clear local session — next API call
+      // Staff: the backend re-reads the role on refresh, so permission and
+      // sidebar changes made by the admin apply without logging in again.
+      const access = res.data?.staff_access
+      if (access) {
+        setAuthState(prev => {
+          const next = { ...prev, user: { ...prev.user, ...access } }
+          persistAuth(next)
+          return next
+        })
+      }
+    }).catch(err => {
+      // Only a rejected session (401) ends it — a server hiccup keeps the user signed in.
+      if (err?.response?.status !== 401) return
+      // Expired/invalid: clear local session — next API call
       // will get a 401 and redirect to login automatically.
       setAuthState(emptyAuthState)
       localStorage.removeItem(AUTH_STORAGE_KEY)

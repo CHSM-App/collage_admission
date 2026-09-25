@@ -29,11 +29,13 @@ GO
 -- ── 2. Delete application child rows (child-first) ──
 DELETE FROM whatsapp_message_log      WHERE application_id IS NOT NULL;
 DELETE FROM payment_link_tokens;
+DELETE FROM exam_registrations;
 DELETE FROM fee_installments;
 DELETE FROM payments;
 DELETE FROM application_documents;
 DELETE FROM application_previous_exam;
 DELETE FROM application_subjects;
+DELETE FROM application_groups;
 DELETE FROM application_activity_log;
 GO
 

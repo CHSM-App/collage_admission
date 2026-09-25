@@ -19,6 +19,7 @@ const auditLog = require('../middleware/auditLog');
 const { authenticate } = require('../middleware/auth');
 // Student names are stored in title case whatever the casing typed
 const { titleCaseFields } = require('../lib/names');
+const { buildStaffAccess } = require('../lib/staffAccess');
 const STUDENT_NAME_FIELDS = ['full_name', 'surname', 'first_name', 'middle_name'];
 
 function validate(req, res, next) {
@@ -229,16 +230,7 @@ router.post('/login/college', ...authLimiter, emailLoginValidators, validate, as
     const match = await bcrypt.compare(password, staff.password_hash);
     if (!match) return res.status(401).json({ message: 'Invalid email or password.' });
 
-    const permsArray = staff.permissions_json ? JSON.parse(staff.permissions_json) : [];
-    const permissions = {};
-    const nav_visibility = {};
-    permsArray.forEach(p => {
-      if (p.permission.startsWith('nav:')) {
-        nav_visibility[p.permission.slice(4)] = !!p.can_write;
-      } else {
-        permissions[p.permission] = !!p.can_write;
-      }
-    });
+    const { permissions, nav_visibility } = buildStaffAccess(staff.permissions_json ? JSON.parse(staff.permissions_json) : []);
 
     const { token, deadline } = signSessionToken(
       { id: staff.college_id, role: 'college', is_staff: true, staff_id: staff.id, permissions, nav_visibility }
@@ -336,16 +328,7 @@ router.post('/login/college-user', ...authLimiter, emailLoginValidators, validat
     }
 
     // Build permissions map: { submit_application: true/false, ... }
-    const permsArray = user.permissions_json ? JSON.parse(user.permissions_json) : [];
-    const permissions = {};
-    const nav_visibility = {};
-    permsArray.forEach(p => {
-      if (p.permission.startsWith('nav:')) {
-        nav_visibility[p.permission.slice(4)] = !!p.can_write;
-      } else {
-        permissions[p.permission] = !!p.can_write;
-      }
-    });
+    const { permissions, nav_visibility } = buildStaffAccess(user.permissions_json ? JSON.parse(user.permissions_json) : []);
 
     const { token, deadline } = signSessionToken(
       { id: user.college_id, role: 'college', is_staff: true, staff_id: user.id, permissions, nav_visibility }
@@ -835,7 +818,7 @@ router.post('/forgot-password/college/reset', ...authLimiter,
 // ── Refresh token ────────────────────────────────────────────
 // Reads the existing httpOnly cookie OR Authorization: Bearer header, verifies it,
 // and issues a fresh one (both cookie and body).
-router.post('/refresh', (req, res) => {
+router.post('/refresh', async (req, res) => {
   let token = req.cookies?.auth_token;
   if (!token) {
     const header = req.headers['authorization'];
@@ -860,6 +843,31 @@ router.post('/refresh', (req, res) => {
       return clearAndReject('Your session has expired for the day. Please log in again.');
     }
 
+    // Staff: re-read the role from the DB so edits to its permissions / sidebar
+    // take effect on the next page load instead of the next login. A deactivated
+    // user (or disabled college, or deleted user) is signed out here.
+    let staffAccess = null;
+    if (claims.is_staff && claims.staff_id) {
+      const r = await db.request()
+        .input('sid', mssql.Int, claims.staff_id)
+        .query(`
+          SELECT u.is_active, c.is_enabled AS college_enabled, r.role_name,
+                 (SELECT p.permission, p.can_write FROM college_role_permissions p
+                  WHERE p.role_id = u.role_id FOR JSON PATH) AS permissions_json
+          FROM college_users u
+          JOIN colleges c      ON c.id = u.college_id
+          JOIN college_roles r ON r.id = u.role_id
+          WHERE u.id = @sid`);
+      const s = r.recordset[0];
+      if (!s || !s.is_active || !s.college_enabled) return clearAndReject('Your account is no longer active.');
+      staffAccess = {
+        role_name: s.role_name,
+        ...buildStaffAccess(s.permissions_json ? JSON.parse(s.permissions_json) : []),
+      };
+      claims.permissions    = staffAccess.permissions;
+      claims.nav_visibility = staffAccess.nav_visibility;
+    }
+
     // Re-issue a token that still expires at the SAME deadline (not a fresh window).
     const deadline = sxp ? new Date(sxp * 1000) : nextExpiryDate();
     const secs = Math.max(60, Math.floor((deadline.getTime() - Date.now()) / 1000));
@@ -869,8 +877,12 @@ router.post('/refresh', (req, res) => {
       { expiresIn: secs },
     );
     setAuthCookie(res, newToken, deadline);
-    return res.json({ message: 'Session refreshed.', token: newToken, expires_at: deadline.toISOString() });
-  } catch {
+    return res.json({ message: 'Session refreshed.', token: newToken, expires_at: deadline.toISOString(), staff_access: staffAccess });
+  } catch (err) {
+    if (!(err instanceof jwt.JsonWebTokenError)) {
+      logger.error({ err }, 'Session refresh failed');
+      return res.status(500).json({ message: 'Server error.' });   // DB hiccup: keep the session
+    }
     return clearAndReject('Session expired. Please log in again.');
   }
 });

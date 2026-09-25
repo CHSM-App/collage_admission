@@ -111,7 +111,7 @@ export default function Step6Groups({
           : 'Choose the subject combination you want for each semester of this year.'}
       />
 
-      <div className="px-5 py-5 space-y-5">
+      <div className="px-3 py-4 sm:px-5 sm:py-5 space-y-5">
         {loading ? (
           <SkeletonLines rows={6} />
         ) : (
@@ -159,7 +159,7 @@ export default function Step6Groups({
 function SemesterGroupPanel({ semester, groups, chosenId, expanded, readOnly, onChoose, onToggleExpand }) {
   return (
     <div className="rounded-xl border border-slate-200 overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-3 bg-slate-50 border-b border-slate-200">
+      <div className="flex items-center justify-between gap-2 px-3 sm:px-5 py-3 bg-slate-50 border-b border-slate-200">
         <div className="flex items-center gap-3">
           <p className="font-semibold text-slate-800">Semester {semester}</p>
           {chosenId != null && (
@@ -175,7 +175,7 @@ function SemesterGroupPanel({ semester, groups, chosenId, expanded, readOnly, on
       </div>
 
       {groups.length === 0 ? (
-        <p className="px-5 py-4 text-sm text-slate-400">No groups available for this semester.</p>
+        <p className="px-3 sm:px-5 py-4 text-sm text-slate-400">No groups available for this semester.</p>
       ) : (
         <div className="divide-y divide-slate-100">
           {groups.map(g => {
@@ -184,7 +184,7 @@ function SemesterGroupPanel({ semester, groups, chosenId, expanded, readOnly, on
             const isChosen = chosenId === g.id
             return (
               <div key={g.id} className={isChosen ? 'bg-violet-50/40' : ''}>
-                <div className="flex items-start gap-3 px-5 py-3">
+                <div className="flex items-start gap-2 sm:gap-3 px-3 sm:px-5 py-3">
                   <input
                     type="radio"
                     name={`group-sem-${semester}`}
@@ -216,7 +216,7 @@ function SemesterGroupPanel({ semester, groups, chosenId, expanded, readOnly, on
                     className="shrink-0 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-800 transition"
                     aria-expanded={isOpen}
                   >
-                    {isOpen ? 'Hide' : 'View'} subjects
+                    {isOpen ? 'Hide' : 'View'}<span className="hidden sm:inline"> subjects</span>
                     <svg className={`h-3.5 w-3.5 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24">
                       <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
@@ -224,16 +224,16 @@ function SemesterGroupPanel({ semester, groups, chosenId, expanded, readOnly, on
                 </div>
 
                 {isOpen && (
-                  <div className="border-t border-slate-100 bg-slate-50/60 px-5 py-2">
+                  <div className="border-t border-slate-100 bg-slate-50/60 px-3 sm:px-5 py-2">
                     {g.courses.length === 0 ? (
                       <p className="py-2 text-sm text-slate-400">This group has no subjects yet.</p>
                     ) : (
                       <ul className="divide-y divide-slate-200/70">
                         {g.courses.map(c => (
-                          <li key={`${c.course_position}-${c.course_code}`} className="flex items-center gap-3 py-2">
+                          <li key={`${c.course_position}-${c.course_code}`} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 py-2">
                             <span className="w-5 text-right text-xs text-slate-300 shrink-0">{c.course_position}</span>
-                            <span className="font-mono text-xs text-slate-500 w-28 shrink-0">{c.course_code}</span>
-                            <span className="flex-1 text-sm text-slate-700">{c.course_title}</span>
+                            <span className="font-mono text-xs text-slate-500 sm:w-28 shrink-0">{c.course_code}</span>
+                            <span className="order-last basis-full pl-8 text-sm text-slate-700 sm:order-none sm:basis-0 sm:flex-1 sm:pl-0">{c.course_title}</span>
                             {c.subject_type && <span className="text-xs text-slate-400 shrink-0">{c.subject_type}</span>}
                             {c.credits != null && <span className="text-xs text-slate-400 shrink-0">{c.credits} cr</span>}
                           </li>

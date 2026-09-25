@@ -182,18 +182,8 @@ export default function StudentRegister() {
             disabled={loading}
           />
         </div>
-        <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-1">Category</label>
-          <select
-            name="category" value={form.category} onChange={handleChange}
-            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm"
-          >
-            <option value="general">General</option>
-            <option value="obc">OBC</option>
-            <option value="sc">SC</option>
-            <option value="st">ST</option>
-          </select>
-        </div>
+        {/* No category here — the caste/community category is chosen in the
+            application form; the account keeps the 'general' default. */}
 
         {error && (
           <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">

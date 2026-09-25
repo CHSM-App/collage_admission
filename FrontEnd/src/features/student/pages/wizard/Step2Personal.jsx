@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import FormField from '../../../../shared/components/FormField.jsx'
+import SearchSelect from '../../../../shared/components/SearchSelect.jsx'
 import { sanitizeName, toTitleCase, capitalizeWords, digitsOnly, isValidMobile, isValidEmail } from '../../../../shared/validators.js'
 import { StepHeader, StepFooter } from './Step1Context.jsx'
 import { getFaculty, getDivisions, computeFees, getCategoryMaster } from '../../../../services/masterService.js'
@@ -41,16 +42,16 @@ function LocationFields({ prefix = '', data, onChange, errors = {}, required, re
   const set = (name, value) => onChange({ target: { name, value } })
   const field = (key, label, list, placeholder, children) => (
     <FormField label={label} error={errors[key]} required={required}>
-      <input list={`dl-${key}`} name={key} value={data[key] ?? ''} autoComplete="off"
+      {/* Own dropdown, not <datalist>: mobile browsers barely show datalist options */}
+      <SearchSelect name={key} value={data[key] ?? ''} options={list.map(x => x.name)}
         placeholder={readOnly ? '' : placeholder} readOnly={readOnly}
         className={`${inputCls(errors[key])} ${readOnly ? 'cursor-default bg-slate-50' : ''}`}
-        onChange={ev => {
+        onChange={text => {
           // Snap to the master spelling on an exact match; otherwise no digits in a place name
-          const hit = findByName(list, ev.target.value)
-          set(key, hit ? hit.name : sanitizeName(ev.target.value))
+          const hit = findByName(list, text)
+          set(key, hit ? hit.name : sanitizeName(text))
           children.forEach(c => data[c] && set(c, ''))
         }} />
-      <datalist id={`dl-${key}`}>{list.map(x => <option key={x.id} value={x.name} />)}</datalist>
     </FormField>
   )
 
