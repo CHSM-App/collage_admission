@@ -42,6 +42,7 @@ const applicationMutationLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Too many requests. Please wait 15 minutes.' },
+  skip: require('../middleware/rateLimits').skip,   // honours RATE_LIMIT_DISABLED
 });
 
 router.use('/subjects', applicationMutationLimiter);

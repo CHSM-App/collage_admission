@@ -52,8 +52,12 @@ const CFG = {
 const min = (m) => m * 60 * 1000;
 
 // Skip limiting in non-prod, and for loopback in prod (local ops / health checks).
+// RATE_LIMIT_DISABLED=1 turns every limiter off (testing only — never leave on in production).
+const RATE_LIMIT_DISABLED = process.env.RATE_LIMIT_DISABLED === '1';
+if (RATE_LIMIT_DISABLED) console.warn('[rate-limit] DISABLED via RATE_LIMIT_DISABLED=1 — testing only');
+
 const skip = (req) => {
-  if (!IS_PROD) return true;
+  if (RATE_LIMIT_DISABLED || !IS_PROD) return true;
   const ip = req.ip || '';
   return ip === '::1' || ip === '127.0.0.1' || ip.includes('127.0.0.1');
 };
@@ -137,6 +141,7 @@ const authedLimiter = rateLimit({
 });
 
 module.exports = {
+  skip,
   CFG,
   authLimiter,        // array of middlewares — spread when applying
   authIpLimiter,

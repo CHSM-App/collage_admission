@@ -64,6 +64,7 @@ const paymentLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Too many payment requests. Please wait 15 minutes.' },
+  skip: require('../middleware/rateLimits').skip,   // honours RATE_LIMIT_DISABLED
 });
 
 router.use('/initiate', paymentLimiter);
