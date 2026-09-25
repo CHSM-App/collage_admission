@@ -330,7 +330,6 @@ function FeeModal({ application, kind, miscRow, feeStatus, onClose, onPaid }) {
   const [amount, setAmount]         = useState(String(amtDue || ''))
   const [payErr, setPayErr]         = useState('')
   const [miscPaying, setMiscPaying] = useState(false)
-  const [receiptsOpen, setReceiptsOpen] = useState(false)
 
   const { payOnline, paying, payError, paidMsg } = useCollegePayment(application.id)
 
@@ -544,52 +543,18 @@ function FeeModal({ application, kind, miscRow, feeStatus, onClose, onPaid }) {
             </div>
           )}
 
-          {/* Transactions */}
+          {/* Transactions — each row expands to its printable receipt */}
           {isRegular && fs?.paid_records?.length > 0 && (
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Transactions</p>
-              <div className="space-y-1.5">
-                {fs.paid_records.map((p, i) => (
-                  <div key={p.id} className="flex items-center justify-between rounded-lg border border-slate-100 bg-white px-3 py-2.5 text-sm">
-                    <div className="flex items-center gap-2.5">
-                      <div className="h-6 w-6 rounded-full bg-emerald-100 flex items-center justify-center text-xs font-bold text-emerald-700 shrink-0">{i + 1}</div>
-                      <div>
-                        <p className="font-medium text-slate-800">
-                          {p.gateway === 'cash' ? 'Cash / Offline' : p.via_payment_link ? 'Payment Link (PayU)' : 'Online (PayU)'}
-                        </p>
-                        <p className="text-xs text-slate-400">
-                          {p.completed_at ? new Date(p.completed_at.toString().replace(' ', 'T').split('.')[0]).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}
-                        </p>
-                      </div>
-                    </div>
-                    <span className="font-bold text-emerald-700">{fmtINR(p.amount)}</span>
-                  </div>
-                ))}
-              </div>
+              <PaymentReceipts
+                key={fs.paid_records.length}   // refetch when a new payment lands
+                applicationId={application.id}
+                hideTypes={['application_fee']}
+                showOrderId
+              />
             </div>
           )}
-
-          {/* Receipts */}
-          <div className="border-t border-slate-100 pt-3">
-            <button
-              onClick={() => setReceiptsOpen(v => !v)}
-              className="flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900 transition"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-              </svg>
-              {receiptsOpen ? 'Hide Receipts' : 'View Printable Receipts'}
-            </button>
-            {receiptsOpen && (
-              <div className="mt-3">
-                <PaymentReceipts
-                  applicationId={application.id}
-                  hideTypes={['application_fee']}
-                  showOrderId
-                />
-              </div>
-            )}
-          </div>
         </div>
       </div>
     </div>

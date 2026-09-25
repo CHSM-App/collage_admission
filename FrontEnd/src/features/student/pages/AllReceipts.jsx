@@ -3,7 +3,7 @@
  *
  * One table, rows = college × fee-type (Regular | Misc | Exam).
  * Clicking a row opens a modal identical in structure to CollegeCollectPayPanel:
- *   fee summary → fee head breakdown → payment form (online only) → transactions → receipts
+ *   fee summary → fee head breakdown → payment form (online only) → transactions (printable receipts)
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
@@ -258,7 +258,6 @@ function RowModal({ row, onClose, onPaid }) {
   const isMiscOrExam = row.kind === 'misc' || row.kind === 'exam'
   const allPaid      = row.status === 'paid'
 
-  const [receiptsOpen, setReceiptsOpen] = useState(false)
   const [amount, setAmount]             = useState('')
   const [amtErr, setAmtErr]             = useState('')
   const [miscPaying, setMiscPaying]     = useState(null) // payment id being paid
@@ -472,46 +471,13 @@ function RowModal({ row, onClose, onPaid }) {
             </div>
           )}
 
-          {/* ── Transactions (regular fee) ── */}
+          {/* ── Transactions (regular fee) — each row expands to its printable receipt ── */}
           {isRegular && fs?.paid_records?.length > 0 && (
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Transactions</p>
-              <div className="space-y-1.5">
-                {fs.paid_records.map((p, i) => (
-                  <div key={p.id} className="flex items-center justify-between rounded-lg border border-slate-100 bg-white px-3 py-2.5 text-sm">
-                    <div className="flex items-center gap-2.5">
-                      <div className="h-6 w-6 rounded-full bg-emerald-100 flex items-center justify-center text-xs font-bold text-emerald-700 shrink-0">{i + 1}</div>
-                      <div>
-                        <p className="font-medium text-slate-800">
-                          {p.gateway === 'cash' ? 'Cash / Offline' : p.via_payment_link ? 'WhatsApp Link (PayU)' : 'Online (PayU)'}
-                        </p>
-                        <p className="text-xs text-slate-400">{fmtDate(p.completed_at)} {fmtTime(p.completed_at)}</p>
-                      </div>
-                    </div>
-                    <span className="font-bold text-emerald-700">{fmtINR(p.amount)}</span>
-                  </div>
-                ))}
-              </div>
+              <PaymentReceipts key={fs.paid_records.length} applicationId={row.app.id} hideTypes={['application_fee']} showOrderId />
             </div>
           )}
-
-          {/* ── Receipts toggle ── */}
-          <div className="border-t border-slate-100 pt-3">
-            <button
-              onClick={() => setReceiptsOpen(v => !v)}
-              className="flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900 transition"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-              </svg>
-              {receiptsOpen ? 'Hide Receipts' : 'View Printable Receipts'}
-            </button>
-            {receiptsOpen && (
-              <div className="mt-3">
-                <PaymentReceipts applicationId={row.app.id} hideTypes={['application_fee']} showOrderId />
-              </div>
-            )}
-          </div>
 
         </div>
       </div>

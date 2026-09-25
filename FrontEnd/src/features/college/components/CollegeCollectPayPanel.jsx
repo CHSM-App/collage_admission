@@ -2,8 +2,8 @@
  * CollegeCollectPayPanel — shared college-side fee collection panel.
  *
  * Used in:
- *  - ApplicationDetail (inline card, no close button, no receipts toggle)
- *  - FeeReceipts modal (modal body, has close button + receipts toggle)
+ *  - ApplicationDetail (inline card, no close button, plain transactions list)
+ *  - FeeReceipts modal (modal body, close button, transactions as printable receipts)
  *
  * Props:
  *   appId      {number}           — application ID
@@ -11,7 +11,7 @@
  *   onPaid     {() => void}       — called after any successful payment
  *   header     {ReactNode}        — optional custom header (for modal variant)
  *   onClose    {() => void}       — if provided, renders a ✕ button in the header
- *   showReceipts {boolean}        — whether to show PaymentReceipts toggle (modal variant)
+ *   showReceipts {boolean}        — list transactions as printable receipts (modal variant)
  *   refreshKey {number}           — bump to re-read the fee status after something
  *                                   outside this panel changed it (installment plan)
  */
@@ -40,7 +40,6 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
   const [payMode, setPayMode]           = useState(null)   // null | 'cash' | 'online' | 'link'
   const [amount, setAmount]             = useState('')
   const [note, setNote]                 = useState('')
-  const [receiptsOpen, setReceiptsOpen] = useState(false)
   const [linkPhone, setLinkPhone]       = useState('')
   const [linkSending, setLinkSending]   = useState(false)
   const [linkSent, setLinkSent]         = useState(false)
@@ -76,7 +75,7 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
   async function handleCash(e) {
     e.preventDefault()
     await payCash({ amount: parseFloat(amountValue), note }, {
-      onSuccess: () => { setAmount(''); setNote(''); setPayMode(null); setReceiptsOpen(true) },
+      onSuccess: () => { setAmount(''); setNote(''); setPayMode(null) },
     })
   }
 
@@ -85,7 +84,7 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
     const amt = parseFloat(amountValue)
     if (!amt || amt <= 0) { setErr('Enter a valid amount.'); return }
     await payOnline(amt, {
-      onSuccess: () => { setPayMode(null); setReceiptsOpen(true) },
+      onSuccess: () => { setPayMode(null) },
     })
   }
 
@@ -380,10 +379,13 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
               </form>
             )}
 
-            {/* ── Transactions list ───────────────────────── */}
+            {/* ── Transactions: printable receipts in the modal variant, a plain list otherwise ── */}
             {fs.paid_records?.length > 0 && (
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Transactions</p>
+                {enableReceipts ? (
+                  <PaymentReceipts key={fs.paid_records.length} applicationId={appId} hideTypes={['application_fee']} showOrderId />
+                ) : (
                 <div className="space-y-1.5">
                   {fs.paid_records.map((p, i) => (
                     <div key={p.id} className="flex items-center justify-between rounded-lg border border-slate-100 bg-white px-3 py-2.5 text-sm">
@@ -406,25 +408,6 @@ export default function CollegeCollectPayPanel({ appId, collegeId, onPaid, heade
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {/* ── Receipts toggle (modal variant only) ───── */}
-            {enableReceipts && (
-              <div className="border-t border-slate-100 pt-3">
-                <button
-                  onClick={() => setReceiptsOpen(v => !v)}
-                  className="flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-slate-900 transition"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                  </svg>
-                  {receiptsOpen ? 'Hide Receipts' : 'View Printable Receipts'}
-                </button>
-                {receiptsOpen && (
-                  <div className="mt-3">
-                    <PaymentReceipts applicationId={appId} hideTypes={['application_fee']} showOrderId />
-                  </div>
                 )}
               </div>
             )}
