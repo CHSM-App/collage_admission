@@ -6,6 +6,7 @@ import { StepHeader, StepFooter } from './Step1Context.jsx'
 import { getFaculty, getDivisions, computeFees, getCategoryMaster } from '../../../../services/masterService.js'
 import api from '../../../../services/api'
 import scrollToField from '../../../../shared/scrollToField.js'
+import { useAuthContext } from '../../../../context/AuthContext.jsx'
 
 const inputCls = err => 'w-full rounded-lg border px-3 py-2.5 text-sm transition focus:outline-none focus:ring-2 ' +
   (err ? 'border-red-300 bg-red-50 focus:border-red-400 focus:ring-red-100' : 'border-slate-200 bg-white focus:border-slate-400 focus:ring-slate-100')
@@ -84,6 +85,7 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
   const [overrideRemark, setOverrideRemark] = useState(data.fees_category_override_remark || '')
   // Client-side check failure: { field, msg, value }. Shown under the field until the value changes.
   const [localError, setLocalError]         = useState(null)
+  const emailLocked = !!useAuthContext()?.user?.email
 
   // Category master (dynamic, from backend)
   const [categoryMaster, setCategoryMaster] = useState(null)
@@ -493,9 +495,11 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
             onChange={onNameChange} inputClassName="capitalize" placeholder="e.g. Father, Uncle" />
         </div>
 
+        {/* Students: locked to the account email — unless the account has none (e.g. the
+            college created it without one), then they enter it here. */}
         <FormField label="Email Address" name="email" type="email" value={data.email}
-          onChange={onChange} error={e.email} required={!isCollege} readOnly={!isCollege}
-          hint={isCollege ? 'Optional' : 'Pre-filled from your account. Cannot be changed here.'} />
+          onChange={onChange} error={e.email} required={!isCollege} readOnly={!isCollege && emailLocked}
+          hint={isCollege ? 'Optional' : emailLocked ? 'Pre-filled from your account. Cannot be changed here.' : 'Your account has no email yet — enter it here.'} />
 
         {/* Address */}
         <div>

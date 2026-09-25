@@ -426,11 +426,16 @@ router.get('/:collegeId/students/:studentId/applied-courses', async (req, res) =
       .input('collegeId', mssqlShared.Int, collegeId)
       .input('studentId', mssqlShared.Int, studentId)
       .query(`
-        SELECT DISTINCT a.admission_period_id, a.course_id, a.year_of_study, a.academic_year
+        -- Active applications, plus drafts the COLLEGE started (flagged is_draft, so the
+        -- form can offer to continue them). A student's own draft stays hidden.
+        SELECT a.admission_period_id, a.course_id, a.year_of_study, a.academic_year,
+               MIN(CASE WHEN a.status = 'draft' THEN 1 ELSE 0 END) AS is_draft
         FROM applications a
         WHERE a.student_id = @studentId
           AND a.college_id = @collegeId
-          AND a.status NOT IN ('draft', 'cancelled', 'rejected')
+          AND (a.status NOT IN ('draft', 'cancelled', 'rejected')
+               OR (a.status = 'draft' AND a.created_by_role = 'college'))
+        GROUP BY a.admission_period_id, a.course_id, a.year_of_study, a.academic_year
       `);
     return res.json({ success: true, data: result.recordset });
   } catch (err) {

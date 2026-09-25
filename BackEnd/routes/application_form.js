@@ -184,10 +184,13 @@ router.post('/applications/init', async (req, res) => {
       .input('yr',  mssql.Int, yr)
       .input('ay',  mssql.NVarChar, academic_year);
     if (perSemesterAdmission) existingReq.input('apid', mssql.Int, parseInt(admission_period_id));
+    // A draft the COLLEGE started is private to the college — the student neither
+    // sees nor resumes it; they get a draft of their own.
     const existingAny = await existingReq.query(`
         SELECT id, status, current_step FROM applications
         WHERE student_id = @sid AND college_id = @col AND course_id = @crs
           AND year_of_study = @yr AND academic_year = @ay
+          AND NOT (status = 'draft' AND created_by_role = 'college')
           ${perSemesterAdmission ? 'AND admission_period_id = @apid' : ''}
       `);
 
@@ -234,6 +237,7 @@ router.post('/applications/init', async (req, res) => {
           AND target.year_of_study = src.year_of_study
           AND target.academic_year = src.academic_year
           AND target.status        = 'draft'
+          AND target.created_by_role = 'student'
           ${perSemesterAdmission ? 'AND target.admission_period_id = src.admission_period_id' : ''}
         WHEN NOT MATCHED THEN
           INSERT (student_id, college_id, course_id, year_of_study, academic_year,
@@ -257,7 +261,7 @@ router.post('/applications/init', async (req, res) => {
       const existing2 = await existing2Req.query(`
           SELECT id, current_step FROM applications
           WHERE student_id=@sid AND college_id=@col AND course_id=@crs
-            AND year_of_study=@yr AND academic_year=@ay AND status='draft'
+            AND year_of_study=@yr AND academic_year=@ay AND status='draft' AND created_by_role='student'
             ${perSemesterAdmission ? 'AND admission_period_id=@apid' : ''}
         `);
       if (existing2.recordset.length) {
@@ -374,28 +378,15 @@ router.post('/applications/init-by-college', async (req, res) => {
       .input('ay',  mssql.NVarChar, academic_year);
     if (perSemesterAdmission) existingReqC.input('apid', mssql.Int, parseInt(admission_period_id));
     const existing = await existingReqC.query(`
+        -- Only the college's own draft; a student's draft is private to the student
         SELECT id, current_step, created_by_role FROM applications
         WHERE student_id=@sid AND college_id=@col AND course_id=@crs
-          AND year_of_study=@yr AND academic_year=@ay AND status='draft'
+          AND year_of_study=@yr AND academic_year=@ay AND status='draft' AND created_by_role='college'
           ${perSemesterAdmission ? 'AND admission_period_id=@apid' : ''}
       `);
 
     if (existing.recordset.length > 0) {
       const draft = existing.recordset[0];
-
-      // A draft the STUDENT started for this same course: the college takes it over
-      // (the student is at the counter) instead of blocking or duplicating it. It
-      // becomes a college entry, so it gets direct approval on fee payment like any
-      // other college-filled form; what the student already filled is kept.
-      if (draft.created_by_role !== 'college') {
-        await db.request()
-          .input('id',    mssql.Int,      draft.id)
-          .input('actor', mssql.NVarChar, String(req.user?.staff_id || req.user?.id || 'college'))
-          .query(`UPDATE applications SET created_by_role = 'college', updated_at = GETDATE(), updated_by = @actor
-                  WHERE id = @id AND status = 'draft'`);
-        await logActivity(draft.id, 'application_updated', 'college', 'College took over the draft the student had started.');
-      }
-
       return res.json({
         success: true,
         data: {
@@ -878,6 +869,15 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
           updated_by=@actor
         WHERE id=@id
       `);
+
+    // Account created without an email (e.g. by the college): keep the one the
+    // student just entered, so later forms are pre-filled. Never overwrites.
+    if (req.user?.role === 'student' && email) {
+      await db.request()
+        .input('sid', mssql.Int,      req.user.id)
+        .input('em',  mssql.NVarChar, String(email).trim().toLowerCase())
+        .query(`UPDATE students SET email = @em WHERE id = @sid AND (email IS NULL OR email = '')`);
+    }
 
     return res.json({ success: true, message: 'Personal details saved.', current_step: 2 });
   } catch (err) {

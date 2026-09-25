@@ -106,7 +106,7 @@ export default function AddApplicationStart() {
         setAppliedCourses(applied)
         // Clear a previously-picked period if it's now blocked for this student
         const p = periods.find(p => String(p.id) === selectedPeriod)
-        if (p && applied.some(a => a.admission_period_id === p.id)) {
+        if (p && applied.some(a => a.admission_period_id === p.id && !a.is_draft)) {
           setPeriod('')
         }
       })
@@ -118,7 +118,12 @@ export default function AddApplicationStart() {
   // Keying on the period (not course+year) lets semester colleges apply into a
   // later semester's period for the same course and year.
   function isAlreadyApplied(period) {
-    return appliedCourses.some(a => a.admission_period_id === period.id)
+    return appliedCourses.some(a => a.admission_period_id === period.id && !a.is_draft)
+  }
+
+  // A draft the college started for this period — selectable; continuing opens that draft.
+  function isCollegeDraft(period) {
+    return appliedCourses.some(a => a.admission_period_id === period.id && a.is_draft)
   }
 
   function handleSelectStudent(s) {
@@ -448,10 +453,11 @@ export default function AddApplicationStart() {
             <option value="">— Select course &amp; year —</option>
             {periods.map(p => {
               const applied = isAlreadyApplied(p)
+              const draft   = !applied && isCollegeDraft(p)
               return (
                 <option key={p.id} value={p.id} disabled={applied} className={applied ? 'text-slate-400' : ''}>
                   {p.course_name} — {YEAR_LABEL[p.year_of_study]} · {p.academic_year}
-                  {applied ? ' (already applied)' : ''}
+                  {applied ? ' (already applied)' : draft ? ' (draft — continue)' : ''}
                 </option>
               )
             })}

@@ -83,6 +83,8 @@ router.get('/', async (req, res) => {
     `;
 
     let where = 'WHERE a.student_id = @sid';
+    // A draft the college is still filling in is not the student's to see
+    if (req.user?.role === 'student') where += " AND NOT (a.status = 'draft' AND a.created_by_role = 'college')";
     const pool = await db;
     const sid  = parseInt(student_id);
     const extraInputs = [];

@@ -535,7 +535,7 @@ export default function CollegeApplyWizard() {
           {currentStep === 7 && (
             <div className="px-5 py-5 space-y-4">
               <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
-                <p className="font-bold text-emerald-800">Admission Confirmed</p>
+                <p className="font-bold text-emerald-800">Application Accepted</p>
                 <p className="text-emerald-700 mt-0.5">Collect the college fee now, or later from the application.</p>
               </div>
               <CollegeFeePaySection
