@@ -65,6 +65,8 @@ app.use(helmet({
       imgSrc:         ["'self'", 'data:', 'blob:'],
       connectSrc:     ["'self'"],
       fontSrc:        ["'self'"],
+      // Document preview renders fetched PDFs in an <iframe src="blob:…">
+      frameSrc:       ["'self'", 'blob:'],
       objectSrc:      ["'none'"],
       frameAncestors: ["'none'"],
       baseUri:        ["'self'"],
