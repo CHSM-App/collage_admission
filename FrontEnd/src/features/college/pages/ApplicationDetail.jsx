@@ -149,7 +149,6 @@ export default function ApplicationDetail({ collegeId, appId }) {
     const validInst = collegeFeeEnabled
       ? installments.filter(i => i.amount !== '' && parseFloat(i.amount) > 0)
       : []
-    if (collegeFeeEnabled && validInst.length === 0) { setFeeError('Enter at least one installment amount.'); return }
     if (collegeFeeEnabled) {
       const instTotal = validInst.reduce((s, i) => s + parseFloat(i.amount), 0)
       if (feeTotal != null && instTotal > feeTotal + 0.01) { setFeeError(`Installment total (₹${instTotal.toLocaleString('en-IN')}) cannot exceed fee total (₹${feeTotal.toLocaleString('en-IN')}).`); return }
@@ -875,9 +874,9 @@ function InstallmentPlanInput({ installments, onChange, feeTotal, onError }) {
   return (
     <div className="space-y-3">
       <div>
-        <p className="text-sm font-semibold text-slate-700 mb-0.5">Installment Plan</p>
+        <p className="text-sm font-semibold text-slate-700 mb-0.5">Installment Plan <span className="text-xs font-normal text-slate-400">(Optional)</span></p>
         <p className="text-xs text-slate-500">
-          Fill installments the student <em>must</em> pay in order. Leave trailing rows empty for free payment.
+          Leave all rows empty to let the student pay any amount freely. Fill installments to enforce a payment schedule.
         </p>
       </div>
       <div className="rounded-lg border border-slate-200 overflow-hidden">
@@ -1018,7 +1017,7 @@ function FeeAmountPanel({ collegeId, appId, initialTotal, initialPayNow, readonl
   async function handleSave() {
     setError(''); setSuccess('')
     const validInst = installments.filter(i => i.amount !== '' && parseFloat(i.amount) > 0)
-    if (validInst.length === 0) { setError('Enter at least one installment amount.'); return }
+    // Empty plan is allowed — clears installments, student pays any amount up to the balance
     const instTotal = validInst.reduce((s, i) => s + parseFloat(i.amount), 0)
     if (totalNum > 0 && instTotal > totalNum + 0.01) { setError(`Installment total (₹${instTotal.toLocaleString('en-IN')}) cannot exceed fee total (₹${totalNum.toLocaleString('en-IN')}).`); return }
     setSaving(true)

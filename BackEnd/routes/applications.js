@@ -21,6 +21,7 @@ const { body, validationResult } = require('express-validator');
 const auditLog = require('../middleware/auditLog');
 const { filledSeatsSql } = require('../constants/seatStatuses');
 const regNumberService = require('../services/RegistrationNumberService');
+const admissionGuard   = require('../services/AdmissionGuard');
 
 function validate(req, res, next) {
   const errors = validationResult(req);
@@ -403,7 +404,8 @@ router.post('/:id/submit', async (req, res) => {
 
     // ── Rules 2 & 3: where the application lands depends on WHO created it ──
     const createdByCollege = app.created_by_role === 'college';
-    const targetStatus = createdByCollege ? 'confirmed' : 'submitted';
+    // Direct confirmation only if the student has no other confirmed admission this year
+    const targetStatus = await admissionGuard.statusAfterFeePaid(appId, createdByCollege);
 
     const pool = await db;
     const tx   = pool.transaction();
@@ -473,7 +475,7 @@ router.post('/:id/submit', async (req, res) => {
 
     const actorRole = createdByCollege ? 'college' : 'student';
     await logActivity(appId, 'submitted', actorRole, null);
-    if (createdByCollege) {
+    if (targetStatus === 'confirmed') {
       // Rule 3: college-filled applications are approved on submission.
       await logActivity(appId, 'confirmed', 'college', 'Directly approved (application filled by college).');
     }

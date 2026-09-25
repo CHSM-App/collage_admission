@@ -16,6 +16,10 @@ const logger    = require('../config/logger');
 const { saveOtp, verifyAndConsumeOtp, checkOtp } = require('../services/otpService');
 const { body, validationResult } = require('express-validator');
 const auditLog = require('../middleware/auditLog');
+const { authenticate } = require('../middleware/auth');
+// Student names are stored in title case whatever the casing typed
+const { titleCaseFields } = require('../lib/names');
+const STUDENT_NAME_FIELDS = ['full_name', 'surname', 'first_name', 'middle_name'];
 
 function validate(req, res, next) {
   const errors = validationResult(req);
@@ -386,6 +390,7 @@ const otpSendValidators = [
 // ── Send OTP for phone verification ─────────────────────────
 // POST /auth/otp/send   body: { phone, ...registrationFields }
 router.post('/otp/send', otpLimiter, otpSendValidators, validate, async (req, res) => {
+  titleCaseFields(req.body, STUDENT_NAME_FIELDS);
   const { phone, full_name, email, password, confirm_password, city, category, surname, first_name, middle_name } = req.body;
 
   const pwdErr = validatePassword(password);
@@ -474,16 +479,22 @@ router.post('/otp/verify', otpVerifyValidators, validate, async (req, res) => {
 });
 
 // ── Student registration ────────────────────────────────────
-router.post('/register/student', registerLimiter, async (req, res) => {
+// College staff registering a student at the counter (students self-register via
+// the OTP flow). Staff-only: it creates accounts without phone verification.
+router.post('/register/student', registerLimiter, authenticate, async (req, res) => {
+  if (req.user?.role !== 'college') {
+    return res.status(403).json({ message: 'Only college staff can register students here.' });
+  }
+  titleCaseFields(req.body, STUDENT_NAME_FIELDS);
   const { full_name, password, phone, dob, gender, address, city, category, surname, first_name, middle_name } = req.body;
 
-  if (!full_name || !req.body.email) {
-    return res.status(400).json({ message: 'Name and email are required.' });
+  if (!full_name) {
+    return res.status(400).json({ message: 'Name is required.' });
   }
-  // Normalize email (stored lowercased). Duplicate emails are allowed.
-  const email = String(req.body.email).trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return res.status(400).json({ message: 'A valid email address is required.' });
+  // Email is optional (students log in by phone). Normalize if given; duplicates allowed.
+  const email = req.body.email ? String(req.body.email).trim().toLowerCase() : null;
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ message: 'Enter a valid email address.' });
   }
   // If no password provided (college-registered student), generate a random one.
   // The student will use Forgot Password to set their own password.

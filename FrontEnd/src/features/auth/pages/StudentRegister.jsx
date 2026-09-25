@@ -131,20 +131,20 @@ export default function StudentRegister() {
           <Input
             id="surname" label="Surname" name="surname" type="text"
             placeholder="Shetty"
-            value={form.surname} onChange={handleChange}
+            value={form.surname} onChange={handleChange} inputClassName="uppercase"
             disabled={loading} required
           />
           <Input
             id="first_name" label="First name" name="first_name" type="text"
             placeholder="Aarav"
-            value={form.first_name} onChange={handleChange}
+            value={form.first_name} onChange={handleChange} inputClassName="uppercase"
             disabled={loading} required
           />
         </div>
         <Input
           id="middle_name" label="Middle name (optional)" name="middle_name" type="text"
           placeholder="Rajesh"
-          value={form.middle_name} onChange={handleChange}
+          value={form.middle_name} onChange={handleChange} inputClassName="uppercase"
           disabled={loading}
         />
         <Input

@@ -130,7 +130,7 @@ export function StepHeader({ step, title, desc }) {
   )
 }
 
-export function StepFooter({ onBack, onNext, saving, nextLabel = 'Save & Continue', hideBack, extraFooter, readOnly, disabled }) {
+export function StepFooter({ onBack, onNext, saving, nextLabel = 'Save & Continue', hideBack, extraFooter, readOnly, disabled, onSkip, skipLabel }) {
   return (
     <div className="space-y-2 pt-2">
       <div className="flex flex-col-reverse sm:flex-row gap-3">
@@ -139,8 +139,13 @@ export function StepFooter({ onBack, onNext, saving, nextLabel = 'Save & Continu
             ← Back
           </Button>
         )}
+        {!readOnly && onSkip && (
+          <Button variant="secondary" onClick={onSkip} disabled={saving || disabled} className="w-full sm:w-auto sm:ml-auto">
+            {skipLabel}
+          </Button>
+        )}
         {!readOnly && (
-          <Button onClick={onNext} loading={saving} disabled={disabled} className={`w-full sm:w-auto sm:ml-auto ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
+          <Button onClick={onNext} loading={saving} disabled={disabled} className={`w-full sm:w-auto ${onSkip ? '' : 'sm:ml-auto'} ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}>
             {nextLabel} →
           </Button>
         )}

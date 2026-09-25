@@ -30,9 +30,10 @@ export default function PaymentResult() {
   // After a college-initiated application fee payment, redirect back to the wizard (step 6 — Fees).
   useEffect(() => {
     if (status === 'success' && paymentType === 'application_fee' && origin === 'college' && appId) {
-      navigate(`/college/apply/${appId}`, { replace: true })
+      // paid=online tells the wizard this is the post-payment return, not an edit of a submitted application
+      navigate(`/college/apply/${appId}?paid=online${reg ? `&reg=${encodeURIComponent(reg)}` : ''}`, { replace: true })
     }
-  }, [status, paymentType, origin, appId, navigate])
+  }, [status, paymentType, origin, appId, reg, navigate])
 
   if (status === 'error') {
     return (

@@ -133,8 +133,10 @@ export default function AddApplicationStart() {
     setShowRegForm(true)
     setNoResults(false)
     setStudents([])
-    // Whatever they searched for is most likely the surname they were looking up.
-    setRegForm({ ...EMPTY_REG, surname: sanitizeName(query.trim()) })
+    // Whatever they searched for is most likely the surname they were looking up —
+    // unless a student was picked, in which case the box holds that student's full name.
+    setRegForm({ ...EMPTY_REG, surname: selectedStudent ? '' : sanitizeName(query.trim()) })
+    setSelected(null)
     setRegError('')
   }
 
@@ -155,8 +157,8 @@ export default function AddApplicationStart() {
     const full_name   = fullNameOf({ surname, first_name, middle_name })
     if (!surname)    { setRegError('Surname is required.'); return }
     if (!first_name) { setRegError('First name is required.'); return }
-    if (!email.trim())     { setRegError('Email is required.'); return }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setRegError('Enter a valid email address.'); return }
+    // Email is optional for college registration; validate only if given
+    if (email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) { setRegError('Enter a valid email address.'); return }
     if (!phone.trim()) { setRegError('Mobile number is required.'); return }
     if (!/^[6-9]\d{9}$/.test(phone.trim())) { setRegError('Mobile number must be 10 digits starting with 6–9.'); return }
 
@@ -165,7 +167,7 @@ export default function AddApplicationStart() {
       const res = await registerStudentByCollege({
         full_name, surname, first_name,
         middle_name: middle_name || undefined,
-        email:       email.trim().toLowerCase(),
+        email:       email.trim().toLowerCase() || undefined,
         phone:       phone.trim() || undefined,
       })
       const newStudent = res.data.user
@@ -342,27 +344,24 @@ export default function AddApplicationStart() {
           </div>
         )}
 
-        {/* No results — offer registration */}
+        {/* No results */}
         {noResults && !showRegForm && !selectedStudent && (
-          <div className="mt-2 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 flex items-center justify-between gap-3">
-            <p className="text-sm text-amber-800">No student found for "{query}".</p>
+          <p className="mt-2 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-800">
+            No student found for "{query}".
+          </p>
+        )}
+
+        {/* Register is always available — search results can't prove the student is new */}
+        {!showRegForm && (
+          <div className="mt-2 flex justify-end">
             <button
+              type="button"
               onClick={openRegForm}
-              className="shrink-0 text-sm font-semibold text-indigo-700 hover:underline"
+              className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-sm font-semibold text-indigo-700 hover:bg-indigo-50"
             >
               + Register new student
             </button>
           </div>
-        )}
-
-        {/* Or always show a register link below the search */}
-        {!noResults && !selectedStudent && !showRegForm && query.trim().length === 0 && (
-          <p className="mt-1.5 text-xs text-slate-400">
-            Student not in system?{' '}
-            <button onClick={openRegForm} className="text-indigo-600 hover:underline font-medium">
-              Register new student
-            </button>
-          </p>
         )}
       </div>
 
@@ -397,7 +396,7 @@ export default function AddApplicationStart() {
               />
             </div>
             <RegField
-              label="Email" required type="email"
+              label="Email (optional)" type="email"
               value={regForm.email}
               onChange={v => setRegForm(f => ({ ...f, email: v }))}
               placeholder="student@example.com"
@@ -495,7 +494,7 @@ function RegField({ label, value, onChange, placeholder, type = 'text', required
         autoComplete="off"
         maxLength={maxLength}
         inputMode={inputMode}
-        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+        className={`w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white ${nameOnly ? 'uppercase' : ''}`}
       />
     </div>
   )

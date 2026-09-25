@@ -27,9 +27,25 @@ const { authenticate, requireCollegeAccess, requirePerm, requireWrite } = requir
 const { parsePage, paginateQuery, paginatedResponse } = require('../middleware/paginate');
 const whatsapp = require('../services/whatsapp');
 const logger = require('../config/logger');
+
+// An application "has a pending payment link" when a link is unused, unexpired,
+// AND no payment of that type has succeeded since the link was sent. Without the
+// last condition, older links superseded by a later payment (online via another
+// link, or cash at the counter) keep the application flagged forever.
+const PENDING_LINK_EXISTS = `
+  SELECT 1 FROM payment_link_tokens plt
+  WHERE plt.application_id = a.id AND plt.used = 0 AND plt.expires_at > GETDATE()
+    AND NOT EXISTS (
+      SELECT 1 FROM payments p
+      WHERE p.application_id = plt.application_id
+        AND p.payment_type   = plt.payment_type
+        AND p.status         = 'success'
+        AND p.completed_at  >= plt.created_at
+    )`;
 const feeSvc   = require('../services/FeeDeterminationService');
 const rcptSvc  = require('../services/ReceiptNumberService');
 const regNumberService = require('../services/RegistrationNumberService');
+const admissionGuard   = require('../services/AdmissionGuard');
 const { saveOtp, verifyAndConsumeOtp } = require('../services/otpService');
 const { filledSeatsSql } = require('../constants/seatStatuses');
 
@@ -484,8 +500,7 @@ router.get('/:collegeId/applications', requirePerm('review_application'), async 
     // Filter: only applications that have an active (unused, unexpired) payment link
     if (pending_link === '1') {
       whereBase += ` AND EXISTS (
-        SELECT 1 FROM payment_link_tokens plt
-        WHERE plt.application_id = a.id AND plt.used = 0 AND plt.expires_at > GETDATE()
+        ${PENDING_LINK_EXISTS}
       )`;
     }
 
@@ -534,8 +549,7 @@ router.get('/:collegeId/applications', requirePerm('review_application'), async 
           s.full_name AS student_name, s.email AS student_email, s.phone,
           COALESCE(CONCAT(fm.degree_course_code, ' — ', fm.degree_course_name), CAST(a.course_id AS NVARCHAR)) AS course_name,
           CASE WHEN EXISTS (
-            SELECT 1 FROM payment_link_tokens plt
-            WHERE plt.application_id = a.id AND plt.used = 0 AND plt.expires_at > GETDATE()
+            ${PENDING_LINK_EXISTS}
           ) THEN 1 ELSE 0 END AS has_pending_link
         ${joins} ${where}
         ORDER BY COALESCE(a.submitted_at, a.created_at) DESC
@@ -653,8 +667,7 @@ router.get('/:collegeId/applications/:appId', requirePerm('review_application'),
           col.name AS college_name,
           col.features_config AS college_features_config,
           CASE WHEN EXISTS (
-            SELECT 1 FROM payment_link_tokens plt
-            WHERE plt.application_id = a.id AND plt.used = 0 AND plt.expires_at > GETDATE()
+            ${PENDING_LINK_EXISTS}
           ) THEN 1 ELSE 0 END AS has_pending_link
         FROM applications a
         JOIN students       s   ON s.id      = a.student_id
@@ -990,6 +1003,12 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
       return res.status(400).json({ success: false, message: 'Application must be accepted before it can be confirmed.' });
     }
 
+    // One confirmed admission per student per college per academic year
+    const otherConfirmed = await admissionGuard.findOtherConfirmed(parseInt(req.params.appId));
+    if (otherConfirmed) {
+      return res.status(409).json({ success: false, message: admissionGuard.duplicateMessage(otherConfirmed) });
+    }
+
     // Does this college run a college-fee system? For colleges with college_fee
     // disabled (e.g. agriculture), there is no fee to compute — confirmation just
     // marks the admission confirmed with a ₹0 total. The fee-total requirement
@@ -1065,7 +1084,7 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
 
     const instSummary = validInstallments.map(i => `Inst-${i.installment_no}: ₹${i.amount}`).join(', ');
     await logActivity(req.params.appId, 'confirmed', 'college',
-      collegeFeeEnabled ? `Total fee: ₹${total}. Installments: ${instSummary}` : 'Admission confirmed (no college fee).');
+      collegeFeeEnabled ? `Total fee: ₹${total}. ${instSummary ? `Installments: ${instSummary}` : 'No installments (free payment).'}` : 'Admission confirmed (no college fee).');
 
     return res.json({
       success: true,
@@ -1074,6 +1093,10 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
         : 'Admission confirmed.',
     });
   } catch (err) {
+    // Two confirmations racing past the check above — the unique index (migration 055) refuses the second
+    if (err.number === 2601 || err.number === 2627 || err.originalError?.info?.number === 2601) {
+      return res.status(409).json({ success: false, message: 'This student already has a confirmed admission at this college for this academic year.' });
+    }
     logger.error({ err });
     return res.status(500).json({ success: false, message: 'Server error.' });
   }
@@ -1087,9 +1110,7 @@ router.post('/:collegeId/applications/:appId/set-fee', requireWrite('review_appl
     .filter(i => i.amount && parseFloat(i.amount) > 0)
     .map((i, idx) => ({ installment_no: idx + 1, amount: parseFloat(i.amount), due_date: i.due_date || null }));
 
-  if (validInstallments.length === 0) {
-    return res.status(400).json({ success: false, message: 'At least one installment with an amount is required.' });
-  }
+  // An empty plan is valid: no installments = free payment of any amount up to the balance.
 
   try {
     const appRes = await db.request()
@@ -1115,7 +1136,7 @@ router.post('/:collegeId/applications/:appId/set-fee', requireWrite('review_appl
     }
 
     const actor = String(req.user.staff_id || req.user.id);
-    const firstInstAmt = validInstallments[0].amount;
+    const firstInstAmt = validInstallments.length > 0 ? validInstallments[0].amount : total;
 
     await db.request()
       .input('id',    mssqlShared.Int,     parseInt(req.params.appId))
@@ -1214,7 +1235,8 @@ router.post('/:collegeId/applications/:appId/record-application-fee', requirePer
     const existingRegNum = existingRegRes.recordset[0]?.registration_number || null;
 
     const createdByCollege = app.created_by_role === 'college';
-    const targetStatus     = createdByCollege ? 'confirmed' : 'submitted';
+    // Direct confirmation only if the student has no other confirmed admission this year
+    const targetStatus     = await admissionGuard.statusAfterFeePaid(appId, createdByCollege);
 
     const pool = await db;
     const tx   = pool.transaction();
@@ -1287,7 +1309,7 @@ router.post('/:collegeId/applications/:appId/record-application-fee', requirePer
     }
 
     await logActivity(appId, 'application_fee_paid', 'college', `Cash application fee: ₹${fee.toLocaleString('en-IN')}`);
-    if (createdByCollege && ['draft', 'submitted'].includes(app.status)) {
+    if (targetStatus === 'confirmed' && ['draft', 'submitted'].includes(app.status)) {
       await logActivity(appId, 'confirmed', 'college', 'Directly approved (application filled by college).');
     }
 

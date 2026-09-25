@@ -26,6 +26,7 @@ const mssql    = require('mssql');
 const feeSvc   = require('../services/FeeDeterminationService');
 const whatsapp = require('../services/whatsapp');
 const payU     = require('../services/PayUService');
+const admissionGuard = require('../services/AdmissionGuard');
 const { authenticate } = require('../middleware/auth');
 const logger    = require('../config/logger');
 const rateLimit = require('express-rate-limit');
@@ -243,7 +244,8 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
     //   'student' -> 'submitted'; the full scrutiny pipeline follows
     //                (accept -> student visited -> division -> fees set).
     const createdByCollege = app.created_by_role === 'college';
-    const targetStatus     = createdByCollege ? 'confirmed' : 'submitted';
+    // Direct confirmation only if the student has no other confirmed admission this year
+    const targetStatus     = await admissionGuard.statusAfterFeePaid(appId, createdByCollege);
 
     const pool = await db;
     const tx   = pool.transaction();
@@ -323,7 +325,7 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
       await tx.rollback();
       throw e;
     }
-    return { alreadyProcessed, regNum, directApproved: createdByCollege && !alreadyProcessed };
+    return { alreadyProcessed, regNum, directApproved: targetStatus === 'confirmed' && !alreadyProcessed };
   }
 
   // college_fee
@@ -450,6 +452,13 @@ async function markPaymentFailed(txnid, reason) {
 }
 
 // ── Frontend redirect URL helper ─────────────────────────────
+// Links sent to a student's phone must use the public site, even when this
+// backend runs locally (FRONTEND_URL may then be a LAN address a phone can't open).
+function paymentLinkUrl(token) {
+  const base = (process.env.PAYMENT_LINK_BASE_URL || process.env.FRONTEND_URL || 'http://localhost:5173').trim().replace(/\/$/, '');
+  return `${base}/pay/${token}`;
+}
+
 function frontendUrl(path) {
   const base = (process.env.FRONTEND_URL || 'http://localhost:5173').trim();
   return `${base}${path}`;
@@ -1037,7 +1046,8 @@ router.post('/initiate', initiateValidators, validate, async (req, res) => {
     // productinfo: alphanumeric + spaces only (PayU rejects parentheses, slashes, etc.)
     const safeProductinfo = description.replace(/[^a-zA-Z0-9_-]/g, '') || 'AdmissionFee';
     const safeFirstname   = ((app.student_name || '').split(' ')[0] || 'Student').replace(/[^a-zA-Z0-9 ]/g, '').trim() || 'Student';
-    const safeEmail       = (app.student_email || '').trim();
+    // PayU requires an email; students registered at the counter may have none
+    const safeEmail       = (app.student_email || '').trim() || 'student@college.edu';
     // PayU requires exactly 10-digit phone; strip non-digits and take last 10
     const rawPhone        = String(app.student_phone || '').replace(/\D/g, '');
     const safePhone       = rawPhone.length >= 10 ? rawPhone.slice(-10) : rawPhone.padEnd(10, '0');
@@ -1130,7 +1140,8 @@ router.post('/initiate-misc-fee', async (req, res) => {
     const description    = paymentType === 'misc_fee' ? 'MiscFee' : 'ExamFee';
     const safeProductinfo = description;
     const safeFirstname   = ((pmt.student_name || '').split(' ')[0] || 'Student').replace(/[^a-zA-Z0-9 ]/g, '').trim() || 'Student';
-    const safeEmail       = (pmt.student_email || '').trim();
+    // PayU requires an email; students registered at the counter may have none
+    const safeEmail       = (pmt.student_email || '').trim() || 'student@college.edu';
     const rawPhone        = String(pmt.student_phone || '').replace(/\D/g, '');
     const safePhone       = rawPhone.length >= 10 ? rawPhone.slice(-10) : rawPhone.padEnd(10, '0');
 
@@ -1466,8 +1477,7 @@ router.post('/generate-link', authenticate, async (req, res) => {
         VALUES (@token, @appId, @ptype, @amount, @creator, @exp)
       `);
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const link = `${frontendUrl}/pay/${token}`;
+    const link = paymentLinkUrl(token);
 
     return res.json({
       success: true,
@@ -1540,8 +1550,7 @@ router.post('/send-payment-link', authenticate, async (req, res) => {
         VALUES (@token, @appId, @ptype, @amount, @creator, @exp)
       `);
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
-    const link = `${frontendUrl}/pay/${token}`;
+    const link = paymentLinkUrl(token);
 
     // Template 590: shop_name, bill_no, bill_url
     const normPhone = whatsapp.normalisePhone(phone);

@@ -24,6 +24,7 @@ const { authenticate } = require('../middleware/auth');
 const logger   = require('../config/logger');
 const { filledSeatsSql } = require('../constants/seatStatuses');
 const regNumberService = require('../services/RegistrationNumberService');
+const admissionGuard   = require('../services/AdmissionGuard');
 
 // All application form routes require authentication
 router.use(authenticate);
@@ -48,6 +49,12 @@ const validateAadhaar = validate12Digits;
 const validateAbcId   = validate12Digits;
 function validateMobile(v)   { return /^[6-9]\d{9}$/.test(v); }
 function validateEmail(v)    { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+
+// Stored in title case whatever the casing typed (the form shows names in capitals)
+const { titleCaseFields } = require('../lib/names');
+const PERSON_NAME_FIELDS = ['surname', 'first_name', 'middle_name', 'mother_name',
+  'father_surname', 'father_first_name', 'father_middle_name',
+  'mother_surname', 'mother_first_name', 'mother_middle_name'];
 
 /**
  * True when an id value is actually absent.
@@ -691,6 +698,7 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
   const app = await assertDraft(appId, res, req.user);
   if (!app) return;
 
+  titleCaseFields(req.body, PERSON_NAME_FIELDS);
   const {
     surname, first_name, middle_name, mother_name,
     sex, mobile, email,
@@ -715,9 +723,10 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
   if (!sex)           errors.sex           = 'Sex is required.';
   if (!mobile)        errors.mobile        = 'Mobile number is required.';
   else if (!validateMobile(mobile)) errors.mobile = 'Mobile must be 10 digits starting with 6-9.';
-  if (!email)         errors.email         = 'Email is required.';
-  else if (!validateEmail(email)) errors.email = 'Invalid email format.';
   const isCollegeStaff = req.user && req.user.role === 'college';
+  // Email is optional when college staff fill the form (walk-in students may have none)
+  if (!email && !isCollegeStaff) errors.email = 'Email is required.';
+  else if (email && !validateEmail(email)) errors.email = 'Invalid email format.';
   if (!isCollegeStaff) {
     if (!address)  errors.address  = 'Residential address is required.';
     if (!taluka)   errors.taluka   = 'Taluka is required.';
@@ -1389,7 +1398,8 @@ router.post('/applications/:id/submit-direct', async (req, res) => {
     // A college-filled application is directly approved (the college reviewed it
     // inline); a student-filled one goes to the scrutiny queue.
     const createdByCollege = ai.created_by_role === 'college';
-    const targetStatus     = createdByCollege ? 'confirmed' : 'submitted';
+    // Direct confirmation only if the student has no other confirmed admission this year
+    const targetStatus     = await admissionGuard.statusAfterFeePaid(appId, createdByCollege);
 
     const actor = String(req.user.staff_id || req.user.id);
 
@@ -1444,7 +1454,7 @@ router.post('/applications/:id/submit-direct', async (req, res) => {
 
     const submitterRole = createdByCollege ? 'college' : 'student';
     await logActivity(appId, 'submitted', submitterRole, null);
-    if (createdByCollege) {
+    if (targetStatus === 'confirmed') {
       await logActivity(appId, 'confirmed', 'college', 'Directly approved (application filled by college).');
     }
 
@@ -1663,6 +1673,16 @@ const semestersForYear = (y) => {
 // editable window rather than the post-admission one used by subject selection.
 const GROUP_EDITABLE_STATUSES = ['draft', 'correction_requested'];
 
+// Students may change groups only on their own application while it is still
+// editable. College staff (of that college) may change them at any stage until
+// the application is closed — same latitude they have on the other form steps.
+function canEditGroups(app, user) {
+  if (user?.role === 'college') {
+    return app.college_id === user.id && !['rejected', 'cancelled'].includes(app.status);
+  }
+  return app.student_id === user?.id && GROUP_EDITABLE_STATUSES.includes(app.status);
+}
+
 // ── GET /api/groups-list ────────────────────────────────────
 // Active groups for a college + course + semester, each with its member
 // courses inlined so expanding a group on screen costs no extra request.
@@ -1727,11 +1747,13 @@ router.get('/applications/:id/groups', async (req, res) => {
   try {
     const appRes = await db.request()
       .input('id', mssql.Int, appId)
-      .query(`SELECT id, status, college_id, course_id, year_of_study FROM applications WHERE id = @id`);
-    if (appRes.recordset.length === 0) {
+      .query(`SELECT id, status, student_id, college_id, course_id, year_of_study FROM applications WHERE id = @id`);
+    const app = appRes.recordset[0];
+    // Only the owning student or staff of the application's college may read it
+    const canView = app && (req.user?.role === 'college' ? app.college_id === req.user.id : app.student_id === req.user?.id);
+    if (!canView) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
-    const app = appRes.recordset[0];
 
     const saved = await db.request()
       .input('appId', mssql.Int, appId)
@@ -1749,7 +1771,7 @@ router.get('/applications/:id/groups', async (req, res) => {
         selections: saved.recordset,
         // Derived here so the client never re-implements the year -> semester map.
         semesters: semestersForYear(app.year_of_study),
-        can_select: GROUP_EDITABLE_STATUSES.includes(app.status),
+        can_select: canEditGroups(app, req.user),
         college_id: app.college_id,
         course_id: app.course_id,
         year_of_study: app.year_of_study,
@@ -1781,12 +1803,12 @@ router.post('/applications/:id/groups', async (req, res) => {
   try {
     const appRes = await db.request()
       .input('id', mssql.Int, appId)
-      .query(`SELECT id, status, college_id, course_id, year_of_study FROM applications WHERE id = @id`);
+      .query(`SELECT id, status, student_id, college_id, course_id, year_of_study FROM applications WHERE id = @id`);
     if (appRes.recordset.length === 0) {
       return res.status(404).json({ success: false, message: 'Application not found.' });
     }
     const app = appRes.recordset[0];
-    if (!GROUP_EDITABLE_STATUSES.includes(app.status)) {
+    if (!canEditGroups(app, req.user)) {
       return res.status(400).json({ success: false, message: 'This application can no longer be edited.' });
     }
 

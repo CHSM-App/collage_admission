@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import FormField from '../../../../shared/components/FormField.jsx'
-import { sanitizeName } from '../../../../shared/validators.js'
+import { sanitizeName, toTitleCase } from '../../../../shared/validators.js'
 import { StepHeader, StepFooter } from './Step1Context.jsx'
 import { getFaculty, getDivisions, computeFees, getCategoryMaster } from '../../../../services/masterService.js'
 import api from '../../../../services/api'
@@ -58,6 +58,11 @@ function LocationFields({ prefix = '', data, onChange, errors = {}, required, re
   )
 }
 
+// Person-name fields: entered in capitals, stored in title case
+const NAME_FIELDS = ['surname', 'first_name', 'middle_name', 'mother_name',
+  'father_surname', 'father_first_name', 'father_middle_name',
+  'mother_surname', 'mother_first_name', 'mother_middle_name']
+
 const YEAR_LEVEL_MAP = { 1: 'FY', 2: 'SY', 3: 'TY' }
 const SEX_OPTIONS    = [{ value: 'Male', label: 'Male' }, { value: 'Female', label: 'Female' }, { value: 'Other', label: 'Other' }]
 const FUNDING_LABELS = { Granted: 'Granted', NonGranted: 'Non-Granted', Both: 'Both' }
@@ -67,7 +72,7 @@ const FUNDING_COLORS = {
   Both:       'bg-blue-50 text-blue-700 border-blue-200',
 }
 
-export default function Step2Personal({ data, errors, globalError, saving, onChange, onBack, onNext, readOnly, isCollege, features }) {
+export default function Step2Personal({ data, errors, globalError, saving, onChange, onBack, onNext, onSkipToReview, readOnly, isCollege, features }) {
   const [determined, setDetermined]         = useState({ category: '', reason: '' })
   const [overrideMode, setOverrideMode]     = useState(!!data.fees_category_override)
   const [overrideRemark, setOverrideRemark] = useState(data.fees_category_override_remark || '')
@@ -310,7 +315,8 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showDateOfAdmission])
 
-  function handleNext() {
+  // skip = save this step, then jump straight to Review (college entry only)
+  function handleNext(skip = false) {
     // Checked in on-screen order, so the scroll lands on the topmost problem
     const checks = [
       [showSemester && !data.semester,                             'semester',          'Semester is required.'],
@@ -328,9 +334,13 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
       return
     }
     setLocalError(null)
-    onNext({
-      surname: data.surname, first_name: data.first_name,
-      middle_name: data.middle_name, mother_name: data.mother_name,
+    // Title-case every name ("naik RAJESH" → "Naik Rajesh") and reflect it on screen,
+    // so Review shows exactly what is stored.
+    const names = Object.fromEntries(NAME_FIELDS.map(k => [k, toTitleCase(data[k])]))
+    NAME_FIELDS.forEach(k => { if ((data[k] || '') !== names[k]) onChange({ target: { name: k, value: names[k] } }) })
+    ;(skip === true && onSkipToReview ? onSkipToReview : onNext)({
+      surname: names.surname, first_name: names.first_name,
+      middle_name: names.middle_name, mother_name: names.mother_name,
       sex: data.sex, mobile: data.mobile, email: data.email,
       address: data.address, taluka: data.taluka, district: data.district, state: data.state,
       category:       data.category       || null,
@@ -354,22 +364,21 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
       land_line:         data.land_line         || null,
       guardian_relation: data.guardian_relation || null,
       semester:          data.semester          || null,
-      father_surname:      data.father_surname      || null,
-      father_first_name:   data.father_first_name   || null,
-      father_middle_name:  data.father_middle_name  || null,
-      mother_surname:      data.mother_surname      || null,
-      mother_first_name:   data.mother_first_name   || null,
-      mother_middle_name:  data.mother_middle_name  || null,
+      father_surname:      names.father_surname      || null,
+      father_first_name:   names.father_first_name   || null,
+      father_middle_name:  names.father_middle_name  || null,
+      mother_surname:      names.mother_surname      || null,
+      mother_first_name:   names.mother_first_name   || null,
+      mother_middle_name:  names.mother_middle_name  || null,
     })
   }
 
   // Name fields: strip anything that is not name-legal, and capitalise the first
   // letter of each word. Deliberately does NOT lowercase the rest — full title
   // casing on every keystroke would fight the typist and mangle "McDonald".
+  // Names are shown in capitals while typing (CSS only) and title-cased on save.
   function onNameChange(e) {
-    const value = sanitizeName(e.target.value)
-      .replace(/(^|\s)(\p{L})/gu, (_, sep, ch) => sep + ch.toLocaleUpperCase())
-    onChange({ target: { name: e.target.name, value } })
+    onChange({ target: { name: e.target.name, value: sanitizeName(e.target.value) } })
   }
 
   const e = localError && data[localError.field] === localError.value
@@ -416,10 +425,10 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
         <div>
           <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-400">Full Name</p>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <FormField label="Surname"                name="surname"     value={data.surname}     onChange={onNameChange} error={e.surname}     required placeholder="Shetty" />
-            <FormField label="First Name"             name="first_name"  value={data.first_name}  onChange={onNameChange} error={e.first_name}  required placeholder="Aarav" />
-            <FormField label="Middle / Father's Name" name="middle_name" value={data.middle_name} onChange={onNameChange} error={e.middle_name} required placeholder="Ramesh" />
-            <FormField label="Mother's First Name"    name="mother_name" value={data.mother_name} onChange={onNameChange} error={e.mother_name} required placeholder="Sunita" />
+            <FormField label="Surname"                name="surname"     value={data.surname}     onChange={onNameChange} inputClassName="uppercase" error={e.surname}     required placeholder="Shetty" />
+            <FormField label="First Name"             name="first_name"  value={data.first_name}  onChange={onNameChange} inputClassName="uppercase" error={e.first_name}  required placeholder="Aarav" />
+            <FormField label="Middle / Father's Name" name="middle_name" value={data.middle_name} onChange={onNameChange} inputClassName="uppercase" error={e.middle_name} required placeholder="Ramesh" />
+            <FormField label="Mother's First Name"    name="mother_name" value={data.mother_name} onChange={onNameChange} inputClassName="uppercase" error={e.mother_name} required placeholder="Sunita" />
           </div>
           {(showNameAsOnAadhaar || showSonOf) && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
@@ -441,17 +450,17 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
             <div>
               <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Father's / Husband's Name</p>
               <div className="grid grid-cols-3 gap-3">
-                <FormField label="Surname"    name="father_surname"     value={data.father_surname     || ''} onChange={onNameChange} placeholder="Shetty" />
-                <FormField label="First Name" name="father_first_name"  value={data.father_first_name  || ''} onChange={onNameChange} placeholder="Ramesh" />
-                <FormField label="Middle Name"name="father_middle_name" value={data.father_middle_name || ''} onChange={onNameChange} placeholder="Kumar" />
+                <FormField label="Surname"    name="father_surname"     value={data.father_surname     || ''} onChange={onNameChange} inputClassName="uppercase" placeholder="Shetty" />
+                <FormField label="First Name" name="father_first_name"  value={data.father_first_name  || ''} onChange={onNameChange} inputClassName="uppercase" placeholder="Ramesh" />
+                <FormField label="Middle Name"name="father_middle_name" value={data.father_middle_name || ''} onChange={onNameChange} inputClassName="uppercase" placeholder="Kumar" />
               </div>
             </div>
             <div>
               <p className="mb-2 text-xs font-bold uppercase tracking-wide text-slate-400">Mother's Name (from paternal side)</p>
               <div className="grid grid-cols-3 gap-3">
-                <FormField label="Surname"    name="mother_surname"     value={data.mother_surname     || ''} onChange={onNameChange} placeholder="Shetty" />
-                <FormField label="First Name" name="mother_first_name"  value={data.mother_first_name  || ''} onChange={onNameChange} placeholder="Sunita" />
-                <FormField label="Middle Name"name="mother_middle_name" value={data.mother_middle_name || ''} onChange={onNameChange} placeholder="Devi" />
+                <FormField label="Surname"    name="mother_surname"     value={data.mother_surname     || ''} onChange={onNameChange} inputClassName="uppercase" placeholder="Shetty" />
+                <FormField label="First Name" name="mother_first_name"  value={data.mother_first_name  || ''} onChange={onNameChange} inputClassName="uppercase" placeholder="Sunita" />
+                <FormField label="Middle Name"name="mother_middle_name" value={data.mother_middle_name || ''} onChange={onNameChange} inputClassName="uppercase" placeholder="Devi" />
               </div>
             </div>
           </div>
@@ -477,8 +486,8 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
         </div>
 
         <FormField label="Email Address" name="email" type="email" value={data.email}
-          onChange={onChange} error={e.email} required readOnly
-          hint="Pre-filled from your account. Cannot be changed here." />
+          onChange={onChange} error={e.email} required={!isCollege} readOnly={!isCollege}
+          hint={isCollege ? 'Optional' : 'Pre-filled from your account. Cannot be changed here.'} />
 
         {/* Address */}
         <div>
@@ -697,7 +706,8 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
           <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{globalError}</p>
         )}
 
-        <StepFooter onBack={onBack} onNext={handleNext} saving={saving} readOnly={readOnly} />
+        <StepFooter onBack={onBack} onNext={() => handleNext()} saving={saving} readOnly={readOnly}
+          onSkip={onSkipToReview && (() => handleNext(true))} skipLabel="Save & Skip to Review" />
       </div>
     </div>
   )

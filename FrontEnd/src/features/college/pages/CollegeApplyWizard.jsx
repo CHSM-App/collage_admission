@@ -14,7 +14,7 @@
  *   6 — Division & Fee & Payment (confirm admission + collect college fee)
  */
 import scrollToField from '../../../shared/scrollToField.js'
-import { useEffect, useReducer, useCallback, useState } from 'react'
+import { useEffect, useReducer, useCallback, useState, cloneElement } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useAuthContext } from '../../../context/AuthContext.jsx'
 import {
@@ -24,7 +24,7 @@ import {
 import { getStudentDocuments } from '../../../services/documentService.js'
 import {
   recordApplicationFee, sendPaymentLink,
-  confirmApplication, getComputedFee, postApplicationAction,
+  confirmApplication, getComputedFee, postApplicationAction, setApplicationFee,
 } from '../../../services/collegeAdminService.js'
 import { getDivisions } from '../../../services/masterService.js'
 import { initiatePayment } from '../../../services/paymentService.js'
@@ -40,10 +40,10 @@ import Step5Documents from '../../student/pages/wizard/Step5Documents.jsx'
 import Step6Groups    from '../../student/pages/wizard/Step6Groups.jsx'
 import GroupSelectionReview from '../../student/pages/wizard/GroupSelectionReview.jsx'
 
-const ALL_STEPS     = ['Personal', 'Other Details', 'Exam Details', 'Documents', 'Subject Group', 'Review', 'Fees & Confirmation']
+const ALL_STEPS     = ['Personal', 'Other Details', 'Exam Details', 'Documents', 'Subject Group', 'Review & Confirm', 'Fee Collection']
 // Exam Details is step 3 here (the college side has no Context step).
 const EXAM_STEP     = 3
-const STEPS_NO_FEE  = ['Personal', 'Other Details', 'Exam Details', 'Documents', 'Subject Group', 'Review']
+const STEPS_NO_FEE  = ['Personal', 'Other Details', 'Exam Details', 'Documents', 'Subject Group', 'Review & Confirm']
 
 // Wizard step index → actual application step number for saving (offset by 1 vs student wizard)
 // Student wizard: step1=Context, step2=Personal, ...
@@ -110,10 +110,13 @@ export default function CollegeApplyWizard() {
   const [state, dispatch] = useReducer(reducer, initialState)
 
   // ── Application fee state ───────────────────────────────────
-  const [registrationNumber, setRegistrationNumber] = useState(null)
+  // Returning from a college-initiated online application-fee payment (PaymentResult adds ?paid=online)
+  const paidOnline = searchParams.get('paid') === 'online'
+  const [registrationNumber, setRegistrationNumber] = useState(() => paidOnline ? (searchParams.get('reg') || '') : null)
   const [feeUiOpen, setFeeUiOpen] = useState(false)   // reveal fee-collection UI without submitting yet
   const [submitError, setSubmitError]               = useState('')
   const [feeCollected, setFeeCollected]             = useState(false)
+  const [admissionConfirmed, setAdmissionConfirmed] = useState(false)
   const [feeCollecting, setFeeCollecting]           = useState(false)
   const [feeError, setFeeError]                     = useState('')
   const [feeMode, setFeeMode]                       = useState('')      // 'cash'|'online'|'link'
@@ -204,7 +207,7 @@ export default function CollegeApplyWizard() {
         // After application fee is paid (status=submitted), jump straight to the Fees step (6)
         // unless college_fee feature is off — in that case stay at step 5 (review)
         const collegeFeeOff = features?.payment?.college_fee === false
-        const startStep = (app.status === 'submitted' && !collegeFeeOff) ? 6 : wizStep
+        const startStep = (paidOnline || (app.status === 'submitted' && !collegeFeeOff)) ? 6 : wizStep
         dispatch({ type: 'INIT_APP', applicationId: appId, studentId, currentStep: startStep, appStatus: app.status, features })
       } catch (err) {
         dispatch({ type: 'SET_GLOBAL_ERR', message: err?.response?.data?.message || 'Failed to load application.' })
@@ -349,7 +352,8 @@ export default function CollegeApplyWizard() {
 
   const { data, currentStep, loading, saving, errors, globalError, applicationId, studentId, appStatus, features } = state
   // Edit mode: app already submitted — save changes and return, no re-submit
-  const isEditMode = !!appStatus && appStatus !== 'draft'
+  // Just paid online → continue the add-application flow (confirm, fees), not edit mode
+  const isEditMode = !paidOnline && !!appStatus && appStatus !== 'draft'
 
   if (loading) {
     return (
@@ -407,19 +411,6 @@ export default function CollegeApplyWizard() {
       <div className={`mx-auto ${shellWidth} px-4 py-6 space-y-6`}>
         <StepIndicator steps={features?.payment?.college_fee === false ? STEPS_NO_FEE : ALL_STEPS} current={currentStep} />
 
-        {/* Only Personal is mandatory for college entry — the rest can be completed later */}
-        {currentStep >= 2 && currentStep <= 5 && (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5">
-            <p className="text-sm text-slate-600">Remaining steps are optional for college entry — you can fill them later.</p>
-            <button
-              type="button"
-              onClick={() => { dispatch({ type: 'SET_MAX_STEP', step: 6 }); goStep(6) }}
-              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 hover:border-slate-500"
-            >
-              Skip to Review →
-            </button>
-          </div>
-        )}
 
         {globalError && (
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -437,6 +428,8 @@ export default function CollegeApplyWizard() {
               appId={applicationId}
               onBack={() => navigate('/college/dashboard?section=inbox')}
               onNext={(body) => saveAndNext('personal-details', body, 2)}
+              // Only Personal is mandatory for college entry — the rest can be filled later
+              onSkipToReview={(body) => saveAndNext('personal-details', body, 6)}
             />
           )}
 
@@ -500,11 +493,27 @@ export default function CollegeApplyWizard() {
               onSaveAndReturn={() => navigate(`/college/dashboard?section=app&app_id=${applicationId}`)}
               onProceedToFees={handleProceedToFees}
               onAddNew={() => navigate('/college/dashboard?section=add-application')}
+              admissionConfirmed={admissionConfirmed || ['confirmed', 'fees_paid', 'roll_assigned', 'enrolled'].includes(appStatus)}
+              feeConfirm={state.features?.payment?.college_fee === false ? null : (
+                <CollegeFeeConfirmStep
+                  applicationId={applicationId}
+                  collegeId={collegeId}
+                  courseId={data.course_id}
+                  yearOfStudy={data.year_of_study}
+                  appDivision={data.app_division}
+                  onConfirmed={(addNew) => {
+                    setAdmissionConfirmed(true)
+                    if (addNew) navigate('/college/dashboard?section=add-application')
+                    else handleProceedToFees()
+                  }}
+                />
+              )}
               submitted={registrationNumber !== null || feeUiOpen}
               registrationNumber={registrationNumber}
               features={state.features}
               appFee={appFee}
-              feeCollected={feeCollected}
+              feeCollected={feeCollected || paidOnline}
+              feePaidOnline={paidOnline}
               linkSent={linkSent}
               feeMode={feeMode}
               setFeeMode={setFeeMode}
@@ -521,19 +530,22 @@ export default function CollegeApplyWizard() {
             />
           )}
 
-          {/* Step 7 — Division, Fee & Payment */}
+          {/* Step 7 — Fee collection only (admission was confirmed on Review) */}
           {currentStep === 7 && (
-            <CollegeFeeConfirmStep
-              applicationId={applicationId}
-              collegeId={collegeId}
-              courseId={data.course_id}
-              yearOfStudy={data.year_of_study}
-              appDivision={data.app_division}
-              onBack={() => goStep(6)}
-              onGoToInbox={() => navigate('/college/dashboard?section=inbox')}
-              onGoToDetail={() => navigate(`/college/dashboard?section=app&app_id=${applicationId}`)}
-              onAddNew={() => navigate('/college/dashboard?section=add-application')}
-            />
+            <div className="px-5 py-5 space-y-4">
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
+                <p className="font-bold text-emerald-800">Admission Confirmed</p>
+                <p className="text-emerald-700 mt-0.5">Collect the college fee now, or later from the application.</p>
+              </div>
+              <CollegeFeePaySection
+                applicationId={applicationId}
+                collegeId={collegeId}
+                onGoToInbox={() => navigate('/college/dashboard?section=inbox')}
+                onGoToDetail={() => navigate(`/college/dashboard?section=app&app_id=${applicationId}`)}
+                onAddNew={() => navigate('/college/dashboard?section=add-application')}
+              />
+              <Button variant="secondary" onClick={() => goStep(6)}>← Back</Button>
+            </div>
           )}
         </div>
       </div>
@@ -557,7 +569,8 @@ function SkipButton({ onClick, saving }) {
 
 // ── Review step (college-specific — shows fee info, all docs skippable) ──────
 function CollegeReviewStep({
-  data, appId, saving, submitError, isEditMode, onBack, onEditStep, onSubmit, onSaveAndReturn, onProceedToFees,
+  data, appId, saving, submitError, isEditMode, onBack, onEditStep, onSubmit, onSaveAndReturn, onProceedToFees, feePaidOnline,
+  feeConfirm, admissionConfirmed,
   submitted, registrationNumber, features, appFee,
   feeCollected, linkSent, feeMode, setFeeMode, feeError, setFeeError,
   feeCollecting, onlinePaying, linkSending, linkPhone, setLinkPhone,
@@ -736,6 +749,9 @@ function CollegeReviewStep({
         {/* Subject Group — renders nothing when the course defines no groups */}
         <GroupSelectionReview appId={appId} onEdit={() => onEditStep(5)} />
 
+        {/* Fee breakdown — a normal review section until admission is confirmed */}
+        {feeConfirm && !admissionConfirmed && cloneElement(feeConfirm, { part: 'breakdown' })}
+
         {submitError && (
           <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
             {submitError}
@@ -752,7 +768,7 @@ function CollegeReviewStep({
                   <>
                     <p className="font-bold text-emerald-800">Application Submitted</p>
                     {registrationNumber && <p className="text-emerald-700 mt-0.5">Reg. No: <span className="font-mono font-bold">{registrationNumber}</span></p>}
-                    {feeCollected && appFee > 0 && <p className="text-emerald-700 mt-0.5">Application fee of ₹{appFee.toLocaleString('en-IN')} collected (cash).</p>}
+                    {feeCollected && appFee > 0 && <p className="text-emerald-700 mt-0.5">Application fee of ₹{appFee.toLocaleString('en-IN')} {feePaidOnline ? 'paid online' : 'collected (cash)'}.</p>}
                     {linkSent && <p className="text-blue-700 mt-0.5">Payment link sent to {linkPhone}.</p>}
                   </>
                 ) : (
@@ -834,18 +850,25 @@ function CollegeReviewStep({
             )}
 
             {/* Proceed to Step 6 (or go to application if college_fee is off) — shown once app fee is handled */}
-            {appFeeHandled && (
-              <div className="flex flex-col sm:flex-row gap-2">
-                <Button onClick={onProceedToFees} className="sm:ml-auto">
+
+            {appFeeHandled && (!feeConfirm || admissionConfirmed) && (
+              <div className="flex flex-col-reverse sm:flex-row gap-2">
+                <Button variant="secondary" onClick={onAddNew} className="sm:ml-auto">
+                  + Add New Application
+                </Button>
+                <Button onClick={onProceedToFees}>
                   {features?.payment?.college_fee === false
                     ? 'Go to Application →'
-                    : 'Proceed to Division & Fee Collection →'
+                    : 'Fees Collection →'
                   }
                 </Button>
               </div>
             )}
           </div>
         )}
+
+        {/* Confirm buttons — after the application-fee status. Need a submitted application with its fee handled. */}
+        {feeConfirm && !admissionConfirmed && cloneElement(feeConfirm, { part: 'actions', canConfirm: submitted && appFeeHandled })}
 
         {/* Submit / back buttons — hidden once submitted */}
         {!submitted && (
@@ -872,8 +895,13 @@ function CollegeReviewStep({
   )
 }
 
-// ── Step 6: Division, Fee Computation, Installment Plan & College Fee Collection ──
-function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy, appDivision, onBack, onGoToInbox, onGoToDetail, onAddNew }) {
+// ── Fee breakdown, optional installment plan & admission confirmation ──
+// Rendered inside the Review step once the application is submitted.
+// onConfirmed(addNew) — admission confirmed; parent decides where to go next.
+// canConfirm — false until the application fee is handled (confirm needs a submitted application).
+// part — 'breakdown': the fee card; 'actions': just the confirm buttons (placed below the
+// application-fee status). Two instances, so each part can sit where it reads best.
+function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy, appDivision, onConfirmed, canConfirm = true, part = 'breakdown' }) {
   const YEAR_MAP = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 
   const [divisions,      setDivisions]      = useState([])
@@ -882,15 +910,8 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
   const [feeBreakdown,   setFeeBreakdown]   = useState([])
   const [feeStudentType, setFeeStudentType] = useState(null)
   const [feeLoading,     setFeeLoading]     = useState(false)
-  const [installments,   setInstallments]   = useState([
-    { amount: '', due_date: '' },
-    { amount: '', due_date: '' },
-    { amount: '', due_date: '' },
-    { amount: '', due_date: '' },
-  ])
   const [confirming,   setConfirming]   = useState(false)
   const [confirmError, setConfirmError] = useState('')
-  const [confirmed,    setConfirmed]    = useState(false)
 
   // Load divisions once
   useEffect(() => {
@@ -922,12 +943,6 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
 
   async function handleConfirm({ addNew = false } = {}) {
     setConfirmError('')
-    const validInst = installments.filter(i => i.amount !== '' && parseFloat(i.amount) > 0)
-    const instTotal = validInst.reduce((s, i) => s + parseFloat(i.amount), 0)
-    if (validInst.length > 0 && feeTotal != null && instTotal > feeTotal + 0.01) {
-      setConfirmError(`Installment total (₹${instTotal.toLocaleString('en-IN')}) cannot exceed fee total (₹${feeTotal.toLocaleString('en-IN')}).`)
-      return
-    }
     setConfirming(true)
     try {
       // College-created applications are in 'submitted' status after Step 5.
@@ -940,15 +955,11 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
     }
     try {
       await confirmApplication(collegeId, applicationId, {
-        installments:          validInst.map((i, idx) => ({ installment_no: idx + 1, amount: parseFloat(i.amount), due_date: i.due_date || null })),
+        installments:          [],   // plan is set (optionally) on the Fee Collection step
         division:              division || null,
         document_ids_verified: [],
       })
-      if (addNew) {
-        onAddNew()
-      } else {
-        setConfirmed(true)
-      }
+      onConfirmed(addNew)
     } catch (err) {
       setConfirmError(err?.response?.data?.message || 'Failed to confirm admission.')
     } finally {
@@ -956,29 +967,33 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
     }
   }
 
-  // ── Collect payment section (shown after confirm) ────────────
-  const CollegePaySection = confirmed ? (
-    <CollegeFeePaySection
-      applicationId={applicationId}
-      collegeId={collegeId}
-      onGoToInbox={onGoToInbox}
-      onGoToDetail={onGoToDetail}
-      onAddNew={onAddNew}
-    />
-  ) : null
+  if (part === 'actions') {
+    if (!canConfirm) return null
+    return (
+      <div className="space-y-3">
+        {confirmError && (
+          <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{confirmError}</div>
+        )}
+        <div className="flex flex-col sm:flex-row gap-3 sm:justify-end">
+          <Button variant="secondary" onClick={() => handleConfirm({ addNew: true })} loading={confirming} disabled={feeLoading || feeTotal == null}>
+            Confirm &amp; Add New Application
+          </Button>
+          <Button onClick={() => handleConfirm({ addNew: false })} loading={confirming} disabled={feeLoading || feeTotal == null}>
+            Confirm &amp; Collect Fee →
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div>
-      <div className="border-b border-slate-100 px-5 py-5">
-        <h2 className="text-base font-bold text-slate-950">Fee &amp; Admission Confirmation</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Review the fee breakdown, set the installment plan, then confirm admission to proceed to fee collection.
-        </p>
+    <div className="rounded-lg border border-slate-200 overflow-hidden">
+      <div className="bg-slate-50 px-4 py-2.5 border-b border-slate-100">
+        <p className="text-xs font-bold uppercase tracking-wide text-slate-600">Fee &amp; Admission Confirmation</p>
+        <p className="mt-0.5 text-xs text-slate-500">Review the fees, then confirm admission once the application fee is paid. Installments and fee collection come next.</p>
       </div>
 
-      <div className="px-5 py-5 space-y-6">
-
-        {!confirmed && (
+      <div className="px-4 py-4 space-y-6">
           <>
             {/* ── Fee breakdown ─────────────────────────────────── */}
             <>
@@ -1030,66 +1045,62 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
                   </div>
                 )}
 
-                {/* ── Installment plan ─────────────────────────── */}
-                {/* {feeTotal != null && !feeLoading && (
-                  <CollegeInstallmentInput
-                    installments={installments}
-                    onChange={setInstallments}
-                    feeTotal={feeTotal}
-                    onError={setConfirmError}
-                  />
-                )} */}
-
-                {/* ── Confirm error ─────────────────────────────── */}
-                {confirmError && (
-                  <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-                    {confirmError}
-                  </div>
-                )}
 
             </>
-
-            {/* ── Navigation buttons ─────────────────────────────── */}
-            <div className="flex flex-col-reverse sm:flex-row gap-3 pt-2">
-              <Button variant="secondary" onClick={onBack}>← Back</Button>
-              <div className="flex flex-col sm:flex-row gap-3 sm:ml-auto">
-                <Button
-                  variant="secondary"
-                  onClick={() => handleConfirm({ addNew: true })}
-                  loading={confirming}
-                  disabled={feeLoading || feeTotal == null}
-                >
-                  Confirm &amp; Add New Application
-                </Button>
-                <Button
-                  onClick={() => handleConfirm({ addNew: false })}
-                  loading={confirming}
-                  disabled={feeLoading || feeTotal == null}
-                >
-                  Confirm &amp; Collect Fee →
-                </Button>
-              </div>
-            </div>
           </>
-        )}
-
-        {/* ── Post-confirm: collect college fee ───────────────── */}
-        {confirmed && (
-          <div className="space-y-4">
-            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm">
-              <p className="font-bold text-emerald-800">Admission Confirmed</p>
-              <p className="text-emerald-700 mt-0.5">Student will be notified to pay the college fee.</p>
-            </div>
-            {CollegePaySection}
-          </div>
-        )}
       </div>
     </div>
   )
 }
 
 // ── College fee payment section (after admission confirmed) ──────────────────
+// Optional installment plan, set after admission is confirmed. Empty = free payment.
+function InstallmentPlanEditor({ applicationId, collegeId, feeTotal, existing, onSaved }) {
+  const blank = { amount: '', due_date: '' }
+  const [rows, setRows]     = useState(() => {
+    const filled = (existing || []).map(i => ({ amount: String(i.amount), due_date: i.due_date ? String(i.due_date).slice(0, 10) : '' }))
+    return [...filled, ...Array(Math.max(0, 4 - filled.length)).fill(blank)]
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError]   = useState('')
+  const [saved, setSaved]   = useState(false)
+
+  async function save() {
+    setError(''); setSaved(false)
+    const valid = rows.filter(i => i.amount !== '' && parseFloat(i.amount) > 0)
+    const total = valid.reduce((s, i) => s + parseFloat(i.amount), 0)
+    if (total > feeTotal + 0.01) {
+      setError(`Installment total (₹${total.toLocaleString('en-IN')}) cannot exceed fee total (₹${feeTotal.toLocaleString('en-IN')}).`)
+      return
+    }
+    setSaving(true)
+    try {
+      await setApplicationFee(collegeId, applicationId, {
+        installments: valid.map((i, idx) => ({ installment_no: idx + 1, amount: parseFloat(i.amount), due_date: i.due_date || null })),
+      })
+      setSaved(true)
+      onSaved()
+    } catch (err) {
+      setError(err?.response?.data?.message || 'Could not save the installment plan.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+      <CollegeInstallmentInput installments={rows} onChange={r => { setRows(r); setSaved(false) }} feeTotal={feeTotal} onError={setError} />
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <div className="flex items-center justify-end gap-3">
+        {saved && <span className="text-sm text-emerald-700">✓ Plan saved</span>}
+        <Button variant="secondary" onClick={save} loading={saving}>Save Plan</Button>
+      </div>
+    </div>
+  )
+}
+
 function CollegeFeePaySection({ applicationId, collegeId, onGoToInbox, onGoToDetail, onAddNew }) {
+  const [planVersion, setPlanVersion] = useState(0)
   const [payMode,     setPayMode]     = useState(null)
   const [amount,      setAmount]      = useState('')
   const [note,        setNote]        = useState('')
@@ -1108,7 +1119,7 @@ function CollegeFeePaySection({ applicationId, collegeId, onGoToInbox, onGoToDet
     payCash,
     setPayError: setErr,
     setPaidMsg: setMsg,
-  } = useCollegePayment(applicationId, collegeId, {})
+  } = useCollegePayment(applicationId, collegeId, { refreshKey: planVersion })
 
   const allPaid  = fs && fs.total_fee > 0 && fs.remaining <= 0
   const amtDue   = fs ? (fs.current_due ?? fs.remaining) : 0
@@ -1147,9 +1158,20 @@ function CollegeFeePaySection({ applicationId, collegeId, onGoToInbox, onGoToDet
     }
   }
 
-  if (loading) return <SkeletonCards count={2} />
+  if (loading && !fs) return <SkeletonCards count={2} />
 
   return (
+    <div className="space-y-4">
+    {/* Plan can be changed until something has been paid */}
+    {fs && fs.total_fee > 0 && !(fs.total_paid > 0) && (
+      <InstallmentPlanEditor
+        applicationId={applicationId}
+        collegeId={collegeId}
+        feeTotal={fs.total_fee}
+        existing={fs.installments}
+        onSaved={() => setPlanVersion(v => v + 1)}
+      />
+    )}
     <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
       {/* Header */}
       <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
@@ -1374,6 +1396,7 @@ function CollegeFeePaySection({ applicationId, collegeId, onGoToInbox, onGoToDet
           <Button onClick={onGoToInbox} className="ml-auto">Go to Inbox →</Button>
         </div>
       </div>
+    </div>
     </div>
   )
 }
