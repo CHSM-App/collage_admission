@@ -501,7 +501,7 @@ export default function CollegeApplyWizard() {
                   collegeId={collegeId}
                   courseId={data.course_id}
                   yearOfStudy={data.year_of_study}
-                  appDivision={data.app_division}
+                  appDivision={data.division}
                   onConfirmed={(addNew) => {
                     setAdmissionConfirmed(true)
                     if (addNew) navigate('/college/dashboard?section=add-application')
@@ -609,6 +609,7 @@ function CollegeReviewStep({
                 af.semester === true          && ['Semester', d.semester ? `Semester ${d.semester}` : ''],
                 af.date_of_admission === true && ['Date of Admission', d.date_of_admission],
                 af.diploma_direct_sy === true && ['Diploma (Direct SY)', d.is_diploma_direct_sy ? 'Yes' : 'No'],
+                ['Division', d.division],
                 ['Name', [d.surname, d.first_name, d.middle_name].filter(Boolean).join(' ')],
                 af.name_as_on_aadhaar === true && ['Name as on Aadhaar', d.name_as_on_aadhaar],
                 af.son_of === true            && ['S/o', d.son_of],
@@ -1295,7 +1296,7 @@ function buildAutofill(app, lastApp, profile) {
     hsc_maths:          apBool('hsc_maths'),
     hsc_biology:        apBool('hsc_biology'),
     hostel_facility:    apBool('hostel_facility'),
-    app_division:                 app.app_division                 || '',
+    division:                     app.app_division                 || '',
     fees_category:                app.fees_category                || '',
     fees_category_override:       !!app.fees_category_override,
     fees_category_override_remark:app.fees_category_override_remark || '',

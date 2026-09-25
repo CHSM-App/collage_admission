@@ -1,5 +1,16 @@
 import { useState } from 'react'
 import { StepHeader, StepFooter } from './Step1Context.jsx'
+import { sanitizeName, capitalizeWords, decimalOnly, codeOnly } from '../../../../shared/validators.js'
+
+// Per-column keystroke filters. Board is letters-only ("Maharashtra State Board", "CBSE").
+const FILTER = {
+  board:          sanitizeName,
+  seat_no:        v => codeOnly(v, 20, '/-'),
+  marks_obtained: v => decimalOnly(v, 7),
+  marks_max:      v => decimalOnly(v, 7),
+}
+// Capitalised on save; the rest of each word is left alone so acronyms survive
+const WORD_COLS = ['institute', 'board', 'class_grade']
 
 // Exam rows shown per year of study
 const EXAM_ROWS = {
@@ -54,6 +65,7 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
   }
 
   function setRowField(type, field, value) {
+    if (FILTER[field]) value = FILTER[field](value)
     const updated = { ...exams, [type]: { ...getRow(type), [field]: value } }
     // Auto-compute percentage when marks change
     if (field === 'marks_obtained' || field === 'marks_max') {
@@ -96,8 +108,25 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
       }
       prev = { type, my }
     }
+    // Marks: both positive, obtained never above the maximum
+    for (const type of rows) {
+      const { marks_obtained: o, marks_max: m } = getRow(type)
+      if (!o && !m) continue
+      let msg = ''
+      if (!(parseFloat(m) > 0)) msg = '"Out of" must be greater than 0'
+      else if (!(parseFloat(o) > 0)) msg = 'Marks Obtained must be greater than 0'
+      else if (parseFloat(o) > parseFloat(m)) msg = 'Marks Obtained cannot be more than "Out of"'
+      if (msg) {
+        setLocalError(`${ROW_LABEL[type]}: ${msg}.`)
+        return
+      }
+    }
     setLocalError('')
-    onNext({ exams })
+    // Capitalise and reflect on screen, so Review shows exactly what is stored
+    const fixed = Object.fromEntries(Object.entries(exams).map(([type, row]) =>
+      [type, { ...row, ...Object.fromEntries(WORD_COLS.map(k => [k, capitalizeWords(row[k])])) }]))
+    setField('exams', fixed)
+    onNext({ exams: fixed })
   }
 
   const COLS = [
@@ -150,12 +179,14 @@ export default function Step4Exam({ data, errors, globalError, saving, setField,
                     {COLS.map(col => (
                       <td key={col.key} className="border border-slate-200 p-1">
                         <input
-                          type={col.key === 'month_year' ? 'month' : ['marks_obtained', 'marks_max', 'percentage'].includes(col.key) ? 'number' : 'text'}
+                          type={col.key === 'month_year' ? 'month' : 'text'}
+                          inputMode={['marks_obtained', 'marks_max'].includes(col.key) ? 'decimal' : undefined}
+                          maxLength={col.key === 'institute' ? 200 : col.key === 'remark' ? 200 : 50}
                           max={col.key === 'month_year' ? new Date().toISOString().slice(0, 7) : undefined}
                           value={row[col.key] || ''}
                           onChange={e => setRowField(type, col.key, e.target.value)}
                           readOnly={col.readOnly || readOnly}
-                          className={`w-full min-w-0 px-2 py-1.5 text-sm rounded border-0 outline-none focus:ring-2 focus:ring-blue-200 focus:bg-blue-50 transition ${
+                          className={`${WORD_COLS.includes(col.key) ? 'capitalize ' : ''}w-full min-w-0 px-2 py-1.5 text-sm rounded border-0 outline-none focus:ring-2 focus:ring-blue-200 focus:bg-blue-50 transition ${
                             col.readOnly || readOnly
                               ? 'bg-slate-100 text-slate-500 cursor-default'
                               : 'bg-white hover:bg-slate-50'

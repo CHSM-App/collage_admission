@@ -335,17 +335,6 @@ export default function DashboardLayout() {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
               </button>
-              {/* In a college portal the nav bar leads with the college — the
-                  sidebar carrying it is hidden on mobile. */}
-              {college && (
-                <div className="flex items-center gap-2 min-w-0">
-                  {college.logoUrl && (
-                    <img src={college.logoUrl} alt="" className="h-8 w-8 shrink-0 rounded object-contain" />
-                  )}
-                  <p className="text-sm font-bold text-slate-950 truncate">{college.name}</p>
-                  <span className="hidden sm:inline text-slate-300">|</span>
-                </div>
-              )}
               <div className="min-w-0">
                 <p className="text-xs text-slate-500 hidden sm:block">Welcome back,</p>
                 <p className="text-sm font-bold text-slate-950 truncate">
@@ -419,13 +408,6 @@ export default function DashboardLayout() {
                   )}
                 </div>
               )}
-
-              <button
-                onClick={() => { if (confirm('Are you sure you want to logout?')) logout() }}
-                className="lg:hidden rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
-              >
-                Logout
-              </button>
             </div>
           </div>
         </header>

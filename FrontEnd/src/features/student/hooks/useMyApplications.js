@@ -7,23 +7,26 @@ import { useCollege } from '../../../context/CollegeContext.jsx'
  * college portal they are currently in.
  *
  * @param {number} studentId
- * @returns {{ apps, loading, fetchApps }}
+ * @returns {{ apps, loading, error, fetchApps }}
  */
 export function useMyApplications(studentId) {
   const college = useCollege()
   const collegeId = college?.id
   const [apps, setApps]       = useState([])
   const [loading, setLoading] = useState(true)
+  // A failed load must not look like "no applications"
+  const [error, setError]     = useState(false)
 
   const fetchApps = useCallback(() => {
     setLoading(true)
+    setError(false)
     getApplications(studentId, collegeId)
       .then(r => setApps(r.data.data || []))
-      .catch(() => {})
+      .catch(() => setError(true))
       .finally(() => setLoading(false))
   }, [studentId, collegeId])
 
   useEffect(() => { fetchApps() }, [fetchApps])
 
-  return { apps, loading, fetchApps }
+  return { apps, loading, error, fetchApps }
 }

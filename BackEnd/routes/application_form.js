@@ -45,16 +45,21 @@ const MIN_AGE_FOR_FY = 16; // years
 // ── Validation helpers ───────────────────────────────────────
 // Aadhaar and the ABC (Academic Bank of Credits) ID are both exactly 12 digits.
 function validate12Digits(v) { return /^\d{12}$/.test(String(v ?? '').trim()); }
-const validateAadhaar = validate12Digits;
+// Aadhaar numbers never start with 0 or 1 (UIDAI does not issue them)
+const validateAadhaar = v => validate12Digits(v) && /^[2-9]/.test(String(v).trim());
 const validateAbcId   = validate12Digits;
 function validateMobile(v)   { return /^[6-9]\d{9}$/.test(v); }
 function validateEmail(v)    { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
 
 // Stored in title case whatever the casing typed (the form shows names in capitals)
-const { titleCaseFields } = require('../lib/names');
+const { titleCaseFields, invalidNameFields } = require('../lib/names');
 const PERSON_NAME_FIELDS = ['surname', 'first_name', 'middle_name', 'mother_name',
   'father_surname', 'father_first_name', 'father_middle_name',
-  'mother_surname', 'mother_first_name', 'mother_middle_name'];
+  'mother_surname', 'mother_first_name', 'mother_middle_name',
+  'name_as_on_aadhaar', 'son_of'];
+// Letters-only (no digits/symbols) on the Other Details step
+const OTHER_NAME_FIELDS = ['father_full_name', 'father_occupation', 'nationality', 'religion', 'caste',
+  'mother_tongue', 'birth_place', 'birth_taluka', 'birth_district', 'birth_state'];
 
 /**
  * True when an id value is actually absent.
@@ -789,8 +794,14 @@ router.patch('/applications/:id/personal-details', async (req, res) => {
       (!Number.isInteger(Number(semester)) || Number(semester) < 1 || Number(semester) > 8)) {
     errors.semester = 'Semester must be a number between 1 and 8.';
   }
-  if (parent_mobile && !/^[0-9]{0,15}$/.test(String(parent_mobile))) {
-    errors.parent_mobile = "Parent's mobile must contain only digits.";
+  if (parent_mobile && !validateMobile(String(parent_mobile))) {
+    errors.parent_mobile = "Parent's mobile must be 10 digits starting with 6-9.";
+  }
+  if (land_line && !/^[\d-]{1,15}$/.test(String(land_line))) {
+    errors.land_line = 'Land line may contain only digits and "-".';
+  }
+  for (const f of invalidNameFields(req.body, [...PERSON_NAME_FIELDS, 'guardian_relation'])) {
+    errors[f] = 'Only letters are allowed — no numbers or symbols.';
   }
 
   if (Object.keys(errors).length) {
@@ -909,7 +920,15 @@ router.patch('/applications/:id/other-details', async (req, res) => {
     if (isNaN(ai) || ai <= 0) errors.annual_income = 'Annual family income must be greater than 0.';
   }
   if (!aadhaar)         errors.aadhaar         = 'Aadhaar number is required.';
-  else if (!validateAadhaar(aadhaar)) errors.aadhaar = 'Aadhaar must be exactly 12 digits.';
+  else if (!validateAadhaar(aadhaar)) errors.aadhaar = 'Aadhaar must be 12 digits and cannot start with 0 or 1.';
+  for (const f of invalidNameFields(req.body, OTHER_NAME_FIELDS)) {
+    errors[f] = 'Only letters are allowed — no numbers or symbols.';
+  }
+  const inRange = (v, lo, hi) => v == null || v === '' || (/^\d+(\.\d+)?$/.test(String(v)) && v >= lo && v <= hi);
+  if (!inRange(height_cm, 50, 250))          errors.height_cm = 'Height must be between 50 and 250 cm.';
+  if (!inRange(weight_kg, 10, 300))          errors.weight_kg = 'Weight must be between 10 and 300 kg.';
+  if (!inRange(son_daughter_number, 1, 99))  errors.son_daughter_number = 'Birth order must be a whole number from 1.';
+  if (prn && !/^[A-Za-z0-9]+$/.test(String(prn))) errors.prn = 'PRN may contain only letters and digits.';
   // ABC ID is only REQUIRED from SY onward, but whenever one is supplied it must
   // be a valid 12-digit id — including for an FY student who fills it in anyway.
   if (app.year_of_study > 1 && !abc_id) errors.abc_id = 'ABC ID is required for SY/TY students.';
@@ -1029,6 +1048,14 @@ router.patch('/applications/:id/previous-exam', async (req, res) => {
         errors[`${type}_${field}`] = `${type}: ${field} is required.`;
       }
     }
+  }
+  for (const [type, row] of Object.entries(exams)) {
+    if (!row) continue;
+    const o = row.marks_obtained, m = row.marks_max;
+    const isNum = v => v == null || v === '' || /^\d+(\.\d+)?$/.test(String(v));
+    if (!isNum(o) || !isNum(m)) errors[`${type}_marks`] = `${type}: marks must be numbers.`;
+    else if (o !== '' && o != null && m !== '' && m != null && parseFloat(o) > parseFloat(m))
+      errors[`${type}_marks`] = `${type}: marks obtained cannot exceed the maximum.`;
   }
   if (Object.keys(errors).length) {
     return res.status(422).json({ success: false, errors });

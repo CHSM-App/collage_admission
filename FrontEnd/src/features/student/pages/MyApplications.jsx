@@ -50,7 +50,7 @@ export default function MyApplications() {
   const [receiptsAppId, setReceiptsAppId]   = useState(null)
   const [expandedId, setExpandedId]         = useState(null)
 
-  const { apps, loading, fetchApps } = useMyApplications(user.id)
+  const { apps, loading, error, fetchApps } = useMyApplications(user.id)
 
   const statusFiltered = useMemo(() => {
     if (!filterStatus) return apps
@@ -150,7 +150,17 @@ export default function MyApplications() {
 
       {loading && <SkeletonTable rows={4} cols={5} />}
 
-      {!loading && apps.length === 0 && (
+      {!loading && error && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-6 text-center">
+          <p className="font-medium text-red-700">Couldn't load your applications.</p>
+          <p className="mt-1 text-sm text-red-600">Please check your connection and try again.</p>
+          <button onClick={fetchApps} className="mt-4 rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700">
+            Retry
+          </button>
+        </div>
+      )}
+
+      {!loading && !error && apps.length === 0 && (
         <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center">
           <p className="text-slate-500 font-medium">No applications yet.</p>
           <p className="mt-1 text-sm text-slate-400">Apply to an open admission to get started.</p>

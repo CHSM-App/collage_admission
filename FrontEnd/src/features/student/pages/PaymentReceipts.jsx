@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { SkeletonLines } from '../../../shared/components/Skeleton.jsx'
 import { getPaymentReceipts } from '../../../services/paymentService.js'
+import { useAuthContext } from '../../../context/AuthContext.jsx'
 
 const YEAR_LABEL = { 1: 'First Year (FY)', 2: 'Second Year (SY)', 3: 'Third Year (TY)', 4: 'Fourth Year (4Y)', 5: 'Fifth Year (5Y)' }
 const TYPE_LABEL = {
@@ -138,6 +139,8 @@ function ReceiptSheet({ app, pmt, showOrderId = false, feeTotal = null, collegeP
   const modeLabel   = pmt.gateway ? (GATEWAY_LABEL[pmt.gateway] || pmt.gateway) : null
   const dueAmt      = feeTotal != null && collegePaid != null ? Math.max(0, feeTotal - collegePaid) : null
   const sheetRef    = useRef(null)
+  // Shared by college and student screens: the Office Copy is for the college only
+  const isCollege   = useAuthContext()?.role === 'college'
 
   function buildReceiptBlock(copyLabel) {
     const d = parseLocalDate(pmt.completed_at)
@@ -252,8 +255,8 @@ function ReceiptSheet({ app, pmt, showOrderId = false, feeTotal = null, collegeP
   </div>
   <!-- align-items:stretch: both copies always same height.
        min-height fills the landscape page; excess rows overflow to page 2. -->
-  <div style="display:flex;gap:4%;align-items:stretch;min-height:calc(210mm - 20mm);">
-    ${buildReceiptBlock('Office Copy')}
+  <div style="display:flex;gap:4%;align-items:stretch;min-height:calc(210mm - 20mm);${isCollege ? '' : 'justify-content:center;'}">
+    ${isCollege ? buildReceiptBlock('Office Copy') : ''}
     ${buildReceiptBlock("Student's Copy")}
   </div>
 </body>
@@ -297,7 +300,7 @@ function ReceiptSheet({ app, pmt, showOrderId = false, feeTotal = null, collegeP
 
       {/* Receipt preview — traditional college format */}
       <div ref={sheetRef} className="bg-white p-4" style={{ fontFamily: "'Times New Roman', Times, serif", color: '#000' }}>
-        <ReceiptCopy copyLabel="Office Copy" app={app} receiptNo={receiptNo} shortDate={shortDate}
+        <ReceiptCopy copyLabel={isCollege ? 'Office Copy' : "Student's Copy"} app={app} receiptNo={receiptNo} shortDate={shortDate}
           classLabel={classLabel} studentName={studentName} displayRows={displayRows}
           fillerCount={fillerCount} pmt={pmt} modeLabel={modeLabel} dueAmt={dueAmt} />
       </div>

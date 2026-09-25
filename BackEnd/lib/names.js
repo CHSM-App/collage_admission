@@ -15,7 +15,21 @@ function titleCaseFields(obj, keys) {
   return obj
 }
 
-module.exports = { titleCaseName, titleCaseFields }
+/**
+ * Letters (any script), spaces and . ' - only — no digits or symbols. Blank is
+ * valid (presence is checked separately). Mirrors FrontEnd shared/validators.js.
+ */
+function isValidName(v) {
+  // \p{M}: combining marks — Devanagari vowel signs ("ा", "े") are marks, not letters
+  return v == null || /^[\p{L}\p{M}\s.'-]*$/u.test(String(v))
+}
+
+/** Field names in obj (among keys) that hold something other than a name. */
+function invalidNameFields(obj, keys) {
+  return keys.filter(k => obj && !isValidName(obj[k]))
+}
+
+module.exports = { titleCaseName, titleCaseFields, isValidName, invalidNameFields }
 
 if (require.main === module) {
   const assert = require('assert')
@@ -23,5 +37,11 @@ if (require.main === module) {
   assert.strictEqual(titleCaseName("  d'souza   RAO-patil "), "D'Souza Rao-Patil")
   assert.strictEqual(titleCaseName(''), '')
   assert.strictEqual(titleCaseName(null), null)
+  assert.ok(isValidName("D'Souza Rao-Patil"))
+  assert.ok(isValidName('राजेश'))
+  assert.ok(isValidName(null) && isValidName(''))
+  assert.ok(!isValidName('Aarav123'))
+  assert.ok(!isValidName('Ram@'))
+  assert.deepStrictEqual(invalidNameFields({ a: 'Ok', b: 'X1' }, ['a', 'b', 'c']), ['b'])
   console.log('names ok')
 }

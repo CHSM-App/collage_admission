@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import FormField from '../../../../shared/components/FormField.jsx'
-import { sanitizeName, toTitleCase } from '../../../../shared/validators.js'
+import { sanitizeName, toTitleCase, capitalizeWords, digitsOnly, isValidMobile, isValidEmail } from '../../../../shared/validators.js'
 import { StepHeader, StepFooter } from './Step1Context.jsx'
 import { getFaculty, getDivisions, computeFees, getCategoryMaster } from '../../../../services/masterService.js'
 import api from '../../../../services/api'
@@ -44,7 +44,12 @@ function LocationFields({ prefix = '', data, onChange, errors = {}, required, re
       <input list={`dl-${key}`} name={key} value={data[key] ?? ''} autoComplete="off"
         placeholder={readOnly ? '' : placeholder} readOnly={readOnly}
         className={`${inputCls(errors[key])} ${readOnly ? 'cursor-default bg-slate-50' : ''}`}
-        onChange={ev => { set(key, ev.target.value); children.forEach(c => data[c] && set(c, '')) }} />
+        onChange={ev => {
+          // Snap to the master spelling on an exact match; otherwise no digits in a place name
+          const hit = findByName(list, ev.target.value)
+          set(key, hit ? hit.name : sanitizeName(ev.target.value))
+          children.forEach(c => data[c] && set(c, ''))
+        }} />
       <datalist id={`dl-${key}`}>{list.map(x => <option key={x.id} value={x.name} />)}</datalist>
     </FormField>
   )
@@ -61,7 +66,7 @@ function LocationFields({ prefix = '', data, onChange, errors = {}, required, re
 // Person-name fields: entered in capitals, stored in title case
 const NAME_FIELDS = ['surname', 'first_name', 'middle_name', 'mother_name',
   'father_surname', 'father_first_name', 'father_middle_name',
-  'mother_surname', 'mother_first_name', 'mother_middle_name']
+  'mother_surname', 'mother_first_name', 'mother_middle_name', 'name_as_on_aadhaar', 'son_of']
 
 const YEAR_LEVEL_MAP = { 1: 'FY', 2: 'SY', 3: 'TY' }
 const SEX_OPTIONS    = [{ value: 'Male', label: 'Male' }, { value: 'Female', label: 'Female' }, { value: 'Other', label: 'Other' }]
@@ -320,7 +325,9 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
     // Checked in on-screen order, so the scroll lands on the topmost problem
     const checks = [
       [showSemester && !data.semester,                             'semester',          'Semester is required.'],
-      [data.mobile && !/^[6-9]\d{9}$/.test(data.mobile.trim()),    'mobile',            'Mobile number must be 10 digits starting with 6–9.'],
+      [data.mobile && !isValidMobile(data.mobile.trim()),          'mobile',            'Mobile number must be 10 digits starting with 6–9.'],
+      [data.parent_mobile && !isValidMobile(data.parent_mobile),   'parent_mobile',     "Parent's mobile must be 10 digits starting with 6–9."],
+      [data.email && !isValidEmail(data.email),                    'email',             'Enter a valid email address.'],
       [isCollege && divisions.length > 0 && !data.division,        'division',          'Division selection is required.'],
       [showCasteCategory && !data.category,                        'category',          'Caste / Community Category is required.'],
       [showAdmittedCategory && !data.admitted_category,            'admitted_category', 'Admitted Category is required.'],
@@ -355,14 +362,14 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
       admission_quota:   data.admission_quota   || null,
       date_of_admission:    data.date_of_admission || null,
       is_diploma_direct_sy: !!data.is_diploma_direct_sy,
-      name_as_on_aadhaar:   data.name_as_on_aadhaar || null,
-      son_of:               data.son_of || null,
+      name_as_on_aadhaar:   names.name_as_on_aadhaar || null,
+      son_of:               names.son_of || null,
       native_address:    data.native_address    || null,
       native_taluka:     data.native_taluka     || null,
       native_district:   data.native_district   || null,
       parent_mobile:     data.parent_mobile     || null,
       land_line:         data.land_line         || null,
-      guardian_relation: data.guardian_relation || null,
+      guardian_relation: capitalizeWords(data.guardian_relation) || null,
       semester:          data.semester          || null,
       father_surname:      names.father_surname      || null,
       father_first_name:   names.father_first_name   || null,
@@ -434,11 +441,11 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
               {showNameAsOnAadhaar && (
                 <FormField label="Name as on Aadhaar Card" name="name_as_on_aadhaar"
-                  value={data.name_as_on_aadhaar || ''} onChange={onChange} placeholder="As printed on Aadhaar" />
+                  value={data.name_as_on_aadhaar || ''} onChange={onNameChange} inputClassName="uppercase" placeholder="As printed on Aadhaar" />
               )}
               {showSonOf && (
                 <FormField label="S/o (for Transcript & Certificate)" name="son_of"
-                  value={data.son_of || ''} onChange={onChange} placeholder="Father's name if needed" />
+                  value={data.son_of || ''} onChange={onNameChange} inputClassName="uppercase" placeholder="Father's name if needed" />
               )}
             </div>
           )}
@@ -476,13 +483,13 @@ export default function Step2Personal({ data, errors, globalError, saving, onCha
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <FormField label="Parent's Mobile" name="parent_mobile" type="tel" value={data.parent_mobile || ''}
-            onChange={e => onChange({ target: { name: 'parent_mobile', value: e.target.value.replace(/\D/g, '').slice(0, 10) } })}
-            placeholder="9876543210" maxLength={10} inputMode="numeric" />
+            onChange={e => onChange({ target: { name: 'parent_mobile', value: digitsOnly(e.target.value, 10) } })}
+            error={e.parent_mobile} placeholder="9876543210" maxLength={10} inputMode="numeric" />
           <FormField label="Land Line" name="land_line" value={data.land_line || ''}
-            onChange={e => onChange({ target: { name: 'land_line', value: e.target.value.replace(/[^\d-]/g, '') } })}
+            onChange={e => onChange({ target: { name: 'land_line', value: e.target.value.replace(/[^\d-]/g, '').slice(0, 15) } })}
             placeholder="e.g. 0233-1234567" />
           <FormField label="Guardian's Relation with Student" name="guardian_relation" value={data.guardian_relation || ''}
-            onChange={onChange} placeholder="e.g. Father, Uncle" />
+            onChange={onNameChange} inputClassName="capitalize" placeholder="e.g. Father, Uncle" />
         </div>
 
         <FormField label="Email Address" name="email" type="email" value={data.email}
