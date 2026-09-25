@@ -1,0 +1,183 @@
+var createError = require('http-errors');
+var express     = require('express');
+var path        = require('path');
+var cookieParser= require('cookie-parser');
+var logger      = require('morgan');
+var cors        = require('cors');
+var helmet      = require('helmet');
+var compression = require('compression');
+var pinoLogger  = require('./config/logger');
+var { startOtpCleanup } = require('./jobs/otpCleanup');
+
+var authRouter           = require('./routes/auth');
+var collegesRouter       = require('./routes/colleges');
+var applicationsRouter   = require('./routes/applications');
+var applicationFormRouter= require('./routes/application_form');
+var collegeAdminRouter   = require('./routes/college_admin');
+var documentsRouter      = require('./routes/documents');
+var uploadsRouter        = require('./routes/uploads');
+var { publicLimiter, authedLimiter } = require('./middleware/rateLimits');
+var paymentsRouter       = require('./routes/payments');
+var mastersRouter        = require('./routes/masters');
+var locationsRouter      = require('./routes/locations');
+var collegeUsersRouter   = require('./routes/college_users');
+var notificationsRouter  = require('./routes/notifications');
+var certificatesRouter   = require('./routes/certificates');
+var examsRouter          = require('./routes/exams');
+var chatRouter           = require('./routes/chat');
+var indexRouter          = require('./routes/index');
+
+var app = express();
+
+// This is a JSON API — no HTML view engine (pug) is used.
+
+const IS_PROD = process.env.NODE_ENV === 'production';
+
+// Origins the PayU redirect form posts to, derived from the service that builds
+// that form so the two cannot drift apart.
+const { ENDPOINTS: PAYU_ENDPOINTS } = require('./services/PayUService');
+// Both environments at once, plus a wildcard for the rest of the gateway's
+// own hosts: Chrome applies form-action to the redirect targets of a
+// submission, not just its action, and PayU's flow hops between payu.in hosts
+// before it ever reaches the bank. Only the first hop leaves our document, so
+// this stops at PayU — the 3-D Secure bank redirects that follow originate
+// from PayU's page under PayU's own policy, not ours.
+const PAYU_FORM_ORIGINS = [
+  ...new Set(Object.values(PAYU_ENDPOINTS).map(u => new URL(u).origin)),
+  'https://payu.in',
+  'https://*.payu.in',
+];
+
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: 'cross-origin' }, // allow static uploads to be fetched cross-origin
+
+  // HSTS — only meaningful over HTTPS; enforce in production
+  hsts: IS_PROD
+    ? { maxAge: 31536000, includeSubDomains: true, preload: true }
+    : false,
+
+  // Content Security Policy
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc:     ["'self'"],
+      scriptSrc:      ["'self'"],
+      styleSrc:       ["'self'", "'unsafe-inline'"],  // pug templates may inline styles
+      imgSrc:         ["'self'", 'data:', 'blob:'],
+      connectSrc:     ["'self'"],
+      fontSrc:        ["'self'"],
+      // Document preview renders fetched PDFs in an <iframe src="blob:…">
+      frameSrc:       ["'self'", 'blob:'],
+      objectSrc:      ["'none'"],
+      frameAncestors: ["'none'"],
+      baseUri:        ["'self'"],
+      // PayU is reached by POSTing a self-submitting form to its gateway, so
+      // its origin must be allowed here or the browser blocks the redirect and
+      // the Pay button hangs. Taken from PayUService's own endpoint list, both
+      // environments at once — the form-action origin is not a secret, and
+      // pinning it to PAYU_ENV would break the moment that var is switched.
+      formAction:     ["'self'"].concat(PAYU_FORM_ORIGINS),
+    },
+  },
+}));
+const corsOptions = {
+  origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(o => o.trim()) : false,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Authorization', 'Content-Type'],
+};
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+app.use(logger('dev'));
+// gzip responses (JS bundles and JSON shrink ~70%)
+app.use(compression());
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+app.use(cookieParser());
+
+// Uploaded documents are served through an authenticated, ownership-checked
+// route (files live outside the web root). Mount BEFORE express.static so
+// /uploads/* is never served statically.
+app.use('/uploads',       uploadsRouter);
+
+// College logos are deliberately public — they brand the logged-out landing and
+// login pages of each college's portal, so they cannot go through the
+// authenticated /uploads route. They live outside public/ because the frontend
+// build empties that directory on every deploy.
+app.use('/logos',         express.static(path.join(__dirname, 'uploads', 'logos')));
+
+// Build files carry a content hash in their name, so they never change — let
+// browsers keep them for a year instead of re-checking every file on every visit.
+// index.html (below) stays revalidated, so a new deploy is still picked up at once.
+app.use('/assets', express.static(path.join(__dirname, 'public', 'assets'), { maxAge: '1y', immutable: true }));
+app.use(express.static(path.join(__dirname, 'public')));
+
+// ── SPA navigation fallback ──────────────────────────────────
+// The frontend uses BrowserRouter, so client routes (/login/student,
+// /student/dashboard, /pay/:token, …) are real URLs. On a direct hit or page
+// refresh the request reaches Express. Several API routers below are mounted at
+// '/' with auth middleware, so they would answer 401 for these paths before any
+// trailing fallback — that's why this must run BEFORE the routers. Serve
+// index.html for browser navigations (GET that accepts HTML) whose path is not
+// an API route; everything else falls through to the routers and JSON 404.
+// NOTE: the /admin API router only exposes /admin/colleges/* — the client route
+// /admin/dashboard is a SPA page, so guard the narrow API subtree, not all /admin.
+const API_PREFIXES = [
+  '/auth', '/colleges', '/applications', '/api', '/college-admin', '/payments',
+  '/masters', '/admin/colleges', '/notifications', '/certificates', '/exams', '/chat',
+  '/uploads', '/logos', '/health',
+];
+app.get('*', function (req, res, next) {
+  if (!req.accepts('html')) return next();
+  if (API_PREFIXES.some((p) => req.path === p || req.path.startsWith(p + '/'))) return next();
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// ── Routes ───────────────────────────────────────────────────
+// Tiered rate limits (see middleware/rateLimits.js):
+//   • /auth has its own strict per-route limiters (login/register/OTP).
+//   • public browse routers get the moderate publicLimiter.
+//   • authenticated action routers get the looser authedLimiter.
+app.use('/',              indexRouter);
+app.use('/auth',          authRouter);
+app.use('/colleges',      publicLimiter, collegesRouter);
+app.use('/applications',  authedLimiter, applicationsRouter);
+app.use('/api',           locationsRouter);   // public, own limiter; must precede the authed /api router
+app.use('/api',           authedLimiter, applicationFormRouter);
+app.use('/college-admin', authedLimiter, collegeAdminRouter);
+app.use('/payments',      authedLimiter, paymentsRouter);
+app.use('/masters',       publicLimiter, mastersRouter);
+app.use('/admin',         authedLimiter, collegeUsersRouter);
+app.use('/notifications', authedLimiter, notificationsRouter);
+app.use('/certificates',  authedLimiter, certificatesRouter);
+app.use('/exams',         authedLimiter, examsRouter);
+app.use('/chat',          authedLimiter, chatRouter);
+app.use('/',              authedLimiter, documentsRouter);
+
+// ── 404 handler ──────────────────────────────────────────────
+app.use(function(req, res, next) {
+  next(createError(404));
+});
+
+// ── Error handler ────────────────────────────────────────────
+app.use(function(err, req, res, next) {
+  const status = err.status || 500;
+  if (status >= 500) {
+    pinoLogger.error({ err, url: req.url, method: req.method }, 'Unhandled error');
+  }
+  // In production never leak internal error details to the client.
+  // 4xx errors are intentional (validation, auth) — their messages are safe to forward.
+  const isProd = IS_PROD;
+  const message = status < 500
+    ? (err.message || 'Bad request.')
+    : (isProd ? 'An internal server error occurred.' : (err.message || 'Internal server error'));
+  res.status(status).json({ success: false, message });
+});
+ 
+const PORT = process.env.PORT || (IS_PROD ? 8000 : 5000);
+
+app.listen(PORT, '0.0.0.0', function () {
+  pinoLogger.info('Server listening on 0.0.0.0:' + PORT);
+  startOtpCleanup();
+});
+
+module.exports = app;

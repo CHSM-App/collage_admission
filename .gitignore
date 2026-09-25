@@ -1,0 +1,17 @@
+# Environment — never commit secrets
+.env
+.env.*
+
+# Dependencies
+node_modules/
+
+# Logs
+logs/
+*.log
+
+# Uploads (user files — store on server, not in repo)
+public/uploads/
+
+# OS
+.DS_Store
+Thumbs.db
