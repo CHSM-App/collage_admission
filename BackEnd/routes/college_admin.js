@@ -47,7 +47,7 @@ const rcptSvc  = require('../services/ReceiptNumberService');
 const regNumberService = require('../services/RegistrationNumberService');
 const admissionGuard   = require('../services/AdmissionGuard');
 const { saveOtp, verifyAndConsumeOtp } = require('../services/otpService');
-const { filledSeatsSql } = require('../constants/seatStatuses');
+const { filledSeatsSql, admittedSql } = require('../constants/seatStatuses');
 
 const YEAR_LEVEL_MAP = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' };
 
@@ -326,7 +326,7 @@ router.get('/:collegeId/students/search', async (req, res) => {
                 SELECT 1 FROM applications a
                 WHERE a.student_id = s.id
                   AND a.college_id <> @collegeId
-                  AND a.status IN ('confirmed','fees_paid','roll_assigned','enrolled')
+                  AND ${admittedSql('a')}
               )
               AND (
                 NOT EXISTS (SELECT 1 FROM applications a WHERE a.student_id = s.id)
@@ -355,7 +355,7 @@ router.get('/:collegeId/students/search', async (req, res) => {
               SELECT 1 FROM applications a
               WHERE a.student_id = s.id
                 AND a.college_id <> @collegeId
-                AND a.status IN ('confirmed','fees_paid','roll_assigned','enrolled')
+                AND ${admittedSql('a')}
             )
         `);
 
@@ -393,7 +393,7 @@ router.post('/:collegeId/students/transfer-otp', async (req, res) => {
             SELECT 1 FROM applications a
             WHERE a.student_id = s.id
               AND a.college_id <> @collegeId
-              AND a.status IN ('confirmed','fees_paid','roll_assigned','enrolled')
+              AND ${admittedSql('a')}
           )
       `);
 
@@ -1103,7 +1103,7 @@ router.post('/:collegeId/applications/:appId/confirm', requireWrite('review_appl
     return res.json({
       success: true,
       message: collegeFeeEnabled
-        ? 'Admission confirmed. Student can now pay the college fee.'
+        ? 'Application confirmed. The admission is confirmed once the student pays the college fee.'
         : 'Admission confirmed.',
     });
   } catch (err) {
@@ -1377,7 +1377,6 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
     // doubles as "a plan exists". No plan means nothing may be collected yet —
     // enforced here and not just hidden in the UI, since this is a money path.
     const totalFee        = parseFloat(app.fee_total_amount)   || 0;
-    const payNowThreshold = parseFloat(app.fee_pay_now_amount) || totalFee;
 
     // Check already paid
     const paidRes = await db.request()
@@ -1407,8 +1406,13 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
 
     const newTotalPaid = alreadyPaid + amt;
     const newRemaining = Math.max(0, totalFee - newTotalPaid);
-    const firstPaid    = payNowThreshold > 0 && newTotalPaid >= payNowThreshold - 0.01;
     const fullyPaid    = totalFee > 0 && newTotalPaid >= totalFee - 0.01;
+
+    // First payment of a fee-pending admission: refuse if no seat is left or the
+    // student already holds an admission this year (later installments pass).
+    const block = await admissionGuard.firstPaymentBlock(appId);
+    if (block) return res.status(409).json({ success: false, message: block });
+    let firstPaid = false;   // set below: did THIS payment confirm the admission?
 
     const pool = await db;
     const tx   = pool.transaction();
@@ -1440,16 +1444,12 @@ router.post('/:collegeId/applications/:appId/record-cash-payment', requirePerm('
             GETDATE(), 'college', @userId, @actor, @receiptNo)
         `);
 
-      if (firstPaid) {
-        await tx.request()
-          .input('id',    mssqlShared.Int,      appId)
-          .input('actor', mssqlShared.NVarChar, actor)
-          .query(`
-            UPDATE applications
-            SET status = 'fees_paid', college_fee_paid = 1, updated_at = GETDATE(), status_updated_at = GETDATE(), updated_by = @actor
-            WHERE id = @id
-          `);
-      }
+      // Any college-fee payment confirms the admission (fee-pending → fees_paid)
+      const confirmRes = await tx.request()
+        .input('id',    mssqlShared.Int,      appId)
+        .input('actor', mssqlShared.NVarChar, actor)
+        .query(admissionGuard.CONFIRM_ON_PAYMENT_SQL);
+      firstPaid = confirmRes.rowsAffected[0] === 1;
 
       await tx.commit();
     } catch (txErr) {

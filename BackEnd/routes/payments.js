@@ -28,6 +28,14 @@ const whatsapp = require('../services/whatsapp');
 const payU     = require('../services/PayUService');
 const admissionGuard = require('../services/AdmissionGuard');
 const { authenticate } = require('../middleware/auth');
+
+// College STAFF may take payments (PayU at the counter, payment links) only with the
+// Fee Collection permission — same rule as the cash routes (requirePerm('collect_fees')).
+// Students paying for themselves and the main college admin are unaffected.
+function staffLacksFeePermission(u) {
+  return u?.role === 'college' && u.is_staff && !(u.permissions && u.permissions.collect_fees !== undefined);
+}
+const FEE_PERMISSION_DENIED = { success: false, message: 'Permission denied: collect_fees' };
 const logger    = require('../config/logger');
 const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
@@ -335,31 +343,7 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
     ? (feeInfo?.total_fee ?? 0)
     : (feeInfo?.student_payable ?? feeInfo?.total_fee ?? 0);
 
-  // Determine pay-now threshold from installment plan if set, else full total
-  const instRes = await db.request()
-    .input('appId', mssql.Int, appId)
-    .query(`SELECT installment_no, amount FROM fee_installments WHERE application_id=@appId ORDER BY installment_no`);
-  const installments = instRes.recordset.map(r => parseFloat(r.amount));
-  // Threshold = cumulative sum up to and including first installment not yet paid
-  // (evaluated BEFORE this payment, so we use prior totalPaid)
-  const priorPaidRes = await db.request()
-    .input('appId', mssql.Int, appId)
-    .query(`SELECT ISNULL(SUM(amount),0) AS total_paid FROM payments WHERE application_id=@appId AND payment_type='college_fee' AND status='success'`);
-  const priorPaid = parseFloat(priorPaidRes.recordset[0].total_paid) || 0;
-
-  let payNowThreshold = totalFee; // default: full amount
-  if (installments.length > 0) {
-    let cumulative = 0;
-    for (const amt of installments) {
-      cumulative += amt;
-      if (priorPaid < cumulative - 0.01) {
-        payNowThreshold = cumulative;
-        break;
-      }
-    }
-    // all installments already paid → threshold = totalFee (free remainder)
-  }
-
+  // (No pay-now threshold any more: ANY college-fee payment confirms the admission.)
   const pool = await db;
   const tx   = pool.transaction();
   await tx.begin();
@@ -404,21 +388,15 @@ async function commitPayment({ appId, paymentType, amount, txnid, gatewayPayment
           WHERE application_id = @appId AND payment_type = 'college_fee' AND status = 'success'
         `);
       totalPaid = parseFloat(paidRes.recordset[0].total_paid) || 0;
-      firstPaid = payNowThreshold > 0 && totalPaid >= payNowThreshold - 0.01;
       fullyPaid = totalFee > 0 && totalPaid >= totalFee - 0.01;
 
-      if (firstPaid) {
-        await tx.request()
-          .input('id',    mssql.Int,      appId)
-          .input('actor', mssql.NVarChar, actorStr)
-          .query(`
-            UPDATE applications
-            SET status = 'fees_paid', college_fee_paid = 1,
-                updated_at = GETDATE(), status_updated_at = GETDATE(),
-                updated_by = @actor
-            WHERE id = @id AND status != 'fees_paid'
-          `);
-      }
+      // Any college-fee payment confirms the admission (fee-pending → fees_paid).
+      // firstPaid = "admission confirmed by THIS payment" (drives the notification).
+      const confirmRes = await tx.request()
+        .input('id',    mssql.Int,      appId)
+        .input('actor', mssql.NVarChar, actorStr)
+        .query(admissionGuard.CONFIRM_ON_PAYMENT_SQL);
+      firstPaid = confirmRes.rowsAffected[0] === 1;
 
       await tx.commit();
 
@@ -946,6 +924,7 @@ const initiateValidators = [
 ];
 
 router.post('/initiate', initiateValidators, validate, async (req, res) => {
+  if (staffLacksFeePermission(req.user)) return res.status(403).json(FEE_PERMISSION_DENIED);
   const { application_id, payment_type, amount: customAmount } = req.body;
 
   try {
@@ -983,6 +962,9 @@ router.post('/initiate', initiateValidators, validate, async (req, res) => {
       if (!['confirmed', 'fees_paid', 'roll_assigned', 'enrolled'].includes(app.status)) {
         return res.status(400).json({ success: false, message: 'Application must be confirmed to pay college fee.' });
       }
+      // First payment of a fee-pending admission: no seat left / already admitted → refuse
+      const block = await admissionGuard.firstPaymentBlock(parseInt(application_id));
+      if (block) return res.status(409).json({ success: false, message: block });
       if ((!app.fee_total_amount || parseFloat(app.fee_total_amount) <= 0) &&
           (!app.fee_pay_now_amount || parseFloat(app.fee_pay_now_amount) <= 0)) {
         return res.status(400).json({ success: false, message: 'The college has not set a fee amount yet.' });
@@ -1364,82 +1346,15 @@ async function handlePayUWebhook(req, res) {
   }
 }
 
-// ── POST /payments/cash (college-side cash recording) ────────
-// Kept for backwards compatibility — cash payments don't use a gateway.
-router.post('/cash/:collegeId/applications/:appId', async (req, res) => {
-  const { collegeId, appId: appIdParam } = req.params;
-  const appId   = parseInt(appIdParam);
-  const amount  = parseFloat(req.body.amount);
-  const actorStr = String(req.user.staff_id || req.user.id);
-
-  if (!amount || amount <= 0) {
-    return res.status(400).json({ success: false, message: 'Invalid amount.' });
-  }
-
-  try {
-    // Fetch division info needed for receipt series
-    const appInfoRes = await db.request()
-      .input('id', mssql.Int, appId)
-      .query(`SELECT app_division, course_id, year_of_study FROM applications WHERE id=@id`);
-    const appInfo = appInfoRes.recordset[0] || {};
-
-    const pool = await db;
-    const tx   = pool.transaction();
-    await tx.begin();
-    try {
-      const receiptNo = await rcptSvc.next({
-        tx,
-        pool,
-        collegeId:       parseInt(collegeId),
-        paymentType:     'college_fee',
-        divisionLetter:  appInfo.app_division || null,
-        facultyMasterId: appInfo.course_id,
-        yearLevel:       YEAR_LEVEL_MAP[appInfo.year_of_study] || 'FY',
-      });
-
-      await tx.request()
-        .input('appId',     mssql.Int,      appId)
-        .input('ptype',     mssql.NVarChar, 'college_fee')
-        .input('amount',    mssql.Decimal(10, 2), amount)
-        .input('actor',     mssql.NVarChar, actorStr)
-        .input('userId',    mssql.Int,      req.user.staff_id || req.user.id)
-        .input('receiptNo', mssql.NVarChar, receiptNo)
-        .query(`
-          INSERT INTO payments
-            (application_id, payment_type, amount, status, gateway, paid_by, paid_by_user_id, completed_at, created_by, receipt_no)
-          VALUES
-            (@appId, @ptype, @amount, 'success', 'cash', 'college', @userId, GETDATE(), @actor, @receiptNo)
-        `);
-
-      await tx.request()
-        .input('id',    mssql.Int,      appId)
-        .input('actor', mssql.NVarChar, actorStr)
-        .query(`
-          UPDATE applications
-          SET status = 'fees_paid', college_fee_paid = 1,
-              updated_at = GETDATE(), status_updated_at = GETDATE(),
-              updated_by = @actor
-          WHERE id = @id AND status != 'fees_paid'
-        `);
-
-      await tx.commit();
-    } catch (e) {
-      await tx.rollback();
-      throw e;
-    }
-
-    await logActivity(appId, 'fees_paid', 'college', `Cash ₹${amount.toLocaleString('en-IN')}`);
-    return res.json({ success: true, message: `Cash payment of ₹${amount.toLocaleString('en-IN')} recorded.` });
-  } catch (err) {
-    logger.error({ err }, 'cash payment error');
-    return res.status(500).json({ success: false, message: 'Server error.' });
-  }
-});
+// (Removed: POST /payments/cash/... — an unused, unauthenticated-by-role duplicate of
+//  POST /college-admin/:collegeId/applications/:appId/record-cash-payment, which any
+//  logged-in user could call to mark an application paid.)
 
 // ── POST /payments/generate-link ─────────────────────────────
 // Creates a single-use token for a payment link (auth required).
 // body: { application_id, payment_type }
 router.post('/generate-link', authenticate, async (req, res) => {
+  if (staffLacksFeePermission(req.user)) return res.status(403).json(FEE_PERMISSION_DENIED);
   const { application_id, payment_type = 'application_fee' } = req.body;
   const appId = parseInt(application_id);
   if (!appId || !['application_fee','college_fee'].includes(payment_type)) {
@@ -1470,6 +1385,11 @@ router.post('/generate-link', authenticate, async (req, res) => {
     }
     if (amount <= 0)
       return res.status(400).json({ success: false, message: 'No outstanding amount to pay.' });
+    if (payment_type === 'college_fee') {
+      // First payment of a fee-pending admission: no seat left / already admitted → refuse
+      const block = await admissionGuard.firstPaymentBlock(appId);
+      if (block) return res.status(409).json({ success: false, message: block });
+    }
 
     const token     = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
@@ -1505,6 +1425,7 @@ router.post('/generate-link', authenticate, async (req, res) => {
 // Generates a link and sends it via WhatsApp template 590.
 // body: { application_id, payment_type, phone, amount? }
 router.post('/send-payment-link', authenticate, async (req, res) => {
+  if (staffLacksFeePermission(req.user)) return res.status(403).json(FEE_PERMISSION_DENIED);
   const { application_id, payment_type = 'application_fee', phone, amount: customAmount } = req.body;
   if (!phone) return res.status(400).json({ success: false, message: 'Phone number is required.' });
 
@@ -1534,6 +1455,11 @@ router.post('/send-payment-link', authenticate, async (req, res) => {
     }
     if (maxAmount <= 0)
       return res.status(400).json({ success: false, message: 'No outstanding amount to pay.' });
+    if (payment_type === 'college_fee') {
+      // First payment of a fee-pending admission: no seat left / already admitted → refuse
+      const block = await admissionGuard.firstPaymentBlock(appId);
+      if (block) return res.status(409).json({ success: false, message: block });
+    }
 
     // Use caller-specified amount if provided and valid, otherwise use full outstanding
     let amount = maxAmount;
@@ -1605,6 +1531,11 @@ async function handlePayViaToken(req, res) {
       return res.status(410).json({ success: false, message: 'This payment link has already been used.' });
     if (new Date() > new Date(tok.expires_at))
       return res.status(410).json({ success: false, message: 'This payment link has expired.' });
+    if (tok.payment_type === 'college_fee') {
+      // First payment of a fee-pending admission: no seat left / already admitted → refuse
+      const block = await admissionGuard.firstPaymentBlock(tok.application_id);
+      if (block) return res.status(409).json({ success: false, message: block });
+    }
 
     const amount      = parseFloat(tok.amount);
     const productinfo = tok.payment_type === 'application_fee' ? 'ApplicationFee' : 'CollegeFee';

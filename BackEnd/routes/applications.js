@@ -496,91 +496,9 @@ router.post('/:id/submit', async (req, res) => {
   }
 });
 
-// ── Pay college fee (simulate) ──────────────────────────────
-router.post('/:id/pay-college-fee', async (req, res) => {
-  const appId = parseInt(req.params.id);
-
-  try {
-    const appRes = await db.request()
-      .input('id', appId)
-      .query(`
-        SELECT a.id, a.status, a.college_id, a.course_id, a.year_of_study, a.category,
-               a.fee_total_amount,
-               s.category AS student_category
-        FROM applications a
-        JOIN students s ON s.id = a.student_id
-        WHERE a.id = @id
-      `);
-
-    if (appRes.recordset.length === 0) {
-      return res.status(404).json({ success: false, message: 'Application not found.' });
-    }
-
-    const app = appRes.recordset[0];
-
-    if (!['confirmed', 'fees_paid'].includes(app.status)) {
-      return res.status(400).json({ success: false, message: 'Application must be confirmed before paying college fee.' });
-    }
-
-    // Use fee_total_amount set by college admin if available, otherwise fall back to fee_structures
-    let amount = app.fee_total_amount ? parseFloat(app.fee_total_amount) : 0;
-    if (!amount) {
-      const feeRes = await db.request()
-        .input('col', app.college_id)
-        .input('crs', app.course_id)
-        .input('yr',  app.year_of_study)
-        .input('cat', app.student_category || 'general')
-        .query(`
-          SELECT TOP 1 (tuition_fee + exam_fee + other_fee) AS total_fee
-          FROM fee_structures
-          WHERE college_id = @col AND course_id = @crs AND year_of_study = @yr
-          ORDER BY category
-        `);
-      amount = feeRes.recordset[0]?.total_fee || 0;
-    }
-
-    const pool = await db;
-    const tx   = pool.transaction();
-    await tx.begin();
-    try {
-      await tx.request()
-        .input('appId',  mssql.Int,     appId)
-        .input('ptype',  mssql.NVarChar,'college_fee')
-        .input('amount', mssql.Decimal, amount)
-        .input('userId', mssql.Int,     req.user.id)
-        .input('actor',  mssql.NVarChar, String(req.user.staff_id || req.user.id))
-        .query(`
-          INSERT INTO payments (application_id, payment_type, amount, status, completed_at, paid_by, paid_by_user_id, created_by)
-          VALUES (@appId, @ptype, @amount, 'success', GETDATE(), 'student', @userId, @actor)
-        `);
-
-      await tx.request()
-        .input('id',    mssql.Int,     appId)
-        .input('actor', mssql.NVarChar, String(req.user.staff_id || req.user.id))
-        .query(`
-          UPDATE applications
-          SET status = 'fees_paid',
-              college_fee_paid = 1,
-              updated_at = GETDATE(),
-              status_updated_at = GETDATE(),
-              updated_by = @actor
-          WHERE id = @id
-        `);
-
-      await tx.commit();
-    } catch (txErr) {
-      await tx.rollback();
-      throw txErr;
-    }
-
-    await logActivity(appId, 'fees_paid', 'student', null);
-
-    return res.json({ success: true, message: 'College fee paid successfully.' });
-  } catch (err) {
-    logger.error({ err });
-    return res.status(500).json({ success: false, message: 'Server error.' });
-  }
-});
+// (Removed: POST /applications/:id/pay-college-fee — recorded a "paid" college fee
+//  with no payment gateway and no ownership check; unused by the app. College fees are
+//  paid via PayU (/payments) or recorded by staff (record-cash-payment).)
 
 // ── Get subjects for selection ──────────────────────────────
 router.get('/:id/subjects', async (req, res) => {

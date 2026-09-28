@@ -1,27 +1,30 @@
 'use strict';
 
 /**
- * Which application statuses occupy a seat.
+ * When an application counts as an ADMISSION — it occupies a seat, and it is the
+ * one admission a student may hold per college per academic year.
  *
- * A seat is taken only once the student's admission is CONFIRMED by the college —
- * not when they merely apply. Everything before `confirmed` (draft → submitted →
- * scrutiny → doc_verified) is still just an application: those students may yet be
- * rejected, may never turn up, or may withdraw, so holding a seat for them would
- * wrongly show the course as full and block genuine applicants.
+ *   • Colleges that charge a college fee: admission is confirmed only once the
+ *     student has paid ANY amount of it (`fees_paid`). `confirmed` there means
+ *     "college accepted, fee pending" — no seat yet.
+ *   • Colleges with the college fee turned off (e.g. agriculture): there is no fee
+ *     to pay, so `confirmed` itself is the admission.
  *
- * This is the same for BOTH college types:
- *   • agriculture — `confirmed` IS admission success (there is no college fee)
- *   • general     — `confirmed`, then the student pays the college fee → `fees_paid`
- * so counting from `confirmed` onward covers both. `roll_assigned` and `enrolled`
- * are later stages of an already-confirmed admission and obviously still hold a seat.
- *
- * `rejected` and `cancelled` are excluded, which is what frees a seat back up.
+ * `roll_assigned` / `enrolled` are later stages of an admission. Everything before
+ * (draft → submitted → review → doc_verified) is only an application, and
+ * `rejected` / `cancelled` free the seat.
  */
-const SEAT_HOLDING_STATUSES = ['confirmed', 'fees_paid', 'roll_assigned', 'enrolled'];
+const PAID_ADMISSION_STATUSES = ['fees_paid', 'roll_assigned', 'enrolled'];
+const PAID_SQL_LIST = PAID_ADMISSION_STATUSES.map(s => `'${s}'`).join(',');
 
-// Ready-made SQL literal, e.g. "'confirmed','fees_paid',..." — keeps every
-// filled-seat query using one definition instead of hand-rolling the list.
-const SEAT_STATUS_SQL_LIST = SEAT_HOLDING_STATUSES.map(s => `'${s}'`).join(',');
+/** SQL condition: application `a` is an admission (see above). */
+function admittedSql(a = 'a') {
+  return `(${a}.status IN (${PAID_SQL_LIST})
+           OR (${a}.status = 'confirmed' AND EXISTS (
+                 SELECT 1 FROM colleges c_fee
+                 WHERE c_fee.id = ${a}.college_id
+                   AND JSON_VALUE(c_fee.features_config, '$.payment.college_fee') = 'false')))`;
+}
 
 /**
  * Correlated subquery that counts the seats an admission period has actually
@@ -30,7 +33,7 @@ const SEAT_STATUS_SQL_LIST = SEAT_HOLDING_STATUSES.map(s => `'${s}'`).join(',');
 function filledSeatsSql(periodAlias = 'ap', appAlias = 'a') {
   return `(SELECT COUNT(*) FROM applications ${appAlias}
             WHERE ${appAlias}.admission_period_id = ${periodAlias}.id
-              AND ${appAlias}.status IN (${SEAT_STATUS_SQL_LIST}))`;
+              AND ${admittedSql(appAlias)})`;
 }
 
-module.exports = { SEAT_HOLDING_STATUSES, SEAT_STATUS_SQL_LIST, filledSeatsSql };
+module.exports = { PAID_ADMISSION_STATUSES, admittedSql, filledSeatsSql };

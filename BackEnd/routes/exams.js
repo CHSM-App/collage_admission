@@ -23,9 +23,9 @@ router.use(authenticate)
 // college_id comes from the URL for college staff; super-admin passes it too.
 const cid = (req) => parseInt(req.params.collegeId)
 
-// Statuses that mean the student has actually taken the seat.
-const CONFIRMED_STATUSES = ['confirmed', 'fees_paid', 'roll_assigned', 'enrolled']
-const CONFIRMED_SQL = CONFIRMED_STATUSES.map(s => `'${s}'`).join(',')
+// "Student has actually taken the seat" — same rule as seats/admissions everywhere
+// (paid, or confirmed at a college without a college fee): constants/seatStatuses.js
+const { admittedSql } = require('../constants/seatStatuses')
 
 const EXAM_TYPES = ['RR', 'OE', 'Repeater']
 
@@ -82,7 +82,7 @@ router.get('/:collegeId/registration', requireCollegeAccess, async (req, res) =>
           AND a.course_id     = @fid
           AND a.academic_year = @ay
           AND a.app_semester  = @sem
-          AND a.status IN (${CONFIRMED_SQL})
+          AND ${admittedSql('a')}
         ORDER BY s.full_name
       `)
 
@@ -187,7 +187,7 @@ router.post('/:collegeId/registration', requirePerm('exams'), async (req, res) =
         SELECT id FROM applications
         WHERE college_id = @cid AND course_id = @fid
           AND app_semester = @sem AND academic_year = @ay
-          AND status IN (${CONFIRMED_SQL})
+          AND ${admittedSql('applications')}
       `)
     const eligible = new Set(appRes.recordset.map(r => r.id))
     for (const st of students) {

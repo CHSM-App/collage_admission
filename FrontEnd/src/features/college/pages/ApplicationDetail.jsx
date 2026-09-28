@@ -168,7 +168,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
         division:              division || null,
         document_ids_verified: app?.documents?.map(d => d.id) || [],
       })
-      toast.success(collegeFeeEnabled ? 'Admission confirmed. Student can now pay the college fee.' : 'Admission confirmed.')
+      toast.success(collegeFeeEnabled ? 'Application confirmed. The admission is confirmed once the student pays the college fee.' : 'Admission confirmed.')
       goBackToInbox()
     } catch (err) {
       const msg = err?.response?.data?.message || 'Action failed.'
@@ -406,14 +406,14 @@ export default function ApplicationDetail({ collegeId, appId }) {
         <div className="space-y-3">
           <p className="text-sm text-slate-600">
             {collegeFeeEnabled
-              ? 'Student has been notified to visit the college. Once the student visits and documents are verified in person, set the fee and confirm admission.'
+              ? 'Student has been notified to visit the college. Once the student visits and documents are verified in person, set the fee and confirm the application — the admission is confirmed when the student pays.'
               : 'Student has been notified to visit the college. Once the student visits and documents are verified in person, confirm the admission.'
             }
           </p>
           {!showConfirm ? (
             <div className="flex flex-wrap gap-3">
               <Button loading={acting} onClick={() => { setShowConfirm(true); setFeeError('') }}>
-                {collegeFeeEnabled ? 'Student Visited — Set Fee & Confirm' : 'Student Visited — Confirm Admission'}
+                {collegeFeeEnabled ? 'Student Visited — Set Fee & Confirm Application' : 'Student Visited — Confirm Admission'}
               </Button>
               <Button variant="secondary" onClick={() => setShowCancel(v => !v)}>Cancel</Button>
             </div>
@@ -423,7 +423,7 @@ export default function ApplicationDetail({ collegeId, appId }) {
                 {collegeFeeEnabled ? 'Verify Documents & Set Fee Amounts' : 'Verify Documents & Confirm Admission'}
               </p>
               {collegeFeeEnabled && (
-                <p className="text-xs text-emerald-700">Enter the fee details to confirm admission. The student will be notified to pay.</p>
+                <p className="text-xs text-emerald-700">Enter the fee details to confirm the application. The admission (and seat) is confirmed when the student pays any amount of the fee.</p>
               )}
 
               {/* Division selector */}

@@ -17,6 +17,7 @@ const { saveOtp, verifyAndConsumeOtp, checkOtp } = require('../services/otpServi
 const { body, validationResult } = require('express-validator');
 const auditLog = require('../middleware/auditLog');
 const { authenticate } = require('../middleware/auth');
+const { admittedSql } = require('../constants/seatStatuses');
 // Student names are stored in title case whatever the casing typed
 const { titleCaseFields } = require('../lib/names');
 const { buildStaffAccess } = require('../lib/staffAccess');
@@ -501,7 +502,7 @@ router.post('/register/student', registerLimiter, authenticate, async (req, res)
         .query(`
           SELECT TOP 1 college_id FROM applications
           WHERE student_id = @studentId
-            AND status IN ('confirmed','fees_paid','roll_assigned','enrolled')
+            AND ${admittedSql('applications')}
         `);
 
       if (confirmedCheck.recordset.length > 0) {

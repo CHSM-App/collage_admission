@@ -22,7 +22,7 @@ const db       = require('./db');
 const mssql    = require('mssql');
 const { authenticate } = require('../middleware/auth');
 const logger   = require('../config/logger');
-const { filledSeatsSql } = require('../constants/seatStatuses');
+const { filledSeatsSql, admittedSql } = require('../constants/seatStatuses');
 const regNumberService = require('../services/RegistrationNumberService');
 const admissionGuard   = require('../services/AdmissionGuard');
 
@@ -127,7 +127,7 @@ router.post('/applications/init', async (req, res) => {
         .query(`
           SELECT year_of_study FROM applications
           WHERE student_id = @sid AND college_id = @col
-            AND status IN ('confirmed','fees_paid','roll_assigned','enrolled')
+            AND ${admittedSql('applications')}
           ORDER BY year_of_study DESC
         `);
 

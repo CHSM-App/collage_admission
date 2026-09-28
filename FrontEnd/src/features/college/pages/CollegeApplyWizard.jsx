@@ -11,7 +11,7 @@
  *   3 — Exam details          (optional — can skip)
  *   4 — Documents             (optional — ALL docs skippable for college entry)
  *   5 — Review & submit
- *   6 — Division & Fee & Payment (confirm admission + collect college fee)
+ *   6 — Division & Fee & Payment (confirm application + collect college fee — paying confirms the admission)
  */
 import scrollToField from '../../../shared/scrollToField.js'
 import { useEffect, useReducer, useCallback, useState, cloneElement } from 'react'
@@ -32,6 +32,7 @@ import StepIndicator from '../../../shared/components/StepIndicator.jsx'
 import Button from '../../../shared/components/Button.jsx'
 import { SkeletonForm, SkeletonCards } from '../../../shared/components/Skeleton.jsx'
 import { useCollegePayment } from '../../../shared/hooks/useCollegePayment.js'
+import { usePermissions } from '../hooks/usePermissions.js'
 import CollegeCollectPayPanel from '../components/CollegeCollectPayPanel.jsx'
 
 import Step2Personal  from '../../student/pages/wizard/Step2Personal.jsx'
@@ -108,6 +109,8 @@ export default function CollegeApplyWizard() {
   const [searchParams]  = useSearchParams()
   const navigate        = useNavigate()
   const { user }        = useAuthContext()   // college admin
+  // Staff without the Fee Collection permission never see collection UI (server enforces it too)
+  const canCollectFees  = usePermissions().canWrite('collect_fees')
   const [state, dispatch] = useReducer(reducer, initialState)
 
   // ── Application fee state ───────────────────────────────────
@@ -288,7 +291,7 @@ export default function CollegeApplyWizard() {
 
   // Called from CollegeReviewStep once application is submitted (app fee done or zero)
   function handleProceedToFees() {
-    if (state.features?.payment?.college_fee === false) {
+    if (state.features?.payment?.college_fee === false || !canCollectFees) {
       navigate(`/college/dashboard?section=app&app_id=${state.applicationId}`)
       return
     }
@@ -493,6 +496,7 @@ export default function CollegeApplyWizard() {
               onSubmit={handleFinalSubmit}
               onSaveAndReturn={() => navigate(`/college/dashboard?section=app&app_id=${applicationId}`)}
               onProceedToFees={handleProceedToFees}
+              canCollectFees={canCollectFees}
               onAddNew={() => navigate('/college/dashboard?section=add-application')}
               admissionConfirmed={admissionConfirmed || ['confirmed', 'fees_paid', 'roll_assigned', 'enrolled'].includes(appStatus)}
               feeConfirm={state.features?.payment?.college_fee === false ? null : (
@@ -502,6 +506,7 @@ export default function CollegeApplyWizard() {
                   courseId={data.course_id}
                   yearOfStudy={data.year_of_study}
                   appDivision={data.division}
+                  canCollectFees={canCollectFees}
                   onConfirmed={(addNew) => {
                     setAdmissionConfirmed(true)
                     if (addNew) navigate('/college/dashboard?section=add-application')
@@ -539,6 +544,7 @@ export default function CollegeApplyWizard() {
                 <p className="text-emerald-700 mt-0.5">Collect the college fee now, or later from the application.</p>
               </div>
               <CollegeFeePaySection
+                canCollectFees={canCollectFees}
                 applicationId={applicationId}
                 collegeId={collegeId}
                 onGoToInbox={() => navigate('/college/dashboard?section=inbox')}
@@ -570,7 +576,7 @@ function SkipButton({ onClick, saving }) {
 
 // ── Review step (college-specific — shows fee info, all docs skippable) ──────
 function CollegeReviewStep({
-  data, appId, saving, submitError, isEditMode, onBack, onEditStep, onSubmit, onSaveAndReturn, onProceedToFees, feePaidOnline,
+  data, appId, saving, submitError, isEditMode, onBack, onEditStep, onSubmit, onSaveAndReturn, onProceedToFees, feePaidOnline, canCollectFees = true,
   feeConfirm, admissionConfirmed,
   submitted, registrationNumber, features, appFee,
   feeCollected, linkSent, feeMode, setFeeMode, feeError, setFeeError,
@@ -783,7 +789,12 @@ function CollegeReviewStep({
             </div>
 
             {/* App fee collection options — shown when platform_fee is enabled and fee not yet collected */}
-            {platformFeeRequired && !feeCollected && !linkSent && (
+            {platformFeeRequired && !feeCollected && !linkSent && !canCollectFees && (
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                The application fee must be collected by staff with the Fee Collection permission.
+              </p>
+            )}
+            {platformFeeRequired && !feeCollected && !linkSent && canCollectFees && (
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 overflow-hidden">
                 <style>{`
                   @keyframes fee-slide-in  { from { opacity:0; transform:translateX(32px) } to { opacity:1; transform:translateX(0) } }
@@ -859,7 +870,7 @@ function CollegeReviewStep({
                   + Add New Application
                 </Button>
                 <Button onClick={onProceedToFees}>
-                  {features?.payment?.college_fee === false
+                  {features?.payment?.college_fee === false || !canCollectFees
                     ? 'Go to Application →'
                     : 'Fees Collection →'
                   }
@@ -903,7 +914,7 @@ function CollegeReviewStep({
 // canConfirm — false until the application fee is handled (confirm needs a submitted application).
 // part — 'breakdown': the fee card; 'actions': just the confirm buttons (placed below the
 // application-fee status). Two instances, so each part can sit where it reads best.
-function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy, appDivision, onConfirmed, canConfirm = true, part = 'breakdown' }) {
+function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy, appDivision, onConfirmed, canConfirm = true, canCollectFees = true, part = 'breakdown' }) {
   const YEAR_MAP = { 1: 'FY', 2: 'SY', 3: 'TY', 4: '4Y', 5: '5Y' }
 
   const [divisions,      setDivisions]      = useState([])
@@ -963,7 +974,7 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
       })
       onConfirmed(addNew)
     } catch (err) {
-      setConfirmError(err?.response?.data?.message || 'Failed to confirm admission.')
+      setConfirmError(err?.response?.data?.message || 'Failed to confirm the application.')
     } finally {
       setConfirming(false)
     }
@@ -978,10 +989,10 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
         )}
         <div className="flex flex-col sm:flex-row gap-3 sm:justify-end">
           <Button variant="secondary" onClick={() => handleConfirm({ addNew: true })} loading={confirming} disabled={feeLoading || feeTotal == null}>
-            Confirm &amp; Add New Application
+            Confirm Application &amp; Add New
           </Button>
           <Button onClick={() => handleConfirm({ addNew: false })} loading={confirming} disabled={feeLoading || feeTotal == null}>
-            Confirm &amp; Collect Fee →
+            {canCollectFees ? <>Confirm Application &amp; Collect Fee →</> : <>Confirm Application →</>}
           </Button>
         </div>
       </div>
@@ -992,7 +1003,7 @@ function CollegeFeeConfirmStep({ applicationId, collegeId, courseId, yearOfStudy
     <div className="rounded-lg border border-slate-200 overflow-hidden">
       <div className="bg-slate-50 px-4 py-2.5 border-b border-slate-100">
         <p className="text-xs font-bold uppercase tracking-wide text-slate-600">Fee &amp; Admission Confirmation</p>
-        <p className="mt-0.5 text-xs text-slate-500">Review the fees, then confirm admission once the application fee is paid. Installments and fee collection come next.</p>
+        <p className="mt-0.5 text-xs text-slate-500">Review the fees, then confirm the application once the application fee is paid. Installments and fee collection come next.</p>
       </div>
 
       <div className="px-4 py-4 space-y-6">
@@ -1103,7 +1114,7 @@ function InstallmentPlanEditor({ applicationId, collegeId, feeTotal, existing, o
 
 // Step 7 payment area: optional installment plan + the same collect-payment panel
 // the application page uses, so both screens always behave identically.
-function CollegeFeePaySection({ applicationId, collegeId, onGoToInbox, onGoToDetail, onAddNew }) {
+function CollegeFeePaySection({ applicationId, collegeId, onGoToInbox, onGoToDetail, onAddNew, canCollectFees = true }) {
   // Bumped on plan save or payment, so the plan editor and the panel re-read the fee status
   const [feeVersion, setFeeVersion] = useState(0)
   const { feeStatus: fs, loading } = useCollegePayment(applicationId, collegeId, { refreshKey: feeVersion })
@@ -1125,7 +1136,13 @@ function CollegeFeePaySection({ applicationId, collegeId, onGoToInbox, onGoToDet
         />
       )}
 
-      <CollegeCollectPayPanel appId={applicationId} collegeId={collegeId} refreshKey={feeVersion} onPaid={bump} />
+      {canCollectFees ? (
+        <CollegeCollectPayPanel appId={applicationId} collegeId={collegeId} refreshKey={feeVersion} onPaid={bump} />
+      ) : (
+        <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          You don't have the Fee Collection permission. The college fee can be collected by staff who have it.
+        </p>
+      )}
 
       <div className="flex flex-wrap gap-2">
         <Button onClick={onGoToDetail} variant="secondary">View Application Detail</Button>
