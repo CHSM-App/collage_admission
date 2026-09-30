@@ -7,7 +7,6 @@ var cors        = require('cors');
 var helmet      = require('helmet');
 var compression = require('compression');
 var pinoLogger  = require('./config/logger');
-var { startOtpCleanup } = require('./jobs/otpCleanup');
 
 var authRouter           = require('./routes/auth');
 var collegesRouter       = require('./routes/colleges');
@@ -172,12 +171,6 @@ app.use(function(err, req, res, next) {
     : (isProd ? 'An internal server error occurred.' : (err.message || 'Internal server error'));
   res.status(status).json({ success: false, message });
 });
- 
-const PORT = process.env.PORT || (IS_PROD ? 8000 : 5000);
 
-app.listen(PORT, '0.0.0.0', function () {
-  pinoLogger.info('Server listening on 0.0.0.0:' + PORT);
-  startOtpCleanup();
-});
-
+// The HTTP server is started by bin/www — do not call app.listen() here.
 module.exports = app;
