@@ -14,8 +14,6 @@ const REQUIRED = [
   'DB_USER',
   'DB_PASSWORD',
   'DB_NAME',
-  'RAZORPAY_KEY_ID',
-  'RAZORPAY_KEY_SECRET',
 ];
 
 const missing = REQUIRED.filter(key => !process.env[key]);
