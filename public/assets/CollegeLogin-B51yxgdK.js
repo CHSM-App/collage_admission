@@ -1,0 +1,1 @@
+import{t as e}from"./jsx-runtime-C27Mmbu5.js";import{t}from"./RoleLoginForm-DS4p-8xb.js";var n=e();function r(){return(0,n.jsx)(t,{role:`college`})}export{r as default};

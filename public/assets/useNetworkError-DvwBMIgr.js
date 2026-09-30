@@ -1,0 +1,1 @@
+function e(e,t=`Something went wrong. Please try again.`){return e?e.isNetworkError?e.message:e?.response?.data?.message||(e.message&&e.message!==`Network Error`?e.message:t):t}export{e as t};

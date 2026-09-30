@@ -1,0 +1,1 @@
+import{W as e}from"./index-CeDub7W8.js";function t(){let{user:t}=e(),n=!!t?.is_staff;function r(e){return!n||!!t?.permissions?.[e]}function i(){return!0}return{canWrite:r,canView:i,isStaff:n,permissions:t?.permissions||{}}}export{t};
