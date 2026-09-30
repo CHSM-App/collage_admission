@@ -62,7 +62,7 @@ app.use(helmet({
       scriptSrc:      ["'self'"],
       styleSrc:       ["'self'", "'unsafe-inline'"],  // pug templates may inline styles
       imgSrc:         ["'self'", 'data:', 'blob:'],
-      connectSrc:     ["'self'"],
+      connectSrc:     ["'self'", 'https://collegeadmission.vengurlatech.com'],
       fontSrc:        ["'self'"],
       // Document preview renders fetched PDFs in an <iframe src="blob:…">
       frameSrc:       ["'self'", 'blob:'],
