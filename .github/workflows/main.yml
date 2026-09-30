@@ -49,12 +49,10 @@ jobs:
           # Force push to backend branch
           git push origin HEAD:backend --force
 
-
-
-
-
-
-          
-
-
-          
+  deploy-azure:
+    needs: deploy
+    permissions:
+      id-token: write
+      contents: read
+    uses: ./.github/workflows/azure-deploy.yml
+    secrets: inherit

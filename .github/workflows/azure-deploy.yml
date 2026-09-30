@@ -1,9 +1,9 @@
 name: Deploy Backend to Azure
 
+# Called by main.yml after it rebuilds the backend branch. A push trigger on
+# `backend` can't fire: that branch holds only BackEnd/, so it has no workflow files.
 on:
-  push:
-    branches:
-      - backend
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: backend
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
